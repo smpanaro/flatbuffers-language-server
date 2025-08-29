@@ -6,15 +6,18 @@ use tower_lsp::{Client, LanguageServer, LspService, Server};
 
 use crate::lsp_logger::LspLogger;
 use crate::parser::{FlatcFFIParser, Parser};
+use crate::symbol_table::SymbolTable;
 
 mod ffi;
 mod lsp_logger;
 mod parser;
+mod symbol_table;
 
 #[derive(Debug)]
 struct Backend {
     client: Client,
     document_map: DashMap<String, String>,
+    symbol_map: DashMap<String, SymbolTable>,
     parser: FlatcFFIParser,
 }
 
@@ -22,7 +25,14 @@ impl Backend {
     async fn on_change(&self, uri: Url, text: String) {
         self.document_map.insert(uri.to_string(), text.clone());
 
-        let diagnostics = self.parser.parse(&uri, &text);
+        let (diagnostics, symbol_table) = self.parser.parse(&uri, &text);
+
+        if let Some(st) = symbol_table {
+            info!("Successfully built symbol table for {}", uri);
+            self.symbol_map.insert(uri.to_string(), st);
+        } else {
+            self.symbol_map.remove(&uri.to_string());
+        }
 
         self.client
             .publish_diagnostics(uri, diagnostics, None)
@@ -76,6 +86,8 @@ impl LanguageServer for Backend {
         info!("Closed file: {}", params.text_document.uri);
         self.document_map
             .remove(&params.text_document.uri.to_string());
+        self.symbol_map
+            .remove(&params.text_document.uri.to_string());
         self.client
             .publish_diagnostics(params.text_document.uri, vec![], None)
             .await;
@@ -97,6 +109,7 @@ async fn main() {
         Backend {
             client,
             document_map: DashMap::new(),
+            symbol_map: DashMap::new(),
             parser: FlatcFFIParser,
         }
     });
