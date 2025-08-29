@@ -1,16 +1,32 @@
 use dashmap::DashMap;
-use flexi_logger::{FileSpec, Logger, WriteMode};
 use log::info;
 use tower_lsp::jsonrpc::Result;
 use tower_lsp::lsp_types::*;
 use tower_lsp::{Client, LanguageServer, LspService, Server};
 
+use crate::lsp_logger::LspLogger;
+use crate::parser::{FlatcCommandLineParser, Parser};
+
+mod lsp_logger;
 mod parser;
 
 #[derive(Debug)]
 struct Backend {
     client: Client,
     document_map: DashMap<String, String>,
+    parser: FlatcCommandLineParser,
+}
+
+impl Backend {
+    async fn on_change(&self, uri: Url, text: String) {
+        self.document_map.insert(uri.to_string(), text.clone());
+
+        let diagnostics = self.parser.parse(&uri, &text);
+
+        self.client
+            .publish_diagnostics(uri, diagnostics, None)
+            .await;
+    }
 }
 
 #[tower_lsp::async_trait]
@@ -32,9 +48,6 @@ impl LanguageServer for Backend {
     }
 
     async fn initialized(&self, _: InitializedParams) {
-        self.client
-            .log_message(MessageType::INFO, "Server initialized!")
-            .await;
         info!("Server initialized!");
     }
 
@@ -45,44 +58,48 @@ impl LanguageServer for Backend {
 
     async fn did_open(&self, params: DidOpenTextDocumentParams) {
         info!("Opened file: {}", params.text_document.uri);
-        self.document_map.insert(
-            params.text_document.uri.to_string(),
-            params.text_document.text,
-        );
+        self.on_change(params.text_document.uri, params.text_document.text)
+            .await;
     }
 
     async fn did_change(&self, mut params: DidChangeTextDocumentParams) {
         info!("Changed file: {}", params.text_document.uri);
-        self.document_map.insert(
-            params.text_document.uri.to_string(),
+        self.on_change(
+            params.text_document.uri,
             params.content_changes.remove(0).text,
-        );
+        )
+        .await;
     }
 
     async fn did_close(&self, params: DidCloseTextDocumentParams) {
         info!("Closed file: {}", params.text_document.uri);
         self.document_map
             .remove(&params.text_document.uri.to_string());
+        self.client
+            .publish_diagnostics(params.text_document.uri, vec![], None)
+            .await;
     }
 }
 
 #[tokio::main]
 async fn main() {
-    let _logger = Logger::try_with_str("info")
-        .unwrap()
-        .log_to_file(FileSpec::default().basename("fbs-lsp"))
-        .write_mode(WriteMode::BufferAndFlush)
-        .start()
-        .unwrap();
-
-    info!("Starting server...");
-
     let stdin = tokio::io::stdin();
     let stdout = tokio::io::stdout();
 
-    let (service, socket) = LspService::new(|client| Backend {
-        client,
-        document_map: DashMap::new(),
+    let (service, socket) = LspService::new(|client| {
+        let logger = LspLogger::new(client.clone());
+        if let Err(e) = log::set_boxed_logger(Box::new(logger)) {
+            eprintln!("Error setting logger: {}", e);
+        }
+        log::set_max_level(log::LevelFilter::Debug);
+
+        Backend {
+            client,
+            document_map: DashMap::new(),
+            parser: FlatcCommandLineParser,
+        }
     });
+
+    info!("Starting server...");
     Server::new(stdin, stdout, socket).serve(service).await;
 }
