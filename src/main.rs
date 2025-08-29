@@ -5,8 +5,9 @@ use tower_lsp::lsp_types::*;
 use tower_lsp::{Client, LanguageServer, LspService, Server};
 
 use crate::lsp_logger::LspLogger;
-use crate::parser::{FlatcCommandLineParser, Parser};
+use crate::parser::{FlatcFFIParser, Parser};
 
+mod ffi;
 mod lsp_logger;
 mod parser;
 
@@ -14,7 +15,7 @@ mod parser;
 struct Backend {
     client: Client,
     document_map: DashMap<String, String>,
-    parser: FlatcCommandLineParser,
+    parser: FlatcFFIParser,
 }
 
 impl Backend {
@@ -96,7 +97,7 @@ async fn main() {
         Backend {
             client,
             document_map: DashMap::new(),
-            parser: FlatcCommandLineParser,
+            parser: FlatcFFIParser,
         }
     });
 
