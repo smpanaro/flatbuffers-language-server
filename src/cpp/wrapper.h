@@ -43,6 +43,17 @@ struct StructDefinitionInfo get_struct_info(struct FlatbuffersParser* parser, in
 int get_num_enums(struct FlatbuffersParser* parser);
 struct EnumDefinitionInfo get_enum_info(struct FlatbuffersParser* parser, int index);
 
+// Functions for fields
+int get_num_fields(struct FlatbuffersParser* parser, int struct_index);
+
+struct FieldDefinitionInfo {
+    const char* name;
+    const char* type_name;
+};
+
+struct FieldDefinitionInfo get_field_info(struct FlatbuffersParser* parser, int struct_index, int field_index);
+
+
 
 #ifdef __cplusplus
 }

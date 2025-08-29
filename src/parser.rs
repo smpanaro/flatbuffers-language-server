@@ -52,12 +52,29 @@ impl Parser for FlatcFFIParser {
                     let name = CStr::from_ptr(def_info.name).to_string_lossy().into_owned();
                     let line = (def_info.line) as u32; // TODO: fix line number
 
+                    let mut fields = Vec::new();
+                    let num_fields = ffi::get_num_fields(parser_ptr, i);
+                    for j in 0..num_fields {
+                        let field_info = ffi::get_field_info(parser_ptr, i, j);
+                        if field_info.name.is_null() {
+                            continue;
+                        }
+                        let field_name = CStr::from_ptr(field_info.name)
+                            .to_string_lossy()
+                            .into_owned();
+                        let type_name = CStr::from_ptr(field_info.type_name)
+                            .to_string_lossy()
+                            .into_owned();
+                        info!("  Found field: {}: {}", field_name, type_name);
+                        // TODO: Create a proper symbol for the field
+                    }
+
                     let symbol_kind = if def_info.is_table {
                         info!("Found table: {} at line {}", name, line + 1);
-                        SymbolKind::Table(Table { fields: vec![] })
+                        SymbolKind::Table(Table { fields })
                     } else {
                         info!("Found struct: {} at line {}", name, line + 1);
-                        SymbolKind::Struct(Struct { fields: vec![] })
+                        SymbolKind::Struct(Struct { fields })
                     };
 
                     let location = Location {
