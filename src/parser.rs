@@ -153,7 +153,16 @@ impl Parser for FlatcFFIParser {
                         if field_info.name.is_null() {
                             continue;
                         }
-                        let type_name = CStr::from_ptr(field_info.type_name)
+
+                        let mut type_name_buffer = vec![0u8; 256];
+                        ffi::get_field_type_name(
+                            parser_ptr,
+                            i,
+                            j,
+                            type_name_buffer.as_mut_ptr() as *mut i8,
+                            type_name_buffer.len() as i32,
+                        );
+                        let type_name = CStr::from_ptr(type_name_buffer.as_ptr() as *const i8)
                             .to_string_lossy()
                             .into_owned();
 
@@ -179,13 +188,11 @@ impl Parser for FlatcFFIParser {
                         debug!("flatc FFI error: {}", error_str);
                         for line in error_str.lines() {
                             if let Some(captures) = RE.captures(line) {
-                                // Check if the optional "originally at" line number was captured
                                 let line_num_str = if let Some(original_line) = captures.get(5) {
                                     original_line.as_str()
                                 } else {
                                     captures.get(1).map_or("1", |m| m.as_str())
                                 };
-
                                 let line_num: u32 =
                                     line_num_str.parse().unwrap_or(1u32).saturating_sub(1);
                                 let col_num: u32 = captures
@@ -194,7 +201,6 @@ impl Parser for FlatcFFIParser {
                                     .parse()
                                     .unwrap_or(1u32)
                                     .saturating_sub(1);
-
                                 let severity = if &captures[3] == "error" {
                                     DiagnosticSeverity::ERROR
                                 } else {

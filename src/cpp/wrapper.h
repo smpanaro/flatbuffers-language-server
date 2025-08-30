@@ -23,6 +23,11 @@ struct EnumDefinitionInfo {
     int line; // Note: This is not yet implemented correctly
 };
 
+// A struct to pass field information
+struct FieldDefinitionInfo {
+    const char* name;
+};
+
 // Parses a schema and returns a pointer to the Parser object.
 struct FlatbuffersParser* parse_schema(const char* schema_content);
 
@@ -45,14 +50,8 @@ struct EnumDefinitionInfo get_enum_info(struct FlatbuffersParser* parser, int in
 
 // Functions for fields
 int get_num_fields(struct FlatbuffersParser* parser, int struct_index);
-
-struct FieldDefinitionInfo {
-    const char* name;
-    const char* type_name;
-};
-
 struct FieldDefinitionInfo get_field_info(struct FlatbuffersParser* parser, int struct_index, int field_index);
-
+void get_field_type_name(struct FlatbuffersParser* parser, int struct_index, int field_index, char* buf, int buf_len);
 
 
 #ifdef __cplusplus

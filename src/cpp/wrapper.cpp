@@ -23,8 +23,6 @@ std::string GetTypeName(const flatbuffers::Type& type) {
             break;
         }
         case flatbuffers::BASE_TYPE_VECTOR: {
-            // For vectors, we recursively call to get the element type name
-            // and wrap it in brackets.
             return "[" + GetTypeName(type.VectorType()) + "]";
         }
         case flatbuffers::BASE_TYPE_UTYPE:
@@ -46,7 +44,6 @@ std::string GetTypeName(const flatbuffers::Type& type) {
             break;
         }
     }
-    // Fallback for primitive types
     return flatbuffers::TypeName(type.base_type);
 }
 
@@ -124,15 +121,8 @@ int get_num_fields(struct FlatbuffersParser* parser, int struct_index) {
     return static_cast<int>(struct_def->fields.vec.size());
 }
 
-// A map to store dynamically created strings for type names.
-// This is a workaround because we can't return std::string across FFI.
-// We leak this memory, which is not ideal for a long-running server, but
-// it's acceptable for now to get the logic working.
-// A better solution would involve a more complex memory management strategy.
-static std::map<const flatbuffers::FieldDef*, std::string> type_name_storage;
-
 struct FieldDefinitionInfo get_field_info(struct FlatbuffersParser* parser, int struct_index, int field_index) {
-    struct FieldDefinitionInfo info = { nullptr, nullptr };
+    struct FieldDefinitionInfo info = { nullptr };
     if (!parser || struct_index < 0 || static_cast<size_t>(struct_index) >= parser->impl.structs_.vec.size()) {
         return info;
     }
@@ -150,11 +140,24 @@ struct FieldDefinitionInfo get_field_info(struct FlatbuffersParser* parser, int 
     }
 
     info.name = field_def->name.c_str();
+    return info;
+}
+
+void get_field_type_name(struct FlatbuffersParser* parser, int struct_index, int field_index, char* buf, int buf_len) {
+    if (!parser || buf == nullptr || buf_len <= 0) return;
+
+    if (struct_index < 0 || static_cast<size_t>(struct_index) >= parser->impl.structs_.vec.size()) {
+        buf[0] = '\0';
+        return;
+    }
+    auto struct_def = parser->impl.structs_.vec[static_cast<size_t>(struct_index)];
+    if (field_index < 0 || static_cast<size_t>(field_index) >= struct_def->fields.vec.size()) {
+        buf[0] = '\0';
+        return;
+    }
+    auto field_def = struct_def->fields.vec[static_cast<size_t>(field_index)];
 
     std::string type_name = GetTypeName(field_def->value.type);
-    // Store the string in our map and return a pointer to it.
-    type_name_storage[field_def] = type_name;
-    info.type_name = type_name_storage[field_def].c_str();
-
-    return info;
+    strncpy(buf, type_name.c_str(), buf_len - 1);
+    buf[buf_len - 1] = '\0'; // Ensure null termination
 }
