@@ -1,4 +1,6 @@
-use crate::symbol_table::{Enum, Struct, Symbol, SymbolInfo, SymbolKind, SymbolTable, Table};
+use crate::symbol_table::{
+    Enum, Field, Struct, Symbol, SymbolInfo, SymbolKind, SymbolTable, Table,
+};
 use log::{debug, info};
 use once_cell::sync::Lazy;
 use regex::Regex;
@@ -50,7 +52,6 @@ impl Parser for FlatcFFIParser {
         // Unsafe block to call C++ functions
         unsafe {
             let parser_ptr = ffi::parse_schema(c_content.as_ptr());
-
             if parser_ptr.is_null() {
                 return (diagnostics, None);
             }
@@ -59,7 +60,7 @@ impl Parser for FlatcFFIParser {
                 info!("Successfully parsed schema. Building symbol table...");
                 let mut st = SymbolTable::new();
 
-                // First Pass: Collect all definitions
+                // First Pass: Collect all definitions and fields
                 let num_structs = ffi::get_num_structs(parser_ptr);
                 for i in 0..num_structs {
                     let def_info = ffi::get_struct_info(parser_ptr, i);
@@ -67,10 +68,11 @@ impl Parser for FlatcFFIParser {
                         continue;
                     }
                     let name = CStr::from_ptr(def_info.name).to_string_lossy().into_owned();
-                    let line = (def_info.line) as u32;
+                    let line = (def_info.line - 1) as u32;
+                    let col = (def_info.col - 1) as u32;
                     let location = Location {
                         uri: uri.clone(),
-                        range: Range::new(Position::new(line, 0), Position::new(line, 0)),
+                        range: Range::new(Position::new(line, col), Position::new(line, col)),
                     };
 
                     if st.contains_key(&name) {
@@ -83,10 +85,55 @@ impl Parser for FlatcFFIParser {
                         continue;
                     }
 
+                    let mut fields = Vec::new();
+                    let num_fields = ffi::get_num_fields(parser_ptr, i);
+                    for j in 0..num_fields {
+                        let field_info = ffi::get_field_info(parser_ptr, i, j);
+                        if field_info.name.is_null() {
+                            continue;
+                        }
+
+                        let field_name = CStr::from_ptr(field_info.name)
+                            .to_string_lossy()
+                            .into_owned();
+                        let field_line = (field_info.line - 1) as u32;
+                        let field_col = (field_info.col - 1) as u32;
+
+                        let mut type_name_buffer = vec![0u8; 256];
+                        ffi::get_field_type_name(
+                            parser_ptr,
+                            i,
+                            j,
+                            type_name_buffer.as_mut_ptr() as *mut i8,
+                            type_name_buffer.len() as i32,
+                        );
+                        let type_name = CStr::from_ptr(type_name_buffer.as_ptr() as *const i8)
+                            .to_string_lossy()
+                            .into_owned();
+
+                        let field_location = Location {
+                            uri: uri.clone(),
+                            range: Range::new(
+                                Position::new(field_line, field_col),
+                                Position::new(field_line, field_col),
+                            ),
+                        };
+                        let field_symbol_info = SymbolInfo {
+                            name: field_name,
+                            location: field_location,
+                            documentation: None,
+                        };
+                        let field_symbol = Symbol {
+                            info: field_symbol_info,
+                            kind: SymbolKind::Field(Field { type_name }),
+                        };
+                        fields.push(field_symbol);
+                    }
+
                     let symbol_kind = if def_info.is_table {
-                        SymbolKind::Table(Table { fields: vec![] })
+                        SymbolKind::Table(Table { fields })
                     } else {
-                        SymbolKind::Struct(Struct { fields: vec![] })
+                        SymbolKind::Struct(Struct { fields })
                     };
                     let symbol_info = SymbolInfo {
                         name: name.clone(),
@@ -109,10 +156,11 @@ impl Parser for FlatcFFIParser {
                         continue;
                     }
                     let name = CStr::from_ptr(def_info.name).to_string_lossy().into_owned();
-                    let line = (def_info.line) as u32;
+                    let line = (def_info.line - 1) as u32;
+                    let col = (def_info.col - 1) as u32;
                     let location = Location {
                         uri: uri.clone(),
-                        range: Range::new(Position::new(line, 0), Position::new(line, 0)),
+                        range: Range::new(Position::new(line, col), Position::new(line, col)),
                     };
 
                     if st.contains_key(&name) {
@@ -141,40 +189,33 @@ impl Parser for FlatcFFIParser {
                     }
                 }
 
-                // Second Pass: Semantic Analysis (e.g., undefined types)
-                for i in 0..num_structs {
-                    let def_info = ffi::get_struct_info(parser_ptr, i);
-                    if def_info.name.is_null() {
-                        continue;
-                    }
-                    let num_fields = ffi::get_num_fields(parser_ptr, i);
-                    for j in 0..num_fields {
-                        let field_info = ffi::get_field_info(parser_ptr, i, j);
-                        if field_info.name.is_null() {
-                            continue;
+                // Second Pass: Semantic Analysis
+                for symbol in st.values() {
+                    if let SymbolKind::Table(table) = &symbol.kind {
+                        for field in &table.fields {
+                            if let SymbolKind::Field(field_def) = &field.kind {
+                                if !is_known_type(&field_def.type_name, &st, &scalar_types) {
+                                    diagnostics.push(Diagnostic {
+                                        range: field.info.location.range,
+                                        severity: Some(DiagnosticSeverity::ERROR),
+                                        message: format!("Undefined type: {}", field_def.type_name),
+                                        ..Default::default()
+                                    });
+                                }
+                            }
                         }
-
-                        let mut type_name_buffer = vec![0u8; 256];
-                        ffi::get_field_type_name(
-                            parser_ptr,
-                            i,
-                            j,
-                            type_name_buffer.as_mut_ptr() as *mut i8,
-                            type_name_buffer.len() as i32,
-                        );
-                        let type_name = CStr::from_ptr(type_name_buffer.as_ptr() as *const i8)
-                            .to_string_lossy()
-                            .into_owned();
-
-                        if !is_known_type(&type_name, &st, &scalar_types) {
-                            let parent_name = CStr::from_ptr(def_info.name).to_string_lossy();
-                            let parent_symbol = st.get(parent_name.as_ref()).unwrap();
-                            diagnostics.push(Diagnostic {
-                                range: parent_symbol.info.location.range,
-                                severity: Some(DiagnosticSeverity::ERROR),
-                                message: format!("Undefined type: {}", type_name),
-                                ..Default::default()
-                            });
+                    } else if let SymbolKind::Struct(struc) = &symbol.kind {
+                        for field in &struc.fields {
+                            if let SymbolKind::Field(field_def) = &field.kind {
+                                if !is_known_type(&field_def.type_name, &st, &scalar_types) {
+                                    diagnostics.push(Diagnostic {
+                                        range: field.info.location.range,
+                                        severity: Some(DiagnosticSeverity::ERROR),
+                                        message: format!("Undefined type: {}", field_def.type_name),
+                                        ..Default::default()
+                                    });
+                                }
+                            }
                         }
                     }
                 }

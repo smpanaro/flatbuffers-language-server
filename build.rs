@@ -3,12 +3,14 @@ use std::path::PathBuf;
 fn main() {
     let files = vec![
         "third_party/flatbuffers/src/util.cpp",
-        "third_party/flatbuffers/src/idl_parser.cpp",
+        "src/cpp/patched_flatbuffers/idl_parser.cpp", // Use our patched version
         "src/cpp/wrapper.cpp",
     ];
 
     cc::Build::new()
         .files(files)
+        // Add our patched include first so it's preferred.
+        .include("src/cpp/patched_flatbuffers")
         .include("third_party/flatbuffers/include")
         .include("src/cpp")
         .cpp(true)
@@ -17,11 +19,11 @@ fn main() {
 
     println!("cargo:rerun-if-changed=src/cpp/wrapper.h");
     println!("cargo:rerun-if-changed=src/cpp/wrapper.cpp");
+    println!("cargo:rerun-if-changed=src/cpp/patched_flatbuffers/idl.h");
+    println!("cargo:rerun-if-changed=src/cpp/patched_flatbuffers/idl_parser.cpp");
 
     let bindings = bindgen::Builder::default()
         .header("src/cpp/wrapper.h")
-        // Tell cargo to invalidate the built crate whenever any of the
-        // included header files changed.
         .parse_callbacks(Box::new(bindgen::CargoCallbacks))
         .generate()
         .expect("Unable to generate bindings");
