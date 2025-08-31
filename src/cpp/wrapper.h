@@ -25,6 +25,14 @@ struct EnumDefinitionInfo {
     unsigned col;
 };
 
+// A struct to pass enum value information
+struct EnumValDefinitionInfo {
+    const char* name;
+    long long value;
+    unsigned line;
+    unsigned col;
+};
+
 // A struct to pass field information
 struct FieldDefinitionInfo {
     const char* name;
@@ -53,6 +61,10 @@ struct StructDefinitionInfo get_struct_info(struct FlatbuffersParser* parser, in
 // Functions for enums and unions
 int get_num_enums(struct FlatbuffersParser* parser);
 struct EnumDefinitionInfo get_enum_info(struct FlatbuffersParser* parser, int index);
+
+// Functions for enum values
+int get_num_enum_vals(struct FlatbuffersParser* parser, int enum_index);
+struct EnumValDefinitionInfo get_enum_val_info(struct FlatbuffersParser* parser, int enum_index, int val_index);
 
 // Functions for fields
 int get_num_fields(struct FlatbuffersParser* parser, int struct_index);

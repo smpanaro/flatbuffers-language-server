@@ -44,14 +44,25 @@ pub struct Struct {
 }
 
 #[derive(Debug, Clone)]
+pub struct EnumVariant {
+    pub name: String,
+    pub value: i64,
+}
+
+#[derive(Debug, Clone)]
 pub struct Enum {
-    // For now, we just care that it exists.
-    // We will add variants later.
+    pub variants: Vec<EnumVariant>,
+}
+
+#[derive(Debug, Clone)]
+pub struct UnionVariant {
+    pub name: String,
+    pub location: Location,
 }
 
 #[derive(Debug, Clone)]
 pub struct Union {
-    // TODO: Add type/unionfield/variant.
+    pub variants: Vec<UnionVariant>,
 }
 
 #[derive(Debug, Clone)]
@@ -85,6 +96,13 @@ impl Symbol {
                     }
                 }
             }
+            SymbolKind::Union(u) => {
+                for variant in &u.variants {
+                    if variant.location.range.contains(pos) {
+                        return Some(self);
+                    }
+                }
+            }
             _ => {}
         }
 
@@ -101,8 +119,10 @@ impl Symbol {
                     format!("table {} {{{}}}", self.info.name, t.fields_markdown()),
                 SymbolKind::Struct(s) =>
                     format!("struct {} {{{}}}", self.info.name, s.fields_markdown()),
-                SymbolKind::Enum(_) => format!("enum {}", self.info.name),
-                SymbolKind::Union(_) => format!("union {}", self.info.name),
+                SymbolKind::Enum(e) =>
+                    format!("enum {} {{{}}}", self.info.name, e.variants_markdown()),
+                SymbolKind::Union(u) =>
+                    format!("union {} {{{}}}", self.info.name, u.variants_markdown()),
                 SymbolKind::Field(f) => format!("{}: {}", self.info.name, f.type_name),
             }
         );
@@ -181,5 +201,47 @@ impl Table {
 impl Struct {
     pub fn fields_markdown(&self) -> String {
         fields_markdown(&self.fields)
+    }
+}
+
+impl Enum {
+    pub fn variants_markdown(&self) -> String {
+        if self.variants.is_empty() {
+            return "".to_string();
+        }
+        format!(
+            "
+{}
+",
+            self.variants
+                .iter()
+                .map(|v| format!("  {} = {}", v.name, v.value))
+                .collect::<Vec<String>>()
+                .join(
+                    "
+"
+                )
+        )
+    }
+}
+
+impl Union {
+    pub fn variants_markdown(&self) -> String {
+        if self.variants.is_empty() {
+            return "".to_string();
+        }
+        format!(
+            "
+{}
+",
+            self.variants
+                .iter()
+                .map(|v| format!("  {}", v.name))
+                .collect::<Vec<String>>()
+                .join(
+                    "
+"
+                )
+        )
     }
 }

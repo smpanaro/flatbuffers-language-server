@@ -114,6 +114,31 @@ struct EnumDefinitionInfo get_enum_info(struct FlatbuffersParser* parser, int in
     return info;
 }
 
+int get_num_enum_vals(struct FlatbuffersParser* parser, int enum_index) {
+    if (!parser || enum_index < 0 || static_cast<size_t>(enum_index) >= parser->impl.enums_.vec.size()) {
+        return 0;
+    }
+    auto enum_def = parser->impl.enums_.vec[static_cast<size_t>(enum_index)];
+    return static_cast<int>(enum_def->Vals().size());
+}
+
+struct EnumValDefinitionInfo get_enum_val_info(struct FlatbuffersParser* parser, int enum_index, int val_index) {
+    struct EnumValDefinitionInfo info = { nullptr, 0, 0, 0 };
+    if (!parser || enum_index < 0 || static_cast<size_t>(enum_index) >= parser->impl.enums_.vec.size()) {
+        return info;
+    }
+    auto enum_def = parser->impl.enums_.vec[static_cast<size_t>(enum_index)];
+    if (val_index < 0 || static_cast<size_t>(val_index) >= enum_def->Vals().size()) {
+        return info;
+    }
+    auto enum_val = enum_def->Vals()[static_cast<size_t>(val_index)];
+    info.name = enum_val->name.c_str();
+    info.value = enum_val->GetAsInt64();
+    info.line = enum_val->decl_line - 1;
+    info.col = enum_val->decl_col;
+    return info;
+}
+
 // Functions for fields
 int get_num_fields(struct FlatbuffersParser* parser, int struct_index) {
     if (!parser || struct_index < 0 || static_cast<size_t>(struct_index) >= parser->impl.structs_.vec.size()) {
@@ -124,7 +149,7 @@ int get_num_fields(struct FlatbuffersParser* parser, int struct_index) {
 }
 
 struct FieldDefinitionInfo get_field_info(struct FlatbuffersParser* parser, int struct_index, int field_index) {
-    struct FieldDefinitionInfo info = { nullptr, 0, 0 };
+    struct FieldDefinitionInfo info = { nullptr, 0, 0, 0, 0 };
     if (!parser || struct_index < 0 || static_cast<size_t>(struct_index) >= parser->impl.structs_.vec.size()) {
         return info;
     }

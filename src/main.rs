@@ -50,6 +50,26 @@ impl Backend {
             return Ok(None);
         };
 
+        if let symbol_table::SymbolKind::Union(u) = &symbol.kind {
+            for variant in &u.variants {
+                if variant.location.range.contains(position) {
+                    if let Some(variant_type_sym) = self
+                        .symbol_map
+                        .iter()
+                        .find_map(|st| st.value().get(&variant.name).cloned())
+                    {
+                        return Ok(Some(Hover {
+                            contents: HoverContents::Markup(MarkupContent {
+                                kind: MarkupKind::Markdown,
+                                value: variant_type_sym.hover_markdown(),
+                            }),
+                            range: Some(variant.location.range),
+                        }));
+                    }
+                }
+            }
+        }
+
         if let symbol_table::SymbolKind::Field(f) = &symbol.kind {
             if f.type_range.contains(position) {
                 if let Some(field_type_sym) = self

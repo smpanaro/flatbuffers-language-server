@@ -186,10 +186,51 @@ impl Parser for FlatcFFIParser {
                         continue;
                     }
 
+                    let mut variants = Vec::new();
+                    let num_vals = ffi::get_num_enum_vals(parser_ptr, i);
+                    for j in 0..num_vals {
+                        let val_info = ffi::get_enum_val_info(parser_ptr, i, j);
+                        if val_info.name.is_null() {
+                            continue;
+                        }
+                        let val_name = CStr::from_ptr(val_info.name).to_string_lossy().into_owned();
+
+                        // For unions, flatc adds a `NONE` member that we can skip.
+                        if def_info.is_union && val_name == "NONE" {
+                            continue;
+                        }
+                        variants.push((val_name, val_info));
+                    }
+
                     let symbol_kind = if def_info.is_union {
-                        SymbolKind::Union(Union {})
+                        SymbolKind::Union(Union {
+                            variants: variants
+                                .into_iter()
+                                .map(|(name, val_info)| crate::symbol_table::UnionVariant {
+                                    location: Location {
+                                        uri: uri.clone(),
+                                        range: Range::new(
+                                            Position::new(
+                                                val_info.line,
+                                                val_info.col - (name.chars().count() as u32),
+                                            ),
+                                            Position::new(val_info.line, val_info.col),
+                                        ),
+                                    },
+                                    name,
+                                })
+                                .collect(),
+                        })
                     } else {
-                        SymbolKind::Enum(Enum {})
+                        SymbolKind::Enum(Enum {
+                            variants: variants
+                                .into_iter()
+                                .map(|(name, val_info)| crate::symbol_table::EnumVariant {
+                                    name,
+                                    value: val_info.value,
+                                })
+                                .collect(),
+                        })
                     };
 
                     let (symbol, _) =
