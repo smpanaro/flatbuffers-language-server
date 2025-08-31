@@ -632,6 +632,12 @@ CheckedError Parser::Next() {
               return Error(
                   "a documentation comment should be on a line on its own");
             doc_comment_.push_back(std::string(start + 1, cursor_));
+          } else {
+            // This is a "//" comment. Treat it as documentation if it's on a
+            // line of its own. Otherwise, it's just a regular comment.
+            if (seen_newline) {
+              doc_comment_.push_back(std::string(start, cursor_));
+            }
           }
           break;
         } else if (*cursor_ == '*') {
