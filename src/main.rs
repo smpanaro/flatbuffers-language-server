@@ -8,6 +8,7 @@ use crate::lsp_logger::LspLogger;
 use crate::parser::{FlatcFFIParser, Parser};
 use crate::symbol_table::SymbolTable;
 
+mod ext;
 mod ffi;
 mod lsp_logger;
 mod parser;
@@ -38,6 +39,43 @@ impl Backend {
             .publish_diagnostics(uri, diagnostics, None)
             .await;
     }
+
+    async fn on_hover(&self, uri: Url, position: Position) -> Result<Option<Hover>> {
+        // Look for a hovered type (will always be the same file) e.g. hovering Foo in `table Foo {}`
+        if let Some(symbol) = self
+            .symbol_map
+            .get(&uri.to_string())
+            .and_then(|st| st.value().find_in_table(position).cloned())
+        {
+            if let symbol_table::SymbolKind::Field(f) = &symbol.kind {
+                // Look up again, could be in any file.
+                if let Some(field_type_sym) = self
+                    .symbol_map
+                    .iter()
+                    .find_map(|st| st.value().get(&f.type_name).cloned())
+                {
+                    return Ok(Some(Hover {
+                        contents: HoverContents::Markup(MarkupContent {
+                            kind: MarkupKind::Markdown,
+                            value: field_type_sym.hover_markdown(),
+                        }),
+                        range: Some(f.type_range),
+                    }));
+                }
+            } else {
+                return Ok(Some(Hover {
+                    contents: HoverContents::Markup(MarkupContent {
+                        kind: MarkupKind::Markdown,
+                        value: symbol.hover_markdown(),
+                    }),
+                    range: Some(symbol.info.location.range),
+                }));
+            }
+        }
+        // Check enum types(?), union types etc e.g. hovering Foo in `union Bar { Foo }`
+
+        Ok(None)
+    }
 }
 
 #[tower_lsp::async_trait]
@@ -53,6 +91,7 @@ impl LanguageServer for Backend {
                 text_document_sync: Some(TextDocumentSyncCapability::Kind(
                     TextDocumentSyncKind::FULL,
                 )),
+                hover_provider: Some(HoverProviderCapability::Simple(true)),
                 ..ServerCapabilities::default()
             },
         })
@@ -90,6 +129,15 @@ impl LanguageServer for Backend {
             .remove(&params.text_document.uri.to_string());
         self.client
             .publish_diagnostics(params.text_document.uri, vec![], None)
+            .await;
+    }
+
+    async fn hover(&self, params: HoverParams) -> Result<Option<Hover>> {
+        return self
+            .on_hover(
+                params.text_document_position_params.text_document.uri,
+                params.text_document_position_params.position,
+            )
             .await;
     }
 }

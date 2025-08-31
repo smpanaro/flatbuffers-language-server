@@ -1,5 +1,5 @@
 use crate::symbol_table::{
-    Enum, Field, Struct, Symbol, SymbolInfo, SymbolKind, SymbolTable, Table,
+    Enum, Field, Struct, Symbol, SymbolInfo, SymbolKind, SymbolTable, Table, Union,
 };
 use log::{debug, info};
 use once_cell::sync::Lazy;
@@ -68,11 +68,14 @@ impl Parser for FlatcFFIParser {
                         continue;
                     }
                     let name = CStr::from_ptr(def_info.name).to_string_lossy().into_owned();
-                    let line = (def_info.line - 1) as u32;
-                    let col = (def_info.col - 1) as u32;
+                    let line = def_info.line;
+                    let col = def_info.col;
                     let location = Location {
                         uri: uri.clone(),
-                        range: Range::new(Position::new(line, col), Position::new(line, col)),
+                        range: Range::new(
+                            Position::new(line, col - (name.chars().count() as u32)),
+                            Position::new(line, col),
+                        ),
                     };
 
                     if st.contains_key(&name) {
@@ -96,8 +99,8 @@ impl Parser for FlatcFFIParser {
                         let field_name = CStr::from_ptr(field_info.name)
                             .to_string_lossy()
                             .into_owned();
-                        let field_line = (field_info.line - 1) as u32;
-                        let field_col = (field_info.col - 1) as u32;
+                        let field_line = field_info.line;
+                        let field_col = field_info.col;
 
                         let mut type_name_buffer = vec![0u8; 256];
                         ffi::get_field_type_name(
@@ -110,11 +113,21 @@ impl Parser for FlatcFFIParser {
                         let type_name = CStr::from_ptr(type_name_buffer.as_ptr() as *const i8)
                             .to_string_lossy()
                             .into_owned();
+                        let type_range = Range::new(
+                            Position::new(
+                                field_info.type_line,
+                                field_info.type_col - (type_name.chars().count() as u32),
+                            ),
+                            Position::new(field_info.type_line, field_info.type_col),
+                        );
 
                         let field_location = Location {
                             uri: uri.clone(),
                             range: Range::new(
-                                Position::new(field_line, field_col),
+                                Position::new(
+                                    field_line,
+                                    field_col - (field_name.chars().count() as u32),
+                                ),
                                 Position::new(field_line, field_col),
                             ),
                         };
@@ -125,7 +138,10 @@ impl Parser for FlatcFFIParser {
                         };
                         let field_symbol = Symbol {
                             info: field_symbol_info,
-                            kind: SymbolKind::Field(Field { type_name }),
+                            kind: SymbolKind::Field(Field {
+                                type_name,
+                                type_range,
+                            }),
                         };
                         fields.push(field_symbol);
                     }
@@ -140,13 +156,10 @@ impl Parser for FlatcFFIParser {
                         location,
                         documentation: None,
                     };
-                    st.insert(
-                        name,
-                        Symbol {
-                            info: symbol_info,
-                            kind: symbol_kind,
-                        },
-                    );
+                    st.insert(Symbol {
+                        info: symbol_info,
+                        kind: symbol_kind,
+                    });
                 }
 
                 let num_enums = ffi::get_num_enums(parser_ptr);
@@ -156,11 +169,14 @@ impl Parser for FlatcFFIParser {
                         continue;
                     }
                     let name = CStr::from_ptr(def_info.name).to_string_lossy().into_owned();
-                    let line = (def_info.line - 1) as u32;
-                    let col = (def_info.col - 1) as u32;
+                    let line = def_info.line;
+                    let col = def_info.col;
                     let location = Location {
                         uri: uri.clone(),
-                        range: Range::new(Position::new(line, col), Position::new(line, col)),
+                        range: Range::new(
+                            Position::new(line, col - (name.chars().count() as u32)),
+                            Position::new(line, col),
+                        ),
                     };
 
                     if st.contains_key(&name) {
@@ -173,20 +189,20 @@ impl Parser for FlatcFFIParser {
                         continue;
                     }
 
-                    if !def_info.is_union {
-                        let symbol_info = SymbolInfo {
-                            name: name.clone(),
-                            location,
-                            documentation: None,
-                        };
-                        st.insert(
-                            name,
-                            Symbol {
-                                info: symbol_info,
-                                kind: SymbolKind::Enum(Enum {}),
-                            },
-                        );
-                    }
+                    let symbol_kind = if def_info.is_union {
+                        SymbolKind::Union(Union {})
+                    } else {
+                        SymbolKind::Enum(Enum {})
+                    };
+                    let symbol_info = SymbolInfo {
+                        name: name.clone(),
+                        location,
+                        documentation: None,
+                    };
+                    st.insert(Symbol {
+                        info: symbol_info,
+                        kind: symbol_kind,
+                    });
                 }
 
                 // Second Pass: Semantic Analysis

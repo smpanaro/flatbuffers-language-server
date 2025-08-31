@@ -913,6 +913,8 @@ CheckedError Parser::ParseField(StructDef &struct_def) {
   EXPECT(kTokenIdentifier);
   EXPECT(':');
   Type type;
+  const int type_decl_line = line_;
+  const int type_decl_col = static_cast<int>(CursorPosition());
   ECHECK(ParseType(type));
 
   if (struct_def.fixed) {
@@ -977,6 +979,8 @@ CheckedError Parser::ParseField(StructDef &struct_def) {
 
   field->decl_line = field_decl_line;
   field->decl_col = field_decl_col;
+  field->type_decl_line = type_decl_line;
+  field->type_decl_col = type_decl_col;
 
   if (typefield) {
     // We preserve the relation between the typefield
@@ -2484,6 +2488,8 @@ CheckedError Parser::ParseEnum(const bool is_union, EnumDef **dest,
   std::vector<std::string> enum_comment = doc_comment_;
   NEXT();
   std::string enum_name = attribute_;
+  const int decl_line = line_;
+  const int decl_col = static_cast<int>(CursorPosition());
   EXPECT(kTokenIdentifier);
   EnumDef *enum_def;
   ECHECK(StartEnum(enum_name, is_union, &enum_def));
@@ -2492,6 +2498,8 @@ CheckedError Parser::ParseEnum(const bool is_union, EnumDef **dest,
         &GetPooledString(FilePath(opts.project_root, filename, opts.binary_schema_absolute_paths));
   }
   enum_def->doc_comment = enum_comment;
+  enum_def->decl_line = decl_line;
+  enum_def->decl_col = decl_col;
   if (!opts.proto_mode) {
     // Give specialized error message, since this type spec used to
     // be optional in the first FlatBuffers release.
@@ -2655,8 +2663,6 @@ CheckedError Parser::StartStruct(const std::string &name, StructDef **dest) {
   struct_def.name = name;
   struct_def.file = file_being_parsed_;
 
-  struct_def.decl_line = line_;
-  struct_def.decl_col = static_cast<int>(CursorPosition());
   // Move this struct to the back of the vector just in case it was predeclared,
   // to preserve declaration order.
   *std::remove(structs_.vec.begin(), structs_.vec.end(), &struct_def) =
@@ -2771,11 +2777,15 @@ CheckedError Parser::ParseDecl(const char *filename) {
   if (!fixed && !IsIdent("table")) return Error("declaration expected");
   NEXT();
   std::string name = attribute_;
+  const int decl_line = line_;
+  const int decl_col = static_cast<int>(CursorPosition());
   EXPECT(kTokenIdentifier);
   StructDef *struct_def;
   ECHECK(StartStruct(name, &struct_def));
   struct_def->doc_comment = dc;
   struct_def->fixed = fixed;
+  struct_def->decl_line = decl_line;
+  struct_def->decl_col = decl_col;
   if (filename && !opts.project_root.empty()) {
     struct_def->declaration_file =
         &GetPooledString(FilePath(opts.project_root, filename, opts.binary_schema_absolute_paths));
@@ -3019,8 +3029,6 @@ CheckedError Parser::StartEnum(const std::string &name, bool is_union,
   enum_def.file = file_being_parsed_;
   enum_def.doc_comment = doc_comment_;
 
-  enum_def.decl_line = line_;
-  enum_def.decl_col = static_cast<int>(CursorPosition());
   enum_def.is_union = is_union;
   enum_def.defined_namespace = current_namespace_;
   const auto qualified_name = current_namespace_->GetFullyQualifiedName(name);

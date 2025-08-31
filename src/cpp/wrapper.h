@@ -13,23 +13,25 @@ struct FlatbuffersParser;
 struct StructDefinitionInfo {
     const char* name;
     bool is_table;
-    int line;
-    int col;
+    unsigned line;
+    unsigned col;
 };
 
 // A struct to pass enum/union definition information
 struct EnumDefinitionInfo {
     const char* name;
     bool is_union;
-    int line;
-    int col;
+    unsigned line;
+    unsigned col;
 };
 
 // A struct to pass field information
 struct FieldDefinitionInfo {
     const char* name;
-    int line;
-    int col;
+    unsigned line;
+    unsigned col;
+    unsigned type_line;
+    unsigned type_col;
 };
 
 // Parses a schema and returns a pointer to the Parser object.

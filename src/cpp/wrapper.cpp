@@ -90,7 +90,7 @@ struct StructDefinitionInfo get_struct_info(struct FlatbuffersParser* parser, in
     auto struct_def = parser->impl.structs_.vec[static_cast<size_t>(index)];
     info.name = struct_def->name.c_str();
     info.is_table = !struct_def->fixed;
-    info.line = struct_def->decl_line;
+    info.line = struct_def->decl_line - 1;
     info.col = struct_def->decl_col;
     return info;
 }
@@ -109,7 +109,7 @@ struct EnumDefinitionInfo get_enum_info(struct FlatbuffersParser* parser, int in
     auto enum_def = parser->impl.enums_.vec[static_cast<size_t>(index)];
     info.name = enum_def->name.c_str();
     info.is_union = enum_def->is_union;
-    info.line = enum_def->decl_line;
+    info.line = enum_def->decl_line - 1;
     info.col = enum_def->decl_col;
     return info;
 }
@@ -142,8 +142,10 @@ struct FieldDefinitionInfo get_field_info(struct FlatbuffersParser* parser, int 
     }
 
     info.name = field_def->name.c_str();
-    info.line = field_def->decl_line;
+    info.line = field_def->decl_line - 1;
     info.col = field_def->decl_col;
+    info.type_line = field_def->type_decl_line - 1;
+    info.type_col = field_def->type_decl_col;
     return info;
 }
 

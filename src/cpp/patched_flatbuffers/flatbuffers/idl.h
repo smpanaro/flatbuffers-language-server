@@ -393,6 +393,8 @@ struct FieldDef : public Definition {
   // sibling_union_field on a union field points to the union type field
   // and vice-versa.
   FieldDef *sibling_union_field;
+  int type_decl_line;
+  int type_decl_col; // FIXME: This is end col for all except [uint] (arrays)
 };
 
 struct StructDef : public Definition {
