@@ -42,6 +42,7 @@ fn create_symbol(
     line: u32,
     col: u32,
     kind: SymbolKind,
+    documentation: Option<String>,
 ) -> (Symbol, Location) {
     let location = Location {
         uri: uri.clone(),
@@ -53,7 +54,7 @@ fn create_symbol(
     let symbol_info = SymbolInfo {
         name,
         location: location.clone(),
-        documentation: None,
+        documentation,
     };
     (
         Symbol {
@@ -168,6 +169,22 @@ impl Parser for FlatcFFIParser {
                             Position::new(field_info.type_line, field_info.type_col),
                         );
 
+                        let mut doc_buffer = vec![0u8; 2048];
+                        ffi::get_field_documentation(
+                            parser_ptr,
+                            i,
+                            j,
+                            doc_buffer.as_mut_ptr() as *mut i8,
+                            doc_buffer.len() as i32,
+                        );
+                        let doc =
+                            CStr::from_ptr(doc_buffer.as_ptr() as *const i8).to_string_lossy();
+                        let documentation = if doc.is_empty() {
+                            None
+                        } else {
+                            Some(doc.into_owned())
+                        };
+
                         let (field_symbol, _) = create_symbol(
                             uri,
                             field_name,
@@ -177,6 +194,7 @@ impl Parser for FlatcFFIParser {
                                 type_name,
                                 type_range,
                             }),
+                            documentation,
                         );
                         fields.push(field_symbol);
                     }
@@ -187,8 +205,28 @@ impl Parser for FlatcFFIParser {
                         SymbolKind::Struct(Struct { fields })
                     };
 
-                    let (symbol, _) =
-                        create_symbol(uri, name, def_info.line, def_info.col, symbol_kind);
+                    let mut doc_buffer = vec![0u8; 2048];
+                    ffi::get_struct_documentation(
+                        parser_ptr,
+                        i,
+                        doc_buffer.as_mut_ptr() as *mut i8,
+                        doc_buffer.len() as i32,
+                    );
+                    let doc = CStr::from_ptr(doc_buffer.as_ptr() as *const i8).to_string_lossy();
+                    let documentation = if doc.is_empty() {
+                        None
+                    } else {
+                        Some(doc.into_owned())
+                    };
+
+                    let (symbol, _) = create_symbol(
+                        uri,
+                        name,
+                        def_info.line,
+                        def_info.col,
+                        symbol_kind,
+                        documentation,
+                    );
                     st.insert(symbol);
                 }
 
@@ -252,16 +290,55 @@ impl Parser for FlatcFFIParser {
                         SymbolKind::Enum(Enum {
                             variants: variants
                                 .into_iter()
-                                .map(|(name, val_info)| crate::symbol_table::EnumVariant {
-                                    name,
-                                    value: val_info.value,
+                                .enumerate()
+                                .map(|(j, (name, val_info))| {
+                                    let mut doc_buffer = vec![0u8; 2048];
+                                    ffi::get_enum_val_documentation(
+                                        parser_ptr,
+                                        i,
+                                        j as i32,
+                                        doc_buffer.as_mut_ptr() as *mut i8,
+                                        doc_buffer.len() as i32,
+                                    );
+                                    let doc = CStr::from_ptr(doc_buffer.as_ptr() as *const i8)
+                                        .to_string_lossy();
+                                    let documentation = if doc.is_empty() {
+                                        None
+                                    } else {
+                                        Some(doc.into_owned())
+                                    };
+                                    crate::symbol_table::EnumVariant {
+                                        name,
+                                        value: val_info.value,
+                                        documentation,
+                                    }
                                 })
                                 .collect(),
                         })
                     };
 
-                    let (symbol, _) =
-                        create_symbol(uri, name, def_info.line, def_info.col, symbol_kind);
+                    let mut doc_buffer = vec![0u8; 2048];
+                    ffi::get_enum_documentation(
+                        parser_ptr,
+                        i,
+                        doc_buffer.as_mut_ptr() as *mut i8,
+                        doc_buffer.len() as i32,
+                    );
+                    let doc = CStr::from_ptr(doc_buffer.as_ptr() as *const i8).to_string_lossy();
+                    let documentation = if doc.is_empty() {
+                        None
+                    } else {
+                        Some(doc.into_owned())
+                    };
+
+                    let (symbol, _) = create_symbol(
+                        uri,
+                        name,
+                        def_info.line,
+                        def_info.col,
+                        symbol_kind,
+                        documentation,
+                    );
                     st.insert(symbol);
                 }
 

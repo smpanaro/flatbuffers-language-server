@@ -3,6 +3,7 @@
 #include "flatbuffers/util.h"
 #include <string>
 #include <unistd.h>
+#include <vector>
 
 // We use a C-style struct to hide the C++ Parser implementation from Rust.
 struct FlatbuffersParser {
@@ -163,6 +164,24 @@ int get_num_included_files(struct FlatbuffersParser* parser) {
     return static_cast<int>(parser->impl.GetIncludedFiles().size());
 }
 
+void join_doc_comments(const std::vector<std::string>& doc_comment, char* buf, int buf_len) {
+    if (buf == nullptr || buf_len <= 0) return;
+    buf[0] = '\0';
+
+    std::string full_doc;
+    for (size_t i = 0; i < doc_comment.size(); ++i) {
+        full_doc += doc_comment[i];
+        if (i < doc_comment.size() - 1) {
+            full_doc += "\n";
+        }
+    }
+
+    if (!full_doc.empty()) {
+        strncpy(buf, full_doc.c_str(), buf_len - 1);
+        buf[buf_len - 1] = '\0';
+    }
+}
+
 void get_included_file_path(struct FlatbuffersParser* parser, int index, char* buf, int buf_len) {
     if (!parser || buf == nullptr || buf_len <= 0) {
         if (buf) buf[0] = '\0';
@@ -232,4 +251,51 @@ void get_field_type_name(struct FlatbuffersParser* parser, int struct_index, int
     std::string type_name = GetTypeName(field_def->value.type);
     strncpy(buf, type_name.c_str(), buf_len - 1);
     buf[buf_len - 1] = '\0'; // Ensure null termination
+}
+
+// Functions for documentation
+void get_struct_documentation(struct FlatbuffersParser* parser, int index, char* buf, int buf_len) {
+    if (!parser || index < 0 || static_cast<size_t>(index) >= parser->impl.structs_.vec.size()) {
+        if (buf && buf_len > 0) buf[0] = '\0';
+        return;
+    }
+    auto struct_def = parser->impl.structs_.vec[static_cast<size_t>(index)];
+    join_doc_comments(struct_def->doc_comment, buf, buf_len);
+}
+
+void get_enum_documentation(struct FlatbuffersParser* parser, int index, char* buf, int buf_len) {
+    if (!parser || index < 0 || static_cast<size_t>(index) >= parser->impl.enums_.vec.size()) {
+        if (buf && buf_len > 0) buf[0] = '\0';
+        return;
+    }
+    auto enum_def = parser->impl.enums_.vec[static_cast<size_t>(index)];
+    join_doc_comments(enum_def->doc_comment, buf, buf_len);
+}
+
+void get_field_documentation(struct FlatbuffersParser* parser, int struct_index, int field_index, char* buf, int buf_len) {
+    if (!parser || struct_index < 0 || static_cast<size_t>(struct_index) >= parser->impl.structs_.vec.size()) {
+        if (buf && buf_len > 0) buf[0] = '\0';
+        return;
+    }
+    auto struct_def = parser->impl.structs_.vec[static_cast<size_t>(struct_index)];
+    if (field_index < 0 || static_cast<size_t>(field_index) >= struct_def->fields.vec.size()) {
+        if (buf && buf_len > 0) buf[0] = '\0';
+        return;
+    }
+    auto field_def = struct_def->fields.vec[static_cast<size_t>(field_index)];
+    join_doc_comments(field_def->doc_comment, buf, buf_len);
+}
+
+void get_enum_val_documentation(struct FlatbuffersParser* parser, int enum_index, int val_index, char* buf, int buf_len) {
+    if (!parser || enum_index < 0 || static_cast<size_t>(enum_index) >= parser->impl.enums_.vec.size()) {
+        if (buf && buf_len > 0) buf[0] = '\0';
+        return;
+    }
+    auto enum_def = parser->impl.enums_.vec[static_cast<size_t>(enum_index)];
+    if (val_index < 0 || static_cast<size_t>(val_index) >= enum_def->Vals().size()) {
+        if (buf && buf_len > 0) buf[0] = '\0';
+        return;
+    }
+    auto enum_val = enum_def->Vals()[static_cast<size_t>(val_index)];
+    join_doc_comments(enum_val->doc_comment, buf, buf_len);
 }

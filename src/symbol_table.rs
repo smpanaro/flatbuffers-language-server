@@ -47,6 +47,7 @@ pub struct Struct {
 pub struct EnumVariant {
     pub name: String,
     pub value: i64,
+    pub documentation: Option<String>,
 }
 
 #[derive(Debug, Clone)]
@@ -128,12 +129,16 @@ impl Symbol {
         );
 
         if let Some(doc) = &self.info.documentation {
-            markdown.push_str(
-                "
+            if !doc.is_empty() {
+                markdown.push_str(
+                    "
+
 ---
+
 ",
-            );
-            markdown.push_str(doc);
+                );
+                markdown.push_str(doc);
+            }
         }
 
         markdown
@@ -215,7 +220,15 @@ impl Enum {
 ",
             self.variants
                 .iter()
-                .map(|v| format!("  {} = {}", v.name, v.value))
+                .map(|v| {
+                    let mut s = format!("  {} = {}", v.name, v.value);
+                    if let Some(doc) = &v.documentation {
+                        if !doc.is_empty() {
+                            s.push_str(&format!("\n  /// {}", doc.replace('\n', "\n  /// ")));
+                        }
+                    }
+                    s
+                })
                 .collect::<Vec<String>>()
                 .join(
                     "
