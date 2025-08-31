@@ -2,7 +2,7 @@ use dashmap::DashMap;
 use log::info;
 use std::collections::HashSet;
 use tower_lsp::jsonrpc::Result;
-use tower_lsp::lsp_types::*;
+use tower_lsp::lsp_types::{OneOf, *};
 use tower_lsp::{Client, LanguageServer, LspService, Server};
 
 use crate::ext::range::RangeExt;
@@ -164,6 +164,7 @@ impl LanguageServer for Backend {
                     TextDocumentSyncKind::FULL,
                 )),
                 hover_provider: Some(HoverProviderCapability::Simple(true)),
+                definition_provider: Some(OneOf::Left(true)),
                 ..ServerCapabilities::default()
             },
         })
@@ -210,6 +211,56 @@ impl LanguageServer for Backend {
             params.text_document_position_params.position,
         )
         .await
+    }
+
+    async fn goto_definition(
+        &self,
+        params: GotoDefinitionParams,
+    ) -> Result<Option<GotoDefinitionResponse>> {
+        let uri = params.text_document_position_params.text_document.uri;
+        let position = params.text_document_position_params.position;
+
+        let Some(st) = self.symbol_map.get(&uri.to_string()) else {
+            return Ok(None);
+        };
+
+        let Some(symbol) = st.value().find_in_table(position) else {
+            return Ok(None);
+        };
+
+        if let symbol_table::SymbolKind::Union(u) = &symbol.kind {
+            for variant in &u.variants {
+                if variant.location.range.contains(position) {
+                    if let Some(variant_type_sym) = self
+                        .symbol_map
+                        .iter()
+                        .find_map(|st| st.value().get(&variant.name).cloned())
+                    {
+                        return Ok(Some(GotoDefinitionResponse::Scalar(
+                            variant_type_sym.info.location.clone(),
+                        )));
+                    }
+                }
+            }
+        }
+
+        if let symbol_table::SymbolKind::Field(f) = &symbol.kind {
+            if f.type_range.contains(position) {
+                if let Some(field_type_sym) = self
+                    .symbol_map
+                    .iter()
+                    .find_map(|st| st.value().get(&f.type_name).cloned())
+                {
+                    return Ok(Some(GotoDefinitionResponse::Scalar(
+                        field_type_sym.info.location.clone(),
+                    )));
+                }
+            }
+        }
+
+        Ok(Some(GotoDefinitionResponse::Scalar(
+            symbol.info.location.clone(),
+        )))
     }
 }
 
