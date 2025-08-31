@@ -4,6 +4,7 @@ use tower_lsp::jsonrpc::Result;
 use tower_lsp::lsp_types::*;
 use tower_lsp::{Client, LanguageServer, LspService, Server};
 
+use crate::ext::range::RangeExt;
 use crate::lsp_logger::LspLogger;
 use crate::parser::{FlatcFFIParser, Parser};
 use crate::symbol_table::SymbolTable;
@@ -41,14 +42,16 @@ impl Backend {
     }
 
     async fn on_hover(&self, uri: Url, position: Position) -> Result<Option<Hover>> {
-        // Look for a hovered type (will always be the same file) e.g. hovering Foo in `table Foo {}`
-        if let Some(symbol) = self
-            .symbol_map
-            .get(&uri.to_string())
-            .and_then(|st| st.value().find_in_table(position).cloned())
-        {
-            if let symbol_table::SymbolKind::Field(f) = &symbol.kind {
-                // Look up again, could be in any file.
+        let Some(st) = self.symbol_map.get(&uri.to_string()) else {
+            return Ok(None);
+        };
+
+        let Some(symbol) = st.value().find_in_table(position) else {
+            return Ok(None);
+        };
+
+        if let symbol_table::SymbolKind::Field(f) = &symbol.kind {
+            if f.type_range.contains(position) {
                 if let Some(field_type_sym) = self
                     .symbol_map
                     .iter()
@@ -62,19 +65,16 @@ impl Backend {
                         range: Some(f.type_range),
                     }));
                 }
-            } else {
-                return Ok(Some(Hover {
-                    contents: HoverContents::Markup(MarkupContent {
-                        kind: MarkupKind::Markdown,
-                        value: symbol.hover_markdown(),
-                    }),
-                    range: Some(symbol.info.location.range),
-                }));
             }
         }
-        // Check enum types(?), union types etc e.g. hovering Foo in `union Bar { Foo }`
 
-        Ok(None)
+        Ok(Some(Hover {
+            contents: HoverContents::Markup(MarkupContent {
+                kind: MarkupKind::Markdown,
+                value: symbol.hover_markdown(),
+            }),
+            range: Some(symbol.info.location.range),
+        }))
     }
 }
 
@@ -133,12 +133,11 @@ impl LanguageServer for Backend {
     }
 
     async fn hover(&self, params: HoverParams) -> Result<Option<Hover>> {
-        return self
-            .on_hover(
-                params.text_document_position_params.text_document.uri,
-                params.text_document_position_params.position,
-            )
-            .await;
+        self.on_hover(
+            params.text_document_position_params.text_document.uri,
+            params.text_document_position_params.position,
+        )
+        .await
     }
 }
 

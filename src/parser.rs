@@ -31,6 +31,34 @@ fn is_known_type(type_name: &str, st: &SymbolTable, scalar_types: &HashSet<&str>
     scalar_types.contains(base_type_name) || st.contains_key(base_type_name)
 }
 
+fn create_symbol(
+    uri: &Url,
+    name: String,
+    line: u32,
+    col: u32,
+    kind: SymbolKind,
+) -> (Symbol, Location) {
+    let location = Location {
+        uri: uri.clone(),
+        range: Range::new(
+            Position::new(line, col - (name.chars().count() as u32)),
+            Position::new(line, col),
+        ),
+    };
+    let symbol_info = SymbolInfo {
+        name,
+        location: location.clone(),
+        documentation: None,
+    };
+    (
+        Symbol {
+            info: symbol_info,
+            kind,
+        },
+        location,
+    )
+}
+
 impl Parser for FlatcFFIParser {
     fn parse(&self, uri: &Url, content: &str) -> (Vec<Diagnostic>, Option<SymbolTable>) {
         let scalar_types: HashSet<_> = [
@@ -68,19 +96,13 @@ impl Parser for FlatcFFIParser {
                         continue;
                     }
                     let name = CStr::from_ptr(def_info.name).to_string_lossy().into_owned();
-                    let line = def_info.line;
-                    let col = def_info.col;
-                    let location = Location {
-                        uri: uri.clone(),
-                        range: Range::new(
-                            Position::new(line, col - (name.chars().count() as u32)),
-                            Position::new(line, col),
-                        ),
-                    };
 
                     if st.contains_key(&name) {
                         diagnostics.push(Diagnostic {
-                            range: location.range,
+                            range: Range::new(
+                                Position::new(def_info.line, def_info.col),
+                                Position::new(def_info.line, def_info.col),
+                            ),
                             severity: Some(DiagnosticSeverity::ERROR),
                             message: format!("Duplicate definition: {}", name),
                             ..Default::default()
@@ -99,8 +121,6 @@ impl Parser for FlatcFFIParser {
                         let field_name = CStr::from_ptr(field_info.name)
                             .to_string_lossy()
                             .into_owned();
-                        let field_line = field_info.line;
-                        let field_col = field_info.col;
 
                         let mut type_name_buffer = vec![0u8; 256];
                         ffi::get_field_type_name(
@@ -121,28 +141,16 @@ impl Parser for FlatcFFIParser {
                             Position::new(field_info.type_line, field_info.type_col),
                         );
 
-                        let field_location = Location {
-                            uri: uri.clone(),
-                            range: Range::new(
-                                Position::new(
-                                    field_line,
-                                    field_col - (field_name.chars().count() as u32),
-                                ),
-                                Position::new(field_line, field_col),
-                            ),
-                        };
-                        let field_symbol_info = SymbolInfo {
-                            name: field_name,
-                            location: field_location,
-                            documentation: None,
-                        };
-                        let field_symbol = Symbol {
-                            info: field_symbol_info,
-                            kind: SymbolKind::Field(Field {
+                        let (field_symbol, _) = create_symbol(
+                            uri,
+                            field_name,
+                            field_info.line,
+                            field_info.col,
+                            SymbolKind::Field(Field {
                                 type_name,
                                 type_range,
                             }),
-                        };
+                        );
                         fields.push(field_symbol);
                     }
 
@@ -151,15 +159,10 @@ impl Parser for FlatcFFIParser {
                     } else {
                         SymbolKind::Struct(Struct { fields })
                     };
-                    let symbol_info = SymbolInfo {
-                        name: name.clone(),
-                        location,
-                        documentation: None,
-                    };
-                    st.insert(Symbol {
-                        info: symbol_info,
-                        kind: symbol_kind,
-                    });
+
+                    let (symbol, _) =
+                        create_symbol(uri, name, def_info.line, def_info.col, symbol_kind);
+                    st.insert(symbol);
                 }
 
                 let num_enums = ffi::get_num_enums(parser_ptr);
@@ -169,19 +172,13 @@ impl Parser for FlatcFFIParser {
                         continue;
                     }
                     let name = CStr::from_ptr(def_info.name).to_string_lossy().into_owned();
-                    let line = def_info.line;
-                    let col = def_info.col;
-                    let location = Location {
-                        uri: uri.clone(),
-                        range: Range::new(
-                            Position::new(line, col - (name.chars().count() as u32)),
-                            Position::new(line, col),
-                        ),
-                    };
 
                     if st.contains_key(&name) {
                         diagnostics.push(Diagnostic {
-                            range: location.range,
+                            range: Range::new(
+                                Position::new(def_info.line, def_info.col),
+                                Position::new(def_info.line, def_info.col),
+                            ),
                             severity: Some(DiagnosticSeverity::ERROR),
                             message: format!("Duplicate definition: {}", name),
                             ..Default::default()
@@ -194,43 +191,29 @@ impl Parser for FlatcFFIParser {
                     } else {
                         SymbolKind::Enum(Enum {})
                     };
-                    let symbol_info = SymbolInfo {
-                        name: name.clone(),
-                        location,
-                        documentation: None,
-                    };
-                    st.insert(Symbol {
-                        info: symbol_info,
-                        kind: symbol_kind,
-                    });
+
+                    let (symbol, _) =
+                        create_symbol(uri, name, def_info.line, def_info.col, symbol_kind);
+                    st.insert(symbol);
                 }
 
                 // Second Pass: Semantic Analysis
                 for symbol in st.values() {
-                    if let SymbolKind::Table(table) = &symbol.kind {
-                        for field in &table.fields {
-                            if let SymbolKind::Field(field_def) = &field.kind {
-                                if !is_known_type(&field_def.type_name, &st, &scalar_types) {
-                                    diagnostics.push(Diagnostic {
-                                        range: field.info.location.range,
-                                        severity: Some(DiagnosticSeverity::ERROR),
-                                        message: format!("Undefined type: {}", field_def.type_name),
-                                        ..Default::default()
-                                    });
-                                }
-                            }
-                        }
-                    } else if let SymbolKind::Struct(struc) = &symbol.kind {
-                        for field in &struc.fields {
-                            if let SymbolKind::Field(field_def) = &field.kind {
-                                if !is_known_type(&field_def.type_name, &st, &scalar_types) {
-                                    diagnostics.push(Diagnostic {
-                                        range: field.info.location.range,
-                                        severity: Some(DiagnosticSeverity::ERROR),
-                                        message: format!("Undefined type: {}", field_def.type_name),
-                                        ..Default::default()
-                                    });
-                                }
+                    let fields = match &symbol.kind {
+                        SymbolKind::Table(t) => &t.fields,
+                        SymbolKind::Struct(s) => &s.fields,
+                        _ => continue,
+                    };
+
+                    for field in fields {
+                        if let SymbolKind::Field(field_def) = &field.kind {
+                            if !is_known_type(&field_def.type_name, &st, &scalar_types) {
+                                diagnostics.push(Diagnostic {
+                                    range: field.info.location.range,
+                                    severity: Some(DiagnosticSeverity::ERROR),
+                                    message: format!("Undefined type: {}", field_def.type_name),
+                                    ..Default::default()
+                                });
                             }
                         }
                     }
@@ -245,11 +228,10 @@ impl Parser for FlatcFFIParser {
                         debug!("flatc FFI error: {}", error_str);
                         for line in error_str.lines() {
                             if let Some(captures) = RE.captures(line) {
-                                let line_num_str = if let Some(original_line) = captures.get(5) {
-                                    original_line.as_str()
-                                } else {
-                                    captures.get(1).map_or("1", |m| m.as_str())
-                                };
+                                let line_num_str = captures.get(5).map_or_else(
+                                    || captures.get(1).map_or("1", |m| m.as_str()),
+                                    |m| m.as_str(),
+                                );
                                 let line_num: u32 =
                                     line_num_str.parse().unwrap_or(1u32).saturating_sub(1);
                                 let col_num: u32 = captures

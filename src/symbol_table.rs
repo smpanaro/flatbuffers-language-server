@@ -62,9 +62,7 @@ pub struct Field {
 
 impl Symbol {
     pub fn find_symbol<'a>(&'a self, pos: Position) -> Option<&'a Symbol> {
-        let range = self.info.location.range;
-
-        if range.contains(pos) {
+        if self.info.location.range.contains(pos) {
             return Some(self);
         }
 
@@ -76,7 +74,6 @@ impl Symbol {
                             return Some(field);
                         }
                     }
-                    // No need to recurse, hovering the field name is not useful.
                 }
             }
             SymbolKind::Struct(s) => {
@@ -86,26 +83,19 @@ impl Symbol {
                             return Some(field);
                         }
                     }
-                    // No need to recurse, hovering the field name is not useful.
                 }
             }
-            SymbolKind::Enum(_) => {
-                // later: variants
-            }
-            SymbolKind::Union(_) => {
-                // later: fields
-            }
-            SymbolKind::Field(_) => {
-                // leaf
-            }
+            _ => {}
         }
 
         None
     }
 
     pub fn hover_markdown(&self) -> String {
-        format!(
-            "```flatbuffers\n{}\n```{}",
+        let mut markdown = format!(
+            "```flatbuffers
+{}
+```",
             match &self.kind {
                 SymbolKind::Table(t) =>
                     format!("table {} {{{}}}", self.info.name, t.fields_markdown()),
@@ -113,14 +103,20 @@ impl Symbol {
                     format!("struct {} {{{}}}", self.info.name, s.fields_markdown()),
                 SymbolKind::Enum(_) => format!("enum {}", self.info.name),
                 SymbolKind::Union(_) => format!("union {}", self.info.name),
-                SymbolKind::Field(_) => "".to_string(),
-            },
-            self.info
-                .documentation
-                .as_deref()
-                .map(|d| format!("\n---\n{}", d))
-                .unwrap_or("".to_string()),
-        )
+                SymbolKind::Field(f) => format!("{}: {}", self.info.name, f.type_name),
+            }
+        );
+
+        if let Some(doc) = &self.info.documentation {
+            markdown.push_str(
+                "
+---
+",
+            );
+            markdown.push_str(doc);
+        }
+
+        markdown
     }
 }
 
@@ -147,45 +143,43 @@ impl SymbolTable {
     }
 
     pub fn find_in_table<'a>(&'a self, pos: Position) -> Option<&'a Symbol> {
-        for symbol in self.0.values() {
-            if let Some(found) = symbol.find_symbol(pos) {
-                return Some(found);
-            }
-        }
-        None
+        self.0.values().find_map(|symbol| symbol.find_symbol(pos))
     }
 }
 
-pub trait FieldsMarkdown {
-    fn fields_markdown(&self) -> String;
-}
-
-impl FieldsMarkdown for [Symbol] {
-    fn fields_markdown(&self) -> String {
-        if self.iter().count() == 0 {
-            return "".to_string();
-        }
-        format!(
-            "\n{}\n",
-            self.iter()
-                .map(|field| match &field.kind {
-                    SymbolKind::Field(f) => format!("  {}: {}", field.info.name, &f.type_name),
-                    _ => "".to_string(),
-                })
-                .collect::<Vec<String>>()
-                .join("\n")
-        )
+fn fields_markdown(fields: &[Symbol]) -> String {
+    if fields.is_empty() {
+        return "".to_string();
     }
+    format!(
+        "
+{}
+",
+        fields
+            .iter()
+            .filter_map(|field| {
+                if let SymbolKind::Field(f) = &field.kind {
+                    Some(format!("  {}: {}", field.info.name, &f.type_name))
+                } else {
+                    None
+                }
+            })
+            .collect::<Vec<String>>()
+            .join(
+                "
+"
+            )
+    )
 }
 
 impl Table {
     pub fn fields_markdown(&self) -> String {
-        self.fields.fields_markdown()
+        fields_markdown(&self.fields)
     }
 }
 
 impl Struct {
     pub fn fields_markdown(&self) -> String {
-        self.fields.fields_markdown()
+        fields_markdown(&self.fields)
     }
 }
