@@ -1,7 +1,7 @@
 use crate::symbol_table::{
     Enum, Field, Struct, Symbol, SymbolInfo, SymbolKind, SymbolTable, Table, Union,
 };
-use log::{debug, error, info};
+use log::{debug, error};
 use once_cell::sync::Lazy;
 use regex::Regex;
 use std::collections::HashSet;
@@ -113,7 +113,6 @@ impl Parser for FlatcFFIParser {
                         included_files.push(path);
                     }
                 }
-                info!("Successfully parsed schema. Building symbol table...");
                 let mut st = SymbolTable::new();
 
                 // First Pass: Collect all definitions and fields

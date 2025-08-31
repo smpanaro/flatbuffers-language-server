@@ -1,6 +1,7 @@
 use dashmap::DashMap;
-use log::info;
+use log::{debug, error, info};
 use std::collections::HashSet;
+use std::time::Instant;
 use tower_lsp::jsonrpc::Result;
 use tower_lsp::lsp_types::{OneOf, *};
 use tower_lsp::{Client, LanguageServer, LspService, Server};
@@ -44,12 +45,7 @@ impl Backend {
                 match fs::read_to_string(uri.to_file_path().unwrap()).await {
                     Ok(text) => text,
                     Err(e) => {
-                        self.client
-                            .log_message(
-                                MessageType::ERROR,
-                                format!("Failed to read file {}: {}", uri, e),
-                            )
-                            .await;
+                        error!("Failed to read file {}: {}", uri, e);
                         continue;
                     }
                 }
@@ -57,7 +53,10 @@ impl Backend {
 
             self.document_map.insert(uri.to_string(), content.clone());
 
+            let start_time = Instant::now();
             let (diagnostics, symbol_table, included_files) = self.parser.parse(&uri, &content);
+            let elapsed_time = start_time.elapsed();
+            error!("Parsed in {}ms: {}", elapsed_time.as_millis(), uri);
 
             if let Some(st) = symbol_table {
                 self.symbol_map.insert(uri.to_string(), st);
@@ -77,12 +76,7 @@ impl Backend {
                         }
                     }
                     Err(_) => {
-                        self.client
-                            .log_message(
-                                MessageType::ERROR,
-                                format!("Invalid include path: {}", included_path_str),
-                            )
-                            .await;
+                        error!("Invalid include path: {}", included_path_str);
                     }
                 }
             }
@@ -93,7 +87,7 @@ impl Backend {
         self.parse_and_discover(uri, Some(text)).await;
     }
 
-    async fn on_hover(&self, uri: Url, position: Position) -> Result<Option<Hover>> {
+    async fn on_hover(&self, uri: &Url, position: Position) -> Result<Option<Hover>> {
         let Some(st) = self.symbol_map.get(&uri.to_string()) else {
             return Ok(None);
         };
@@ -180,13 +174,13 @@ impl LanguageServer for Backend {
     }
 
     async fn did_open(&self, params: DidOpenTextDocumentParams) {
-        info!("Opened file: {}", params.text_document.uri);
+        debug!("Opened: {}", params.text_document.uri);
         self.on_change(params.text_document.uri, params.text_document.text)
             .await;
     }
 
     async fn did_change(&self, mut params: DidChangeTextDocumentParams) {
-        info!("Changed file: {}", params.text_document.uri);
+        debug!("Changed: {}", params.text_document.uri);
         self.on_change(
             params.text_document.uri,
             params.content_changes.remove(0).text,
@@ -195,7 +189,7 @@ impl LanguageServer for Backend {
     }
 
     async fn did_close(&self, params: DidCloseTextDocumentParams) {
-        info!("Closed file: {}", params.text_document.uri);
+        debug!("closed: {}", params.text_document.uri);
         self.document_map
             .remove(&params.text_document.uri.to_string());
         self.symbol_map
@@ -206,11 +200,21 @@ impl LanguageServer for Backend {
     }
 
     async fn hover(&self, params: HoverParams) -> Result<Option<Hover>> {
-        self.on_hover(
-            params.text_document_position_params.text_document.uri,
-            params.text_document_position_params.position,
-        )
-        .await
+        let start = Instant::now();
+
+        let uri = params.text_document_position_params.text_document.uri;
+        let pos = params.text_document_position_params.position;
+        let res = self.on_hover(&uri, pos).await;
+
+        let elapsed = start.elapsed();
+        info!(
+            "hover in {}ms: {} L{}C{}",
+            elapsed.as_millis(),
+            &uri.path(),
+            pos.line + 1,
+            pos.character + 1
+        );
+        return res;
     }
 
     async fn goto_definition(
