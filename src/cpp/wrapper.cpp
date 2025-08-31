@@ -102,12 +102,13 @@ int get_num_structs(struct FlatbuffersParser* parser) {
 }
 
 struct StructDefinitionInfo get_struct_info(struct FlatbuffersParser* parser, int index) {
-    struct StructDefinitionInfo info = { nullptr, false, 0, 0 };
+    struct StructDefinitionInfo info = { nullptr, nullptr, false, 0, 0 };
     if (!parser || index < 0 || static_cast<size_t>(index) >= parser->impl.structs_.vec.size()) {
         return info;
     }
     auto struct_def = parser->impl.structs_.vec[static_cast<size_t>(index)];
     info.name = struct_def->name.c_str();
+    info.file = struct_def->file.c_str();
     info.is_table = !struct_def->fixed;
     info.line = struct_def->decl_line - 1;
     info.col = struct_def->decl_col;
@@ -121,12 +122,13 @@ int get_num_enums(struct FlatbuffersParser* parser) {
 }
 
 struct EnumDefinitionInfo get_enum_info(struct FlatbuffersParser* parser, int index) {
-    struct EnumDefinitionInfo info = { nullptr, false, 0, 0 };
+    struct EnumDefinitionInfo info = { nullptr, nullptr, false, 0, 0 };
     if (!parser || index < 0 || static_cast<size_t>(index) >= parser->impl.enums_.vec.size()) {
         return info;
     }
     auto enum_def = parser->impl.enums_.vec[static_cast<size_t>(index)];
     info.name = enum_def->name.c_str();
+    info.file = enum_def->file.c_str();
     info.is_union = enum_def->is_union;
     info.line = enum_def->decl_line - 1;
     info.col = enum_def->decl_col;

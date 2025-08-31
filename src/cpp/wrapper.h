@@ -12,6 +12,7 @@ struct FlatbuffersParser;
 // A struct to pass struct/table definition information
 struct StructDefinitionInfo {
     const char* name;
+    const char* file;
     bool is_table;
     unsigned line;
     unsigned col;
@@ -20,6 +21,7 @@ struct StructDefinitionInfo {
 // A struct to pass enum/union definition information
 struct EnumDefinitionInfo {
     const char* name;
+    const char* file;
     bool is_union;
     unsigned line;
     unsigned col;

@@ -1,7 +1,7 @@
 use crate::symbol_table::{
     Enum, Field, Struct, Symbol, SymbolInfo, SymbolKind, SymbolTable, Table, Union,
 };
-use log::{debug, info};
+use log::{debug, error, info};
 use once_cell::sync::Lazy;
 use regex::Regex;
 use std::collections::HashSet;
@@ -124,6 +124,11 @@ impl Parser for FlatcFFIParser {
                         continue;
                     }
                     let name = CStr::from_ptr(def_info.name).to_string_lossy().into_owned();
+                    let file = CStr::from_ptr(def_info.file).to_string_lossy().into_owned();
+                    let Some(file_uri) = Url::from_file_path(&file).ok() else {
+                        error!("failed to parse file into url: {}", file);
+                        continue;
+                    };
 
                     if st.contains_key(&name) {
                         diagnostics.push(Diagnostic {
@@ -186,7 +191,7 @@ impl Parser for FlatcFFIParser {
                         };
 
                         let (field_symbol, _) = create_symbol(
-                            uri,
+                            &file_uri,
                             field_name,
                             field_info.line,
                             field_info.col,
@@ -220,7 +225,7 @@ impl Parser for FlatcFFIParser {
                     };
 
                     let (symbol, _) = create_symbol(
-                        uri,
+                        &file_uri,
                         name,
                         def_info.line,
                         def_info.col,
@@ -237,6 +242,11 @@ impl Parser for FlatcFFIParser {
                         continue;
                     }
                     let name = CStr::from_ptr(def_info.name).to_string_lossy().into_owned();
+                    let file = CStr::from_ptr(def_info.file).to_string_lossy().into_owned();
+                    let Some(file_uri) = Url::from_file_path(&file).ok() else {
+                        error!("failed to parse file into url: {}", file);
+                        continue;
+                    };
 
                     if st.contains_key(&name) {
                         diagnostics.push(Diagnostic {
@@ -273,7 +283,7 @@ impl Parser for FlatcFFIParser {
                                 .into_iter()
                                 .map(|(name, val_info)| crate::symbol_table::UnionVariant {
                                     location: Location {
-                                        uri: uri.clone(),
+                                        uri: file_uri.clone(),
                                         range: Range::new(
                                             Position::new(
                                                 val_info.line,
@@ -332,7 +342,7 @@ impl Parser for FlatcFFIParser {
                     };
 
                     let (symbol, _) = create_symbol(
-                        uri,
+                        &file_uri,
                         name,
                         def_info.line,
                         def_info.col,

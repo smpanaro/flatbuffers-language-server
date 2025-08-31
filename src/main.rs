@@ -21,6 +21,7 @@ mod symbol_table;
 struct Backend {
     client: Client,
     document_map: DashMap<String, String>,
+    // TODO: This may not be the correct data structure since flatc parses all included files automatically.
     symbol_map: DashMap<String, SymbolTable>,
     parser: FlatcFFIParser,
 }
