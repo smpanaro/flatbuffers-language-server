@@ -22,7 +22,7 @@ mod symbol_table;
 struct Backend {
     client: Client,
     document_map: DashMap<String, String>,
-    // TODO: This may not be the correct data structure since flatc parses all included files automatically.
+    // TODO: This is definitely the wrong data structure since flatc parses all included files automatically.
     symbol_map: DashMap<String, SymbolTable>,
     parser: FlatcFFIParser,
 }
@@ -92,7 +92,7 @@ impl Backend {
             return Ok(None);
         };
 
-        let Some(symbol) = st.value().find_in_table(position) else {
+        let Some(symbol) = st.value().find_in_table(uri.clone(), position) else {
             return Ok(None);
         };
 
@@ -112,6 +112,7 @@ impl Backend {
                             range: Some(variant.location.range),
                         }));
                     }
+                    return Ok(None); // builtins
                 }
             }
         }
@@ -131,6 +132,7 @@ impl Backend {
                         range: Some(f.type_range),
                     }));
                 }
+                return Ok(None); // builtins
             }
         }
 
@@ -228,7 +230,7 @@ impl LanguageServer for Backend {
             return Ok(None);
         };
 
-        let Some(symbol) = st.value().find_in_table(position) else {
+        let Some(symbol) = st.value().find_in_table(uri, position) else {
             return Ok(None);
         };
 
@@ -244,6 +246,7 @@ impl LanguageServer for Backend {
                             variant_type_sym.info.location.clone(),
                         )));
                     }
+                    return Ok(None); // builtins
                 }
             }
         }
@@ -259,6 +262,7 @@ impl LanguageServer for Backend {
                         field_type_sym.info.location.clone(),
                     )));
                 }
+                return Ok(None); // builtins
             }
         }
 

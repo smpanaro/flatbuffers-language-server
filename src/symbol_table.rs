@@ -1,5 +1,5 @@
 use std::collections::HashMap;
-use tower_lsp::lsp_types::{Location, Position, Range};
+use tower_lsp::lsp_types::{Location, Position, Range, Url};
 
 use crate::ext::range::RangeExt;
 
@@ -73,7 +73,11 @@ pub struct Field {
 }
 
 impl Symbol {
-    pub fn find_symbol<'a>(&'a self, pos: Position) -> Option<&'a Symbol> {
+    pub fn find_symbol<'a>(&'a self, uri: &Url, pos: Position) -> Option<&'a Symbol> {
+        if self.info.location.uri.path() != uri.path() {
+            return None;
+        }
+
         if self.info.location.range.contains(pos) {
             return Some(self);
         }
@@ -152,6 +156,7 @@ impl SymbolTable {
     }
 
     pub fn insert(&mut self, symbol: Symbol) {
+        // TODO: Should this key include namespace?
         self.0.insert(symbol.info.name.clone(), symbol);
     }
 
@@ -167,8 +172,10 @@ impl SymbolTable {
         self.0.get(key)
     }
 
-    pub fn find_in_table<'a>(&'a self, pos: Position) -> Option<&'a Symbol> {
-        self.0.values().find_map(|symbol| symbol.find_symbol(pos))
+    pub fn find_in_table<'a>(&'a self, uri: Url, pos: Position) -> Option<&'a Symbol> {
+        self.0
+            .values()
+            .find_map(|symbol| symbol.find_symbol(&uri, pos))
     }
 }
 
