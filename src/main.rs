@@ -1,5 +1,6 @@
 use dashmap::DashMap;
 use log::info;
+use std::collections::HashSet;
 use tower_lsp::jsonrpc::Result;
 use tower_lsp::lsp_types::*;
 use tower_lsp::{Client, LanguageServer, LspService, Server};
@@ -8,6 +9,7 @@ use crate::ext::range::RangeExt;
 use crate::lsp_logger::LspLogger;
 use crate::parser::{FlatcFFIParser, Parser};
 use crate::symbol_table::SymbolTable;
+use tokio::fs;
 
 mod ext;
 mod ffi;
@@ -24,21 +26,70 @@ struct Backend {
 }
 
 impl Backend {
-    async fn on_change(&self, uri: Url, text: String) {
-        self.document_map.insert(uri.to_string(), text.clone());
+    async fn parse_and_discover(&self, initial_uri: Url, initial_content: Option<String>) {
+        let mut files_to_parse = vec![(initial_uri, initial_content)];
+        let mut parsed_files = HashSet::new();
 
-        let (diagnostics, symbol_table) = self.parser.parse(&uri, &text);
+        while let Some((uri, content_opt)) = files_to_parse.pop() {
+            if !parsed_files.insert(uri.clone()) {
+                continue;
+            }
 
-        if let Some(st) = symbol_table {
-            info!("Successfully built symbol table for {}", uri);
-            self.symbol_map.insert(uri.to_string(), st);
-        } else {
-            self.symbol_map.remove(&uri.to_string());
+            let content = if let Some(c) = content_opt {
+                c
+            } else if let Some(doc) = self.document_map.get(&uri.to_string()) {
+                doc.value().clone()
+            } else {
+                match fs::read_to_string(uri.to_file_path().unwrap()).await {
+                    Ok(text) => text,
+                    Err(e) => {
+                        self.client
+                            .log_message(
+                                MessageType::ERROR,
+                                format!("Failed to read file {}: {}", uri, e),
+                            )
+                            .await;
+                        continue;
+                    }
+                }
+            };
+
+            self.document_map.insert(uri.to_string(), content.clone());
+
+            let (diagnostics, symbol_table, included_files) = self.parser.parse(&uri, &content);
+
+            if let Some(st) = symbol_table {
+                self.symbol_map.insert(uri.to_string(), st);
+            } else {
+                self.symbol_map.remove(&uri.to_string());
+            }
+
+            self.client
+                .publish_diagnostics(uri.clone(), diagnostics, None)
+                .await;
+
+            for included_path_str in included_files {
+                match Url::from_file_path(&included_path_str) {
+                    Ok(included_uri) => {
+                        if !parsed_files.contains(&included_uri) {
+                            files_to_parse.push((included_uri, None));
+                        }
+                    }
+                    Err(_) => {
+                        self.client
+                            .log_message(
+                                MessageType::ERROR,
+                                format!("Invalid include path: {}", included_path_str),
+                            )
+                            .await;
+                    }
+                }
+            }
         }
+    }
 
-        self.client
-            .publish_diagnostics(uri, diagnostics, None)
-            .await;
+    async fn on_change(&self, uri: Url, text: String) {
+        self.parse_and_discover(uri, Some(text)).await;
     }
 
     async fn on_hover(&self, uri: Url, position: Position) -> Result<Option<Hover>> {

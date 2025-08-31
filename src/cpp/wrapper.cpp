@@ -1,6 +1,8 @@
 #include "wrapper.h"
 #include "flatbuffers/idl.h"
+#include "flatbuffers/util.h"
 #include <string>
+#include <unistd.h>
 
 // We use a C-style struct to hide the C++ Parser implementation from Rust.
 struct FlatbuffersParser {
@@ -47,9 +49,25 @@ std::string GetTypeName(const flatbuffers::Type& type) {
     return flatbuffers::TypeName(type.base_type);
 }
 
-struct FlatbuffersParser* parse_schema(const char* schema_content) {
+struct FlatbuffersParser* parse_schema(const char* schema_content, const char* filename) {
     auto parser = new FlatbuffersParser();
-    if (parser->impl.Parse(schema_content, nullptr, "")) {
+
+    std::vector<const char*> include_paths;
+    std::string path_str;
+    if (filename && strlen(filename) > 0) {
+        path_str = flatbuffers::StripFileName(filename);
+        include_paths.push_back(path_str.c_str());
+    }
+    // Add CWD to include paths
+    char cwd[1024];
+    if (getcwd(cwd, sizeof(cwd)) != NULL) {
+        include_paths.push_back(cwd);
+    }
+    include_paths.push_back(nullptr);
+
+    const char** paths = include_paths.empty() ? nullptr : include_paths.data();
+
+    if (parser->impl.Parse(schema_content, paths, filename ? filename : "")) {
         return parser;
     } else {
         return parser;
@@ -137,6 +155,29 @@ struct EnumValDefinitionInfo get_enum_val_info(struct FlatbuffersParser* parser,
     info.line = enum_val->decl_line - 1;
     info.col = enum_val->decl_col;
     return info;
+}
+
+// Functions for included files
+int get_num_included_files(struct FlatbuffersParser* parser) {
+    if (!parser) return 0;
+    return static_cast<int>(parser->impl.GetIncludedFiles().size());
+}
+
+void get_included_file_path(struct FlatbuffersParser* parser, int index, char* buf, int buf_len) {
+    if (!parser || buf == nullptr || buf_len <= 0) {
+        if (buf) buf[0] = '\0';
+        return;
+    }
+    buf[0] = '\0';
+
+    auto included_files = parser->impl.GetIncludedFiles();
+    if (index < 0 || static_cast<size_t>(index) >= included_files.size()) {
+        return;
+    }
+
+    const auto& file_path = included_files[static_cast<size_t>(index)].filename;
+    strncpy(buf, file_path.c_str(), buf_len - 1);
+    buf[buf_len - 1] = '\0'; // Ensure null termination
 }
 
 // Functions for fields

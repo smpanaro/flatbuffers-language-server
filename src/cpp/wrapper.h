@@ -43,7 +43,7 @@ struct FieldDefinitionInfo {
 };
 
 // Parses a schema and returns a pointer to the Parser object.
-struct FlatbuffersParser* parse_schema(const char* schema_content);
+struct FlatbuffersParser* parse_schema(const char* schema_content, const char* filename);
 
 // Deletes a parser object.
 void delete_parser(struct FlatbuffersParser* parser);
@@ -70,6 +70,10 @@ struct EnumValDefinitionInfo get_enum_val_info(struct FlatbuffersParser* parser,
 int get_num_fields(struct FlatbuffersParser* parser, int struct_index);
 struct FieldDefinitionInfo get_field_info(struct FlatbuffersParser* parser, int struct_index, int field_index);
 void get_field_type_name(struct FlatbuffersParser* parser, int struct_index, int field_index, char* buf, int buf_len);
+
+// Functions for included files
+int get_num_included_files(struct FlatbuffersParser* parser);
+void get_included_file_path(struct FlatbuffersParser* parser, int index, char* buf, int buf_len);
 
 
 #ifdef __cplusplus

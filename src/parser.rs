@@ -12,8 +12,13 @@ use crate::ffi;
 
 /// A trait for parsing FlatBuffers schema files.
 pub trait Parser {
-    /// Parses a FlatBuffers schema and returns a list of diagnostics and a symbol table.
-    fn parse(&self, uri: &Url, content: &str) -> (Vec<Diagnostic>, Option<SymbolTable>);
+    /// Parses a FlatBuffers schema and returns a list of diagnostics, a symbol table,
+    /// and a list of included files.
+    fn parse(
+        &self,
+        uri: &Url,
+        content: &str,
+    ) -> (Vec<Diagnostic>, Option<SymbolTable>, Vec<String>);
 }
 
 #[derive(Debug)]
@@ -60,7 +65,11 @@ fn create_symbol(
 }
 
 impl Parser for FlatcFFIParser {
-    fn parse(&self, uri: &Url, content: &str) -> (Vec<Diagnostic>, Option<SymbolTable>) {
+    fn parse(
+        &self,
+        uri: &Url,
+        content: &str,
+    ) -> (Vec<Diagnostic>, Option<SymbolTable>, Vec<String>) {
         let scalar_types: HashSet<_> = [
             "bool", "byte", "ubyte", "short", "ushort", "int", "uint", "float", "long", "ulong",
             "double", "string",
@@ -71,20 +80,38 @@ impl Parser for FlatcFFIParser {
 
         let c_content = match CString::new(content) {
             Ok(s) => s,
-            Err(_) => return (vec![], None), // Content has null bytes
+            Err(_) => return (vec![], None, vec![]), // Content has null bytes
         };
+        let c_filename = CString::new(uri.to_file_path().unwrap().to_str().unwrap()).unwrap();
 
         let mut diagnostics = Vec::new();
         let mut symbol_table: Option<SymbolTable> = None;
+        let mut included_files = Vec::new();
 
         // Unsafe block to call C++ functions
         unsafe {
-            let parser_ptr = ffi::parse_schema(c_content.as_ptr());
+            let parser_ptr = ffi::parse_schema(c_content.as_ptr(), c_filename.as_ptr());
             if parser_ptr.is_null() {
-                return (diagnostics, None);
+                return (diagnostics, None, vec![]);
             }
 
             if ffi::is_parser_success(parser_ptr) {
+                let num_included = ffi::get_num_included_files(parser_ptr);
+                for i in 0..num_included {
+                    let mut path_buffer = vec![0u8; 1024];
+                    ffi::get_included_file_path(
+                        parser_ptr,
+                        i,
+                        path_buffer.as_mut_ptr() as *mut i8,
+                        path_buffer.len() as i32,
+                    );
+                    let path = CStr::from_ptr(path_buffer.as_ptr() as *const i8)
+                        .to_string_lossy()
+                        .into_owned();
+                    if !path.is_empty() {
+                        included_files.push(path);
+                    }
+                }
                 info!("Successfully parsed schema. Building symbol table...");
                 let mut st = SymbolTable::new();
 
@@ -312,6 +339,6 @@ impl Parser for FlatcFFIParser {
             ffi::delete_parser(parser_ptr);
         }
 
-        (diagnostics, symbol_table)
+        (diagnostics, symbol_table, included_files)
     }
 }
