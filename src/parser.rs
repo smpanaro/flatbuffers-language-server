@@ -1,7 +1,7 @@
 use crate::symbol_table::{
     Enum, Field, Struct, Symbol, SymbolInfo, SymbolKind, SymbolTable, Table, Union,
 };
-use log::{debug, error};
+use log::{debug, error, info};
 use once_cell::sync::Lazy;
 use regex::Regex;
 use std::collections::HashSet;
@@ -32,7 +32,20 @@ static RE: Lazy<Regex> = Lazy::new(|| {
 fn is_known_type(type_name: &str, st: &SymbolTable, scalar_types: &HashSet<&str>) -> bool {
     // A type is known if it's a scalar or if it's in the symbol table.
     // We remove vector brackets `[]` for the check.
-    let base_type_name = type_name.trim_start_matches('[').trim_end_matches(']');
+    let base_type_name = if let Some(stripped) = type_name.strip_prefix('[') {
+        if let Some(end_bracket) = stripped.rfind(']') {
+            let inner = &stripped[..end_bracket];
+            if let Some(colon_pos) = inner.find(':') {
+                &inner[..colon_pos]
+            } else {
+                inner
+            }
+        } else {
+            type_name
+        }
+    } else {
+        type_name
+    };
     scalar_types.contains(base_type_name) || st.contains_key(base_type_name)
 }
 

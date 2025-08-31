@@ -28,6 +28,9 @@ std::string GetTypeName(const flatbuffers::Type& type) {
         case flatbuffers::BASE_TYPE_VECTOR: {
             return "[" + GetTypeName(type.VectorType()) + "]";
         }
+        case flatbuffers::BASE_TYPE_ARRAY: {
+            return "[" + GetTypeName(type.VectorType()) + ":" + std::to_string(type.fixed_length) + "]";
+        }
         case flatbuffers::BASE_TYPE_UTYPE:
         case flatbuffers::BASE_TYPE_BOOL:
         case flatbuffers::BASE_TYPE_CHAR:
@@ -232,7 +235,17 @@ struct FieldDefinitionInfo get_field_info(struct FlatbuffersParser* parser, int 
     info.line = field_def->decl_line - 1;
     info.col = field_def->decl_col;
     info.type_line = field_def->type_decl_line - 1;
-    info.type_col = field_def->type_decl_col;
+    
+    // For vectors and arrays, type_decl_col points to start of type name, 
+    // but we want it to point to the end like everything else
+    if (field_def->value.type.base_type == flatbuffers::BASE_TYPE_VECTOR ||
+        field_def->value.type.base_type == flatbuffers::BASE_TYPE_ARRAY) {
+        std::string type_name = GetTypeName(field_def->value.type);
+        info.type_col = field_def->type_decl_col + static_cast<unsigned>(type_name.length()) - 1;
+    } else {
+        info.type_col = field_def->type_decl_col;
+    }
+    
     return info;
 }
 

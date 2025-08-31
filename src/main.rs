@@ -17,6 +17,7 @@ mod ffi;
 mod lsp_logger;
 mod parser;
 mod symbol_table;
+mod utils;
 
 #[derive(Debug)]
 struct Backend {
@@ -99,10 +100,11 @@ impl Backend {
         if let symbol_table::SymbolKind::Union(u) = &symbol.kind {
             for variant in &u.variants {
                 if variant.location.range.contains(position) {
+                    let base_name = utils::type_utils::extract_base_type_name(&variant.name);
                     if let Some(variant_type_sym) = self
                         .symbol_map
                         .iter()
-                        .find_map(|st| st.value().get(&variant.name).cloned())
+                        .find_map(|st| st.value().get(base_name).cloned())
                     {
                         return Ok(Some(Hover {
                             contents: HoverContents::Markup(MarkupContent {
@@ -118,18 +120,21 @@ impl Backend {
         }
 
         if let symbol_table::SymbolKind::Field(f) = &symbol.kind {
-            if f.type_range.contains(position) {
+            let inner_type_range =
+                utils::type_utils::calculate_inner_type_range(f.type_range, &f.type_name);
+            if inner_type_range.contains(position) {
+                let base_type_name = utils::type_utils::extract_base_type_name(&f.type_name);
                 if let Some(field_type_sym) = self
                     .symbol_map
                     .iter()
-                    .find_map(|st| st.value().get(&f.type_name).cloned())
+                    .find_map(|st| st.value().get(base_type_name).cloned())
                 {
                     return Ok(Some(Hover {
                         contents: HoverContents::Markup(MarkupContent {
                             kind: MarkupKind::Markdown,
                             value: field_type_sym.hover_markdown(),
                         }),
-                        range: Some(f.type_range),
+                        range: Some(inner_type_range),
                     }));
                 }
                 return Ok(None); // builtins
@@ -237,10 +242,11 @@ impl LanguageServer for Backend {
         if let symbol_table::SymbolKind::Union(u) = &symbol.kind {
             for variant in &u.variants {
                 if variant.location.range.contains(position) {
+                    let base_name = utils::type_utils::extract_base_type_name(&variant.name);
                     if let Some(variant_type_sym) = self
                         .symbol_map
                         .iter()
-                        .find_map(|st| st.value().get(&variant.name).cloned())
+                        .find_map(|st| st.value().get(base_name).cloned())
                     {
                         return Ok(Some(GotoDefinitionResponse::Scalar(
                             variant_type_sym.info.location.clone(),
@@ -252,11 +258,14 @@ impl LanguageServer for Backend {
         }
 
         if let symbol_table::SymbolKind::Field(f) = &symbol.kind {
-            if f.type_range.contains(position) {
+            let inner_type_range =
+                utils::type_utils::calculate_inner_type_range(f.type_range, &f.type_name);
+            if inner_type_range.contains(position) {
+                let base_type_name = utils::type_utils::extract_base_type_name(&f.type_name);
                 if let Some(field_type_sym) = self
                     .symbol_map
                     .iter()
-                    .find_map(|st| st.value().get(&f.type_name).cloned())
+                    .find_map(|st| st.value().get(base_type_name).cloned())
                 {
                     return Ok(Some(GotoDefinitionResponse::Scalar(
                         field_type_sym.info.location.clone(),
