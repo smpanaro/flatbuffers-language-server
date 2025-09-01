@@ -41,6 +41,8 @@ pub struct Table {
 #[derive(Debug, Clone)]
 pub struct Struct {
     pub fields: Vec<Symbol>,
+    pub size: usize,
+    pub alignment: usize,
 }
 
 #[derive(Debug, Clone)]
@@ -134,15 +136,19 @@ impl Symbol {
 
         if let Some(doc) = &self.info.documentation {
             if !doc.is_empty() {
-                markdown.push_str(
-                    "
-
----
-
-",
-                );
+                markdown.push_str("\n\n---\n\n");
                 markdown.push_str(doc);
             }
+        }
+
+        if let SymbolKind::Struct(s) = &self.kind {
+            markdown.push_str(
+                format!(
+                    "\n\n---\n\nSize: {} bytes\n\nAlignment: {} bytes",
+                    s.size, s.alignment
+                )
+                .as_str(),
+            );
         }
 
         markdown
@@ -184,9 +190,7 @@ fn fields_markdown(fields: &[Symbol]) -> String {
         return "".to_string();
     }
     format!(
-        "
-{}
-",
+        "\n{}\n",
         fields
             .iter()
             .filter_map(|field| {
@@ -197,10 +201,7 @@ fn fields_markdown(fields: &[Symbol]) -> String {
                 }
             })
             .collect::<Vec<String>>()
-            .join(
-                "
-"
-            )
+            .join("\n")
     )
 }
 

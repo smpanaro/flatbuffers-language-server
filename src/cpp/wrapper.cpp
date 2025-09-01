@@ -105,7 +105,7 @@ int get_num_structs(struct FlatbuffersParser* parser) {
 }
 
 struct StructDefinitionInfo get_struct_info(struct FlatbuffersParser* parser, int index) {
-    struct StructDefinitionInfo info = { nullptr, nullptr, false, 0, 0 };
+    struct StructDefinitionInfo info = { nullptr, nullptr, false, 0, 0, 0, 0 };
     if (!parser || index < 0 || static_cast<size_t>(index) >= parser->impl.structs_.vec.size()) {
         return info;
     }
@@ -115,6 +115,8 @@ struct StructDefinitionInfo get_struct_info(struct FlatbuffersParser* parser, in
     info.is_table = !struct_def->fixed;
     info.line = struct_def->decl_line - 1;
     info.col = struct_def->decl_col;
+    info.bytesize = struct_def->bytesize;
+    info.minalign = struct_def->minalign;
     return info;
 }
 
@@ -235,8 +237,8 @@ struct FieldDefinitionInfo get_field_info(struct FlatbuffersParser* parser, int 
     info.line = field_def->decl_line - 1;
     info.col = field_def->decl_col;
     info.type_line = field_def->type_decl_line - 1;
-    
-    // For vectors and arrays, type_decl_col points to start of type name, 
+
+    // For vectors and arrays, type_decl_col points to start of type name,
     // but we want it to point to the end like everything else
     if (field_def->value.type.base_type == flatbuffers::BASE_TYPE_VECTOR ||
         field_def->value.type.base_type == flatbuffers::BASE_TYPE_ARRAY) {
@@ -245,7 +247,7 @@ struct FieldDefinitionInfo get_field_info(struct FlatbuffersParser* parser, int 
     } else {
         info.type_col = field_def->type_decl_col;
     }
-    
+
     return info;
 }
 

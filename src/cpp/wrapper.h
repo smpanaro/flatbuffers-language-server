@@ -1,6 +1,7 @@
 #pragma once
 
 #include <stdbool.h>
+#include <stddef.h>
 
 #ifdef __cplusplus
 extern "C" {
@@ -16,6 +17,8 @@ struct StructDefinitionInfo {
     bool is_table;
     unsigned line;
     unsigned col;
+    size_t bytesize; // struct only
+    size_t minalign; // struct only
 };
 
 // A struct to pass enum/union definition information

@@ -394,7 +394,7 @@ struct FieldDef : public Definition {
   // and vice-versa.
   FieldDef *sibling_union_field;
   int type_decl_line;
-  int type_decl_col; // FIXME: This is end col for all except [uint] (arrays)
+  int type_decl_col; // NOTE: This is end col for all except vectors and arrays
 };
 
 struct StructDef : public Definition {

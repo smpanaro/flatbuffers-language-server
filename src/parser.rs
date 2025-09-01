@@ -220,7 +220,11 @@ impl Parser for FlatcFFIParser {
                     let symbol_kind = if def_info.is_table {
                         SymbolKind::Table(Table { fields })
                     } else {
-                        SymbolKind::Struct(Struct { fields })
+                        SymbolKind::Struct(Struct {
+                            fields,
+                            size: def_info.bytesize as usize,
+                            alignment: def_info.minalign as usize,
+                        })
                     };
 
                     let mut doc_buffer = vec![0u8; 2048];
