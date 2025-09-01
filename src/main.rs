@@ -166,6 +166,7 @@ impl LanguageServer for Backend {
                 )),
                 hover_provider: Some(HoverProviderCapability::Simple(true)),
                 definition_provider: Some(OneOf::Left(true)),
+                references_provider: Some(OneOf::Left(true)),
                 ..ServerCapabilities::default()
             },
         })
@@ -278,6 +279,145 @@ impl LanguageServer for Backend {
         Ok(Some(GotoDefinitionResponse::Scalar(
             symbol.info.location.clone(),
         )))
+    }
+
+    async fn references(&self, params: ReferenceParams) -> Result<Option<Vec<Location>>> {
+        let start = Instant::now();
+
+        let uri = params.text_document_position.text_document.uri;
+        let position = params.text_document_position.position;
+
+        let Some(st) = self.symbol_map.get(&uri.to_string()) else {
+            return Ok(None);
+        };
+
+        let Some(symbol) = st.value().find_in_table(uri.clone(), position) else {
+            return Ok(None);
+        };
+
+        let mut references = Vec::new();
+
+        // Get the target symbol name based on what we're hovering over
+        let target_name = if let symbol_table::SymbolKind::Union(u) = &symbol.kind {
+            let mut result = None;
+            for variant in &u.variants {
+                if variant.location.range.contains(position) {
+                    let base_name = utils::type_utils::extract_base_type_name(&variant.name);
+                    result = Some(base_name.to_string());
+                    break;
+                }
+            }
+            result.or_else(|| Some(symbol.info.name.clone()))
+        } else if let symbol_table::SymbolKind::Field(f) = &symbol.kind {
+            let inner_type_range =
+                utils::type_utils::calculate_inner_type_range(f.type_range, &f.type_name);
+            if inner_type_range.contains(position) {
+                let base_type_name = utils::type_utils::extract_base_type_name(&f.type_name);
+                Some(base_type_name.to_string())
+            } else {
+                Some(symbol.info.name.clone())
+            }
+        } else {
+            Some(symbol.info.name.clone())
+        };
+
+        let Some(target_name) = target_name else {
+            return Ok(None);
+        };
+
+        // Find all references to this symbol across all files
+        for entry in self.symbol_map.iter() {
+            let file_uri_str = entry.key();
+            let symbol_table = entry.value();
+            let file_uri = Url::parse(file_uri_str).unwrap_or_else(|_| uri.clone());
+
+            for symbol in symbol_table.values() {
+                // Only process symbols that actually belong to this file
+                if symbol.info.location.uri != file_uri {
+                    continue;
+                }
+
+                // Check nested fields in tables and structs
+                if let symbol_table::SymbolKind::Table(t) = &symbol.kind {
+                    for field in &t.fields {
+                        if let symbol_table::SymbolKind::Field(f) = &field.kind {
+                            let base_type_name =
+                                utils::type_utils::extract_base_type_name(&f.type_name);
+                            if base_type_name == target_name {
+                                let inner_type_range =
+                                    utils::type_utils::calculate_inner_type_range(
+                                        f.type_range,
+                                        &f.type_name,
+                                    );
+                                references.push(Location {
+                                    uri: file_uri.clone(),
+                                    range: inner_type_range,
+                                });
+                            }
+                        }
+                    }
+                }
+
+                if let symbol_table::SymbolKind::Struct(s) = &symbol.kind {
+                    for field in &s.fields {
+                        if let symbol_table::SymbolKind::Field(f) = &field.kind {
+                            let base_type_name =
+                                utils::type_utils::extract_base_type_name(&f.type_name);
+                            if base_type_name == target_name {
+                                let inner_type_range =
+                                    utils::type_utils::calculate_inner_type_range(
+                                        f.type_range,
+                                        &f.type_name,
+                                    );
+                                references.push(Location {
+                                    uri: file_uri.clone(),
+                                    range: inner_type_range,
+                                });
+                            }
+                        }
+                    }
+                }
+
+                if let symbol_table::SymbolKind::Union(u) = &symbol.kind {
+                    for variant in &u.variants {
+                        let base_name = utils::type_utils::extract_base_type_name(&variant.name);
+                        if base_name == target_name {
+                            references.push(Location {
+                                uri: file_uri.clone(),
+                                range: variant.location.range,
+                            });
+                        }
+                    }
+                }
+            }
+        }
+
+        // Include the definition itself if requested
+        if params.context.include_declaration {
+            if let Some(def_symbol) = self
+                .symbol_map
+                .iter()
+                .find_map(|entry| entry.value().get(&target_name).cloned())
+            {
+                references.push(def_symbol.info.location);
+            }
+        }
+
+        let elapsed = start.elapsed();
+        info!(
+            "references in {}ms: {} L{}C{} -> {} refs",
+            elapsed.as_millis(),
+            &uri.path(),
+            position.line + 1,
+            position.character + 1,
+            references.len()
+        );
+
+        Ok(if references.is_empty() {
+            None
+        } else {
+            Some(references)
+        })
     }
 }
 
