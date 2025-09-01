@@ -22,7 +22,7 @@ pub enum SymbolKind {
     Enum(Enum),
     Field(Field),
     Union(Union),
-    // ... other kinds like EnumVariant, etc. will be added later
+    RootType(RootType),
 }
 
 // Common information for all symbols
@@ -66,6 +66,11 @@ pub struct UnionVariant {
 #[derive(Debug, Clone)]
 pub struct Union {
     pub variants: Vec<UnionVariant>,
+}
+
+#[derive(Debug, Clone)]
+pub struct RootType {
+    pub name: String,
 }
 
 #[derive(Debug, Clone)]
@@ -130,6 +135,7 @@ impl Symbol {
                     format!("enum {} {{{}}}", self.info.name, e.variants_markdown()),
                 SymbolKind::Union(u) =>
                     format!("union {} {{{}}}", self.info.name, u.variants_markdown()),
+                SymbolKind::RootType(r) => format!("root_type {};", r.name),
                 SymbolKind::Field(f) => format!("{}: {}", self.info.name, f.type_name),
             }
         );

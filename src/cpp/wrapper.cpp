@@ -165,6 +165,22 @@ struct EnumValDefinitionInfo get_enum_val_info(struct FlatbuffersParser* parser,
     return info;
 }
 
+bool has_root_type(struct FlatbuffersParser* parser) {
+    if (!parser) return false;
+    return parser->impl.root_struct_def_ != nullptr && parser->impl.root_type_loc_ != nullptr;;
+}
+
+struct RootTypeDefinitionInfo get_root_type_info(struct FlatbuffersParser* parser) {
+    struct RootTypeDefinitionInfo info = { nullptr, nullptr, 0, 0};
+    if (!parser || !has_root_type(parser)) return info;
+    auto root_def = parser->impl.root_struct_def_;
+    info.name = root_def->name.c_str();
+    info.file = parser->impl.root_type_loc_->filename_.c_str();
+    info.line = parser->impl.root_type_loc_->line_ - 1;
+    info.col = parser->impl.root_type_loc_->col_;
+    return info;
+}
+
 // Functions for included files
 int get_num_included_files(struct FlatbuffersParser* parser) {
     if (!parser) return 0;

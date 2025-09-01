@@ -1,5 +1,5 @@
 use crate::symbol_table::{
-    Enum, Field, Struct, Symbol, SymbolInfo, SymbolKind, SymbolTable, Table, Union,
+    Enum, Field, RootType, Struct, Symbol, SymbolInfo, SymbolKind, SymbolTable, Table, Union,
 };
 use log::{debug, error};
 use once_cell::sync::Lazy;
@@ -367,6 +367,24 @@ impl Parser for FlatcFFIParser {
                         documentation,
                     );
                     st.insert(symbol);
+                }
+
+                if ffi::has_root_type(parser_ptr) {
+                    let root_def = ffi::get_root_type_info(parser_ptr);
+                    let name = CStr::from_ptr(root_def.name).to_string_lossy().into_owned();
+                    let file = CStr::from_ptr(root_def.file).to_string_lossy().into_owned();
+                    if let Some(file_uri) = Url::from_file_path(&file).ok() {
+                        let (mut symbol, _) = create_symbol(
+                            &file_uri,
+                            name.clone(),
+                            root_def.line,
+                            root_def.col,
+                            SymbolKind::RootType(RootType { name }),
+                            None,
+                        );
+                        symbol.info.name = "root_type".to_string(); // TODO: Handle multiple root types (if that is possible).
+                        st.insert(symbol);
+                    }
                 }
 
                 // Second Pass: Semantic Analysis

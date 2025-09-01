@@ -2922,11 +2922,13 @@ CheckedError Parser::ParseService(const char *filename) {
   return NoError();
 }
 
-bool Parser::SetRootType(const char *name) {
+bool Parser::SetRootType(const char *name, RootTypeLoc *loc) {
   root_struct_def_ = LookupStruct(name);
-  if (!root_struct_def_)
+  if (!root_struct_def_) {
     root_struct_def_ =
         LookupStruct(current_namespace_->GetFullyQualifiedName(name));
+    root_type_loc_ = loc;
+  }
   return root_struct_def_ != nullptr;
 }
 
@@ -3792,10 +3794,11 @@ CheckedError Parser::DoParse(const char *source, const char **include_paths,
     } else if (IsIdent("root_type")) {
       NEXT();
       auto root_type = attribute_;
+      auto root_loc = new RootTypeLoc{source_filename, line_, static_cast<int>(CursorPosition())};
       EXPECT(kTokenIdentifier);
       ECHECK(ParseNamespacing(&root_type, nullptr));
       if (opts.root_type.empty()) {
-        if (!SetRootType(root_type.c_str()))
+        if (!SetRootType(root_type.c_str(), root_loc))
           return Error("unknown root type: " + root_type);
         if (root_struct_def_->fixed) return Error("root type must be a table");
       }

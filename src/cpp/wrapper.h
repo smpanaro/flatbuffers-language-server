@@ -47,6 +47,13 @@ struct FieldDefinitionInfo {
     unsigned type_col;
 };
 
+struct RootTypeDefinitionInfo {
+    const char* name;
+    const char* file;
+    unsigned line;
+    unsigned col;
+};
+
 // Parses a schema and returns a pointer to the Parser object.
 struct FlatbuffersParser* parse_schema(const char* schema_content, const char* filename);
 
@@ -70,6 +77,10 @@ struct EnumDefinitionInfo get_enum_info(struct FlatbuffersParser* parser, int in
 // Functions for enum values
 int get_num_enum_vals(struct FlatbuffersParser* parser, int enum_index);
 struct EnumValDefinitionInfo get_enum_val_info(struct FlatbuffersParser* parser, int enum_index, int val_index);
+
+// Functions for root type
+bool has_root_type(struct FlatbuffersParser* parser);
+struct RootTypeDefinitionInfo get_root_type_info(struct FlatbuffersParser* parser);
 
 // Functions for fields
 int get_num_fields(struct FlatbuffersParser* parser, int struct_index);

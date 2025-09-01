@@ -24,6 +24,7 @@ struct Backend {
     client: Client,
     document_map: DashMap<String, String>,
     // TODO: This is definitely the wrong data structure since flatc parses all included files automatically.
+    // (However consider that each parse can only return a single root type.)
     symbol_map: DashMap<String, SymbolTable>,
     parser: FlatcFFIParser,
 }
@@ -114,7 +115,7 @@ impl Backend {
                             range: Some(variant.location.range),
                         }));
                     }
-                    return Ok(None); // builtins
+                    return Ok(None);
                 }
             }
         }
@@ -139,6 +140,24 @@ impl Backend {
                 }
                 return Ok(None); // builtins
             }
+        }
+
+        if let symbol_table::SymbolKind::RootType(rt) = &symbol.kind {
+            let base_name = utils::type_utils::extract_base_type_name(&rt.name);
+            if let Some(root_decl) = self
+                .symbol_map
+                .iter()
+                .find_map(|st| st.value().get(base_name).cloned())
+            {
+                return Ok(Some(Hover {
+                    contents: HoverContents::Markup(MarkupContent {
+                        kind: MarkupKind::Markdown,
+                        value: root_decl.hover_markdown(),
+                    }),
+                    range: Some(symbol.info.location.range),
+                }));
+            }
+            return Ok(None);
         }
 
         Ok(Some(Hover {
@@ -253,7 +272,7 @@ impl LanguageServer for Backend {
                             variant_type_sym.info.location.clone(),
                         )));
                     }
-                    return Ok(None); // builtins
+                    return Ok(None);
                 }
             }
         }
@@ -274,6 +293,20 @@ impl LanguageServer for Backend {
                 }
                 return Ok(None); // builtins
             }
+        }
+
+        if let symbol_table::SymbolKind::RootType(rt) = &symbol.kind {
+            let base_name = utils::type_utils::extract_base_type_name(&rt.name);
+            if let Some(root_decl) = self
+                .symbol_map
+                .iter()
+                .find_map(|st| st.value().get(base_name).cloned())
+            {
+                return Ok(Some(GotoDefinitionResponse::Scalar(
+                    root_decl.info.location.clone(),
+                )));
+            }
+            return Ok(None);
         }
 
         Ok(Some(GotoDefinitionResponse::Scalar(
@@ -317,6 +350,8 @@ impl LanguageServer for Backend {
             } else {
                 Some(symbol.info.name.clone())
             }
+        } else if let symbol_table::SymbolKind::RootType(rt) = &symbol.kind {
+            Some(rt.name.clone())
         } else {
             Some(symbol.info.name.clone())
         };
@@ -387,6 +422,16 @@ impl LanguageServer for Backend {
                                 range: variant.location.range,
                             });
                         }
+                    }
+                }
+
+                if let symbol_table::SymbolKind::RootType(rt) = &symbol.kind {
+                    let base_name = utils::type_utils::extract_base_type_name(&rt.name);
+                    if base_name == target_name {
+                        references.push(Location {
+                            uri: file_uri.clone(),
+                            range: symbol.info.location.range,
+                        });
                     }
                 }
             }

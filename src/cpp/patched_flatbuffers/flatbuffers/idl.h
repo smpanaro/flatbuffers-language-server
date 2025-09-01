@@ -602,6 +602,13 @@ inline bool EqualByName(const Type &a, const Type &b) {
            a.enum_def->name == b.enum_def->name));
 }
 
+// Location of a root_type statement;
+struct RootTypeLoc {
+    std::string filename_;
+    int line_;
+    int col_;
+};
+
 struct RPCCall : public Definition {
   Offset<reflection::RPCCall> Serialize(FlatBufferBuilder *builder,
                                         const Parser &parser) const;
@@ -971,6 +978,7 @@ class Parser : public ParserState {
         empty_namespace_(nullptr),
         flex_builder_(256, flexbuffers::BUILDER_FLAG_SHARE_ALL),
         root_struct_def_(nullptr),
+        root_type_loc_(nullptr),
         opts(options),
         uses_flexbuffers_(false),
         has_warning_(false),
@@ -1028,6 +1036,7 @@ class Parser : public ParserState {
     for (auto it = namespaces_.begin(); it != namespaces_.end(); ++it) {
       delete *it;
     }
+    delete root_type_loc_;
   }
 
   // Parse the string containing either schema or JSON data, which will
@@ -1050,7 +1059,7 @@ class Parser : public ParserState {
   std::ptrdiff_t BytesConsumed() const;
 
   // Set the root type. May override the one set in the schema.
-  bool SetRootType(const char *name);
+  bool SetRootType(const char *name, RootTypeLoc *loc);
 
   // Mark all definitions as already having code generated.
   void MarkGenerated();
@@ -1225,6 +1234,7 @@ class Parser : public ParserState {
   flexbuffers::Builder flex_builder_;
   flexbuffers::Reference flex_root_;
   StructDef *root_struct_def_;
+  RootTypeLoc *root_type_loc_;
   std::string file_identifier_;
   std::string file_extension_;
 
