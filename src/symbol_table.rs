@@ -22,7 +22,7 @@ pub enum SymbolKind {
     Enum(Enum),
     Field(Field),
     Union(Union),
-    RootType(RootType),
+    Scalar,
 }
 
 // Common information for all symbols
@@ -66,11 +66,6 @@ pub struct UnionVariant {
 #[derive(Debug, Clone)]
 pub struct Union {
     pub variants: Vec<UnionVariant>,
-}
-
-#[derive(Debug, Clone)]
-pub struct RootType {
-    pub name: String,
 }
 
 #[derive(Debug, Clone)]
@@ -135,7 +130,7 @@ impl Symbol {
                     format!("enum {} {{{}}}", self.info.name, e.variants_markdown()),
                 SymbolKind::Union(u) =>
                     format!("union {} {{{}}}", self.info.name, u.variants_markdown()),
-                SymbolKind::RootType(r) => format!("root_type {};", r.name),
+                SymbolKind::Scalar => format!("{} // builtin", self.info.name),
                 SymbolKind::Field(f) => format!("{}: {}", self.info.name, f.type_name),
             }
         );
@@ -180,14 +175,8 @@ impl SymbolTable {
         self.0.values()
     }
 
-    pub fn get(&self, key: &str) -> Option<&Symbol> {
-        self.0.get(key)
-    }
-
-    pub fn find_in_table<'a>(&'a self, uri: Url, pos: Position) -> Option<&'a Symbol> {
+    pub fn into_inner(self) -> HashMap<String, Symbol> {
         self.0
-            .values()
-            .find_map(|symbol| symbol.find_symbol(&uri, pos))
     }
 }
 

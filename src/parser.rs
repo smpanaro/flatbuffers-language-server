@@ -1,6 +1,7 @@
 use crate::symbol_table::{
-    Enum, Field, RootType, Struct, Symbol, SymbolInfo, SymbolKind, SymbolTable, Table, Union,
+    Enum, Field, Struct, Symbol, SymbolInfo, SymbolKind, SymbolTable, Table, Union,
 };
+use crate::workspace::RootTypeInfo;
 use log::{debug, error};
 use once_cell::sync::Lazy;
 use regex::Regex;
@@ -18,7 +19,12 @@ pub trait Parser {
         &self,
         uri: &Url,
         content: &str,
-    ) -> (Vec<Diagnostic>, Option<SymbolTable>, Vec<String>);
+    ) -> (
+        Vec<Diagnostic>,
+        Option<SymbolTable>,
+        Vec<String>,
+        Option<RootTypeInfo>,
+    );
 }
 
 #[derive(Debug)]
@@ -84,10 +90,16 @@ impl Parser for FlatcFFIParser {
         &self,
         uri: &Url,
         content: &str,
-    ) -> (Vec<Diagnostic>, Option<SymbolTable>, Vec<String>) {
+    ) -> (
+        Vec<Diagnostic>,
+        Option<SymbolTable>,
+        Vec<String>,
+        Option<RootTypeInfo>,
+    ) {
         let scalar_types: HashSet<_> = [
-            "bool", "byte", "ubyte", "short", "ushort", "int", "uint", "float", "long", "ulong",
-            "double", "string",
+            "bool", "byte", "ubyte", "int8", "uint8", "short", "ushort", "int16", "uint16", "int",
+            "uint", "int32", "uint32", "float", "float32", "long", "ulong", "int64", "uint64",
+            "double", "float64", "string",
         ]
         .iter()
         .cloned()
@@ -95,19 +107,20 @@ impl Parser for FlatcFFIParser {
 
         let c_content = match CString::new(content) {
             Ok(s) => s,
-            Err(_) => return (vec![], None, vec![]), // Content has null bytes
+            Err(_) => return (vec![], None, vec![], None), // Content has null bytes
         };
         let c_filename = CString::new(uri.to_file_path().unwrap().to_str().unwrap()).unwrap();
 
         let mut diagnostics = Vec::new();
         let mut symbol_table: Option<SymbolTable> = None;
         let mut included_files = Vec::new();
+        let mut root_type_info: Option<RootTypeInfo> = None;
 
         // Unsafe block to call C++ functions
         unsafe {
             let parser_ptr = ffi::parse_schema(c_content.as_ptr(), c_filename.as_ptr());
             if parser_ptr.is_null() {
-                return (diagnostics, None, vec![]);
+                return (diagnostics, None, vec![], None);
             }
 
             if ffi::is_parser_success(parser_ptr) {
@@ -374,16 +387,20 @@ impl Parser for FlatcFFIParser {
                     let name = CStr::from_ptr(root_def.name).to_string_lossy().into_owned();
                     let file = CStr::from_ptr(root_def.file).to_string_lossy().into_owned();
                     if let Some(file_uri) = Url::from_file_path(&file).ok() {
-                        let (mut symbol, _) = create_symbol(
-                            &file_uri,
-                            name.clone(),
-                            root_def.line,
-                            root_def.col,
-                            SymbolKind::RootType(RootType { name }),
-                            None,
-                        );
-                        symbol.info.name = "root_type".to_string(); // TODO: Handle multiple root types (if that is possible).
-                        st.insert(symbol);
+                        let location = Location {
+                            uri: file_uri,
+                            range: Range::new(
+                                Position::new(
+                                    root_def.line,
+                                    root_def.col - (name.chars().count() as u32),
+                                ),
+                                Position::new(root_def.line, root_def.col),
+                            ),
+                        };
+                        root_type_info = Some(RootTypeInfo {
+                            location,
+                            type_name: name,
+                        });
                     }
                 }
 
@@ -461,6 +478,6 @@ impl Parser for FlatcFFIParser {
             ffi::delete_parser(parser_ptr);
         }
 
-        (diagnostics, symbol_table, included_files)
+        (diagnostics, symbol_table, included_files, root_type_info)
     }
 }

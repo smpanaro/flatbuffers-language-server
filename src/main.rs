@@ -1,3 +1,4 @@
+use crate::symbol_table::Symbol;
 use dashmap::DashMap;
 use log::{debug, error, info};
 use std::collections::HashSet;
@@ -9,7 +10,7 @@ use tower_lsp::{Client, LanguageServer, LspService, Server};
 use crate::ext::range::RangeExt;
 use crate::lsp_logger::LspLogger;
 use crate::parser::{FlatcFFIParser, Parser};
-use crate::symbol_table::SymbolTable;
+use crate::workspace::Workspace;
 use tokio::fs;
 
 mod ext;
@@ -18,15 +19,70 @@ mod lsp_logger;
 mod parser;
 mod symbol_table;
 mod utils;
+mod workspace;
 
 #[derive(Debug)]
 struct Backend {
     client: Client,
     document_map: DashMap<String, String>,
-    // TODO: This is definitely the wrong data structure since flatc parses all included files automatically.
-    // (However consider that each parse can only return a single root type.)
-    symbol_map: DashMap<String, SymbolTable>,
+    workspace: Workspace,
     parser: FlatcFFIParser,
+}
+
+/// Represents what symbol was found at a given location, and what it resolves to.
+#[derive(Debug, Clone)]
+struct ResolvedSymbol {
+    /// The symbol that is the ultimate "target" of the hover or go-to-definition.
+    target: Symbol,
+    /// The specific range of the text that was hovered or clicked (e.g., the range of a field's type).
+    range: Range,
+    /// The name of the symbol to use when finding references.
+    ref_name: String,
+}
+
+fn populate_builtins(workspace: &mut Workspace) {
+    let scalar_types = [
+        ("bool", "8-bit boolean"),
+        ("byte", "8-bit signed integer"),
+        ("ubyte", "8-bit unsigned integer"),
+        ("short", "16-bit signed integer"),
+        ("int16", "16-bit signed integer"),
+        ("ushort", "16-bit unsigned integer"),
+        ("uint16", "16-bit unsigned integer"),
+        ("int", "32-bit signed integer"),
+        ("int32", "32-bit signed integer"),
+        ("uint", "32-bit unsigned integer"),
+        ("uint32", "32-bit unsigned integer"),
+        ("float", "32-bit single precision floating point"),
+        ("float32", "32-bit single precision floating point"),
+        ("long", "64-bit signed integer"),
+        ("int64", "64-bit signed integer"),
+        ("ulong", "64-bit unsigned integer"),
+        ("uint64", "64-bit unsigned integer"),
+        ("double", "64-bit double precision floating point"),
+        ("float64", "64-bit double precision floating point"),
+        (
+            "string",
+            "UTF-8 or 7-bit ASCII encoded string. For other text encodings or general binary data use vectors (`[byte]` or `[ubyte]`) instead.\n\nStored as zero-terminated string, prefixed by length.",
+        ),
+    ];
+
+    for (type_name, doc) in scalar_types {
+        let symbol = Symbol {
+            info: symbol_table::SymbolInfo {
+                name: type_name.to_string(),
+                location: Location {
+                    uri: Url::parse("builtin:scalar").unwrap(),
+                    range: Range::default(),
+                },
+                documentation: Some(doc.to_string()),
+            },
+            kind: symbol_table::SymbolKind::Scalar,
+        };
+        workspace
+            .builtin_symbols
+            .insert(type_name.to_string(), symbol);
+    }
 }
 
 impl Backend {
@@ -56,14 +112,32 @@ impl Backend {
             self.document_map.insert(uri.to_string(), content.clone());
 
             let start_time = Instant::now();
-            let (diagnostics, symbol_table, included_files) = self.parser.parse(&uri, &content);
+            let (diagnostics, symbol_table, included_files, root_type_info) =
+                self.parser.parse(&uri, &content);
             let elapsed_time = start_time.elapsed();
             error!("Parsed in {}ms: {}", elapsed_time.as_millis(), uri);
 
+            // Clear old symbols for this file
+            if let Some((_, old_symbol_keys)) = self.workspace.file_definitions.remove(&uri) {
+                for key in old_symbol_keys {
+                    self.workspace.symbols.remove(&key);
+                }
+            }
+            self.workspace.root_types.remove(&uri);
+
             if let Some(st) = symbol_table {
-                self.symbol_map.insert(uri.to_string(), st);
-            } else {
-                self.symbol_map.remove(&uri.to_string());
+                let symbol_map = st.into_inner();
+                let new_symbol_keys: Vec<String> = symbol_map.keys().cloned().collect();
+                for (key, symbol) in symbol_map {
+                    self.workspace.symbols.insert(key, symbol);
+                }
+                self.workspace
+                    .file_definitions
+                    .insert(uri.clone(), new_symbol_keys);
+            }
+
+            if let Some(rti) = root_type_info {
+                self.workspace.root_types.insert(uri.clone(), rti);
             }
 
             self.client
@@ -85,88 +159,83 @@ impl Backend {
         }
     }
 
-    async fn on_change(&self, uri: Url, text: String) {
-        self.parse_and_discover(uri, Some(text)).await;
-    }
-
-    async fn on_hover(&self, uri: &Url, position: Position) -> Result<Option<Hover>> {
-        let Some(st) = self.symbol_map.get(&uri.to_string()) else {
-            return Ok(None);
-        };
-
-        let Some(symbol) = st.value().find_in_table(uri.clone(), position) else {
-            return Ok(None);
-        };
-
-        if let symbol_table::SymbolKind::Union(u) = &symbol.kind {
-            for variant in &u.variants {
-                if variant.location.range.contains(position) {
-                    let base_name = utils::type_utils::extract_base_type_name(&variant.name);
-                    if let Some(variant_type_sym) = self
-                        .symbol_map
-                        .iter()
-                        .find_map(|st| st.value().get(base_name).cloned())
-                    {
-                        return Ok(Some(Hover {
-                            contents: HoverContents::Markup(MarkupContent {
-                                kind: MarkupKind::Markdown,
-                                value: variant_type_sym.hover_markdown(),
-                            }),
-                            range: Some(variant.location.range),
-                        }));
-                    }
-                    return Ok(None);
+    fn resolve_symbol_at(&self, uri: &Url, position: Position) -> Option<ResolvedSymbol> {
+        // Check if the cursor is on a root_type declaration
+        if let Some(root_type_info) = self.workspace.root_types.get(uri) {
+            if root_type_info.location.range.contains(position) {
+                if let Some(target_symbol) = self.workspace.symbols.get(&root_type_info.type_name) {
+                    return Some(ResolvedSymbol {
+                        target: target_symbol.value().clone(),
+                        range: root_type_info.location.range,
+                        ref_name: root_type_info.type_name.clone(),
+                    });
                 }
             }
         }
 
-        if let symbol_table::SymbolKind::Field(f) = &symbol.kind {
+        let symbol_at_cursor = self
+            .workspace
+            .symbols
+            .iter()
+            .find_map(|entry| entry.value().find_symbol(uri, position).cloned())?;
+
+        if let symbol_table::SymbolKind::Union(u) = &symbol_at_cursor.kind {
+            for variant in &u.variants {
+                if variant.location.range.contains(position) {
+                    let base_name = utils::type_utils::extract_base_type_name(&variant.name);
+                    if let Some(target_symbol) = self.workspace.symbols.get(base_name) {
+                        return Some(ResolvedSymbol {
+                            target: target_symbol.value().clone(),
+                            range: variant.location.range,
+                            ref_name: base_name.to_string(),
+                        });
+                    // Technically this isn't supported currently.
+                    } else if let Some(target_symbol) =
+                        self.workspace.builtin_symbols.get(base_name)
+                    {
+                        return Some(ResolvedSymbol {
+                            target: target_symbol.clone(),
+                            range: variant.location.range,
+                            ref_name: base_name.to_string(),
+                        });
+                    }
+                    return None;
+                }
+            }
+        }
+
+        if let symbol_table::SymbolKind::Field(f) = &symbol_at_cursor.kind {
             let inner_type_range =
                 utils::type_utils::calculate_inner_type_range(f.type_range, &f.type_name);
             if inner_type_range.contains(position) {
                 let base_type_name = utils::type_utils::extract_base_type_name(&f.type_name);
-                if let Some(field_type_sym) = self
-                    .symbol_map
-                    .iter()
-                    .find_map(|st| st.value().get(base_type_name).cloned())
+                if let Some(target_symbol) = self.workspace.symbols.get(base_type_name) {
+                    return Some(ResolvedSymbol {
+                        target: target_symbol.value().clone(),
+                        range: inner_type_range,
+                        ref_name: base_type_name.to_string(),
+                    });
+                } else if let Some(target_symbol) =
+                    self.workspace.builtin_symbols.get(base_type_name)
                 {
-                    return Ok(Some(Hover {
-                        contents: HoverContents::Markup(MarkupContent {
-                            kind: MarkupKind::Markdown,
-                            value: field_type_sym.hover_markdown(),
-                        }),
-                        range: Some(inner_type_range),
-                    }));
+                    return Some(ResolvedSymbol {
+                        target: target_symbol.clone(),
+                        range: inner_type_range,
+                        ref_name: base_type_name.to_string(),
+                    });
                 }
-                return Ok(None); // builtins
+                return None;
             }
         }
 
-        if let symbol_table::SymbolKind::RootType(rt) = &symbol.kind {
-            let base_name = utils::type_utils::extract_base_type_name(&rt.name);
-            if let Some(root_decl) = self
-                .symbol_map
-                .iter()
-                .find_map(|st| st.value().get(base_name).cloned())
-            {
-                return Ok(Some(Hover {
-                    contents: HoverContents::Markup(MarkupContent {
-                        kind: MarkupKind::Markdown,
-                        value: root_decl.hover_markdown(),
-                    }),
-                    range: Some(symbol.info.location.range),
-                }));
-            }
-            return Ok(None);
-        }
-
-        Ok(Some(Hover {
-            contents: HoverContents::Markup(MarkupContent {
-                kind: MarkupKind::Markdown,
-                value: symbol.hover_markdown(),
-            }),
-            range: Some(symbol.info.location.range),
-        }))
+        // Default case: the symbol at cursor is the target.
+        let range = symbol_at_cursor.info.location.range;
+        let ref_name = symbol_at_cursor.info.name.clone();
+        Some(ResolvedSymbol {
+            target: symbol_at_cursor,
+            range,
+            ref_name,
+        })
     }
 }
 
@@ -202,15 +271,15 @@ impl LanguageServer for Backend {
 
     async fn did_open(&self, params: DidOpenTextDocumentParams) {
         debug!("Opened: {}", params.text_document.uri);
-        self.on_change(params.text_document.uri, params.text_document.text)
+        self.parse_and_discover(params.text_document.uri, Some(params.text_document.text))
             .await;
     }
 
     async fn did_change(&self, mut params: DidChangeTextDocumentParams) {
         debug!("Changed: {}", params.text_document.uri);
-        self.on_change(
+        self.parse_and_discover(
             params.text_document.uri,
-            params.content_changes.remove(0).text,
+            Some(params.content_changes.remove(0).text),
         )
         .await;
     }
@@ -219,8 +288,18 @@ impl LanguageServer for Backend {
         debug!("closed: {}", params.text_document.uri);
         self.document_map
             .remove(&params.text_document.uri.to_string());
-        self.symbol_map
-            .remove(&params.text_document.uri.to_string());
+
+        // Remove symbols defined in the closed file
+        if let Some((_, old_symbol_keys)) = self
+            .workspace
+            .file_definitions
+            .remove(&params.text_document.uri)
+        {
+            for key in old_symbol_keys {
+                self.workspace.symbols.remove(&key);
+            }
+        }
+
         self.client
             .publish_diagnostics(params.text_document.uri, vec![], None)
             .await;
@@ -228,10 +307,20 @@ impl LanguageServer for Backend {
 
     async fn hover(&self, params: HoverParams) -> Result<Option<Hover>> {
         let start = Instant::now();
-
         let uri = params.text_document_position_params.text_document.uri;
         let pos = params.text_document_position_params.position;
-        let res = self.on_hover(&uri, pos).await;
+
+        let Some(resolved) = self.resolve_symbol_at(&uri, pos) else {
+            return Ok(None);
+        };
+
+        let res = Ok(Some(Hover {
+            contents: HoverContents::Markup(MarkupContent {
+                kind: MarkupKind::Markdown,
+                value: resolved.target.hover_markdown(),
+            }),
+            range: Some(resolved.range),
+        }));
 
         let elapsed = start.elapsed();
         info!(
@@ -241,7 +330,7 @@ impl LanguageServer for Backend {
             pos.line + 1,
             pos.character + 1
         );
-        return res;
+        res
     }
 
     async fn goto_definition(
@@ -251,66 +340,16 @@ impl LanguageServer for Backend {
         let uri = params.text_document_position_params.text_document.uri;
         let position = params.text_document_position_params.position;
 
-        let Some(st) = self.symbol_map.get(&uri.to_string()) else {
+        let Some(resolved) = self.resolve_symbol_at(&uri, position) else {
             return Ok(None);
         };
 
-        let Some(symbol) = st.value().find_in_table(uri, position) else {
-            return Ok(None);
-        };
-
-        if let symbol_table::SymbolKind::Union(u) = &symbol.kind {
-            for variant in &u.variants {
-                if variant.location.range.contains(position) {
-                    let base_name = utils::type_utils::extract_base_type_name(&variant.name);
-                    if let Some(variant_type_sym) = self
-                        .symbol_map
-                        .iter()
-                        .find_map(|st| st.value().get(base_name).cloned())
-                    {
-                        return Ok(Some(GotoDefinitionResponse::Scalar(
-                            variant_type_sym.info.location.clone(),
-                        )));
-                    }
-                    return Ok(None);
-                }
-            }
-        }
-
-        if let symbol_table::SymbolKind::Field(f) = &symbol.kind {
-            let inner_type_range =
-                utils::type_utils::calculate_inner_type_range(f.type_range, &f.type_name);
-            if inner_type_range.contains(position) {
-                let base_type_name = utils::type_utils::extract_base_type_name(&f.type_name);
-                if let Some(field_type_sym) = self
-                    .symbol_map
-                    .iter()
-                    .find_map(|st| st.value().get(base_type_name).cloned())
-                {
-                    return Ok(Some(GotoDefinitionResponse::Scalar(
-                        field_type_sym.info.location.clone(),
-                    )));
-                }
-                return Ok(None); // builtins
-            }
-        }
-
-        if let symbol_table::SymbolKind::RootType(rt) = &symbol.kind {
-            let base_name = utils::type_utils::extract_base_type_name(&rt.name);
-            if let Some(root_decl) = self
-                .symbol_map
-                .iter()
-                .find_map(|st| st.value().get(base_name).cloned())
-            {
-                return Ok(Some(GotoDefinitionResponse::Scalar(
-                    root_decl.info.location.clone(),
-                )));
-            }
+        if resolved.target.info.location.uri.scheme() == "builtin" {
             return Ok(None);
         }
 
         Ok(Some(GotoDefinitionResponse::Scalar(
-            symbol.info.location.clone(),
+            resolved.target.info.location.clone(),
         )))
     }
 
@@ -320,117 +359,68 @@ impl LanguageServer for Backend {
         let uri = params.text_document_position.text_document.uri;
         let position = params.text_document_position.position;
 
-        let Some(st) = self.symbol_map.get(&uri.to_string()) else {
+        let Some(resolved) = self.resolve_symbol_at(&uri, position) else {
             return Ok(None);
         };
 
-        let Some(symbol) = st.value().find_in_table(uri.clone(), position) else {
+        if resolved.target.info.location.uri.scheme() == "builtin" {
             return Ok(None);
-        };
+        }
 
+        let target_name = resolved.ref_name;
         let mut references = Vec::new();
 
-        // Get the target symbol name based on what we're hovering over
-        let target_name = if let symbol_table::SymbolKind::Union(u) = &symbol.kind {
-            let mut result = None;
-            for variant in &u.variants {
-                if variant.location.range.contains(position) {
-                    let base_name = utils::type_utils::extract_base_type_name(&variant.name);
-                    result = Some(base_name.to_string());
-                    break;
-                }
-            }
-            result.or_else(|| Some(symbol.info.name.clone()))
-        } else if let symbol_table::SymbolKind::Field(f) = &symbol.kind {
-            let inner_type_range =
-                utils::type_utils::calculate_inner_type_range(f.type_range, &f.type_name);
-            if inner_type_range.contains(position) {
-                let base_type_name = utils::type_utils::extract_base_type_name(&f.type_name);
-                Some(base_type_name.to_string())
-            } else {
-                Some(symbol.info.name.clone())
-            }
-        } else if let symbol_table::SymbolKind::RootType(rt) = &symbol.kind {
-            Some(rt.name.clone())
-        } else {
-            Some(symbol.info.name.clone())
-        };
-
-        let Some(target_name) = target_name else {
-            return Ok(None);
-        };
-
         // Find all references to this symbol across all files
-        for entry in self.symbol_map.iter() {
-            let file_uri_str = entry.key();
-            let symbol_table = entry.value();
-            let file_uri = Url::parse(file_uri_str).unwrap_or_else(|_| uri.clone());
+        for entry in self.workspace.symbols.iter() {
+            let symbol = entry.value();
+            let file_uri = &symbol.info.location.uri;
 
-            for symbol in symbol_table.values() {
-                // Only process symbols that actually belong to this file
-                if symbol.info.location.uri != file_uri {
-                    continue;
-                }
-
-                // Check nested fields in tables and structs
-                if let symbol_table::SymbolKind::Table(t) = &symbol.kind {
-                    for field in &t.fields {
-                        if let symbol_table::SymbolKind::Field(f) = &field.kind {
-                            let base_type_name =
-                                utils::type_utils::extract_base_type_name(&f.type_name);
-                            if base_type_name == target_name {
-                                let inner_type_range =
-                                    utils::type_utils::calculate_inner_type_range(
-                                        f.type_range,
-                                        &f.type_name,
-                                    );
-                                references.push(Location {
-                                    uri: file_uri.clone(),
-                                    range: inner_type_range,
-                                });
-                            }
-                        }
-                    }
-                }
-
-                if let symbol_table::SymbolKind::Struct(s) = &symbol.kind {
-                    for field in &s.fields {
-                        if let symbol_table::SymbolKind::Field(f) = &field.kind {
-                            let base_type_name =
-                                utils::type_utils::extract_base_type_name(&f.type_name);
-                            if base_type_name == target_name {
-                                let inner_type_range =
-                                    utils::type_utils::calculate_inner_type_range(
-                                        f.type_range,
-                                        &f.type_name,
-                                    );
-                                references.push(Location {
-                                    uri: file_uri.clone(),
-                                    range: inner_type_range,
-                                });
-                            }
-                        }
-                    }
-                }
-
-                if let symbol_table::SymbolKind::Union(u) = &symbol.kind {
-                    for variant in &u.variants {
-                        let base_name = utils::type_utils::extract_base_type_name(&variant.name);
-                        if base_name == target_name {
+            // Check nested fields in tables and structs
+            if let symbol_table::SymbolKind::Table(t) = &symbol.kind {
+                for field in &t.fields {
+                    if let symbol_table::SymbolKind::Field(f) = &field.kind {
+                        let base_type_name =
+                            utils::type_utils::extract_base_type_name(&f.type_name);
+                        if base_type_name == target_name {
+                            let inner_type_range = utils::type_utils::calculate_inner_type_range(
+                                f.type_range,
+                                &f.type_name,
+                            );
                             references.push(Location {
                                 uri: file_uri.clone(),
-                                range: variant.location.range,
+                                range: inner_type_range,
                             });
                         }
                     }
                 }
+            }
 
-                if let symbol_table::SymbolKind::RootType(rt) = &symbol.kind {
-                    let base_name = utils::type_utils::extract_base_type_name(&rt.name);
+            if let symbol_table::SymbolKind::Struct(s) = &symbol.kind {
+                for field in &s.fields {
+                    if let symbol_table::SymbolKind::Field(f) = &field.kind {
+                        let base_type_name =
+                            utils::type_utils::extract_base_type_name(&f.type_name);
+                        if base_type_name == target_name {
+                            let inner_type_range = utils::type_utils::calculate_inner_type_range(
+                                f.type_range,
+                                &f.type_name,
+                            );
+                            references.push(Location {
+                                uri: file_uri.clone(),
+                                range: inner_type_range,
+                            });
+                        }
+                    }
+                }
+            }
+
+            if let symbol_table::SymbolKind::Union(u) = &symbol.kind {
+                for variant in &u.variants {
+                    let base_name = utils::type_utils::extract_base_type_name(&variant.name);
                     if base_name == target_name {
                         references.push(Location {
                             uri: file_uri.clone(),
-                            range: symbol.info.location.range,
+                            range: variant.location.range,
                         });
                     }
                 }
@@ -439,12 +429,10 @@ impl LanguageServer for Backend {
 
         // Include the definition itself if requested
         if params.context.include_declaration {
-            if let Some(def_symbol) = self
-                .symbol_map
-                .iter()
-                .find_map(|entry| entry.value().get(&target_name).cloned())
-            {
-                references.push(def_symbol.info.location);
+            if let Some(def_symbol) = self.workspace.symbols.get(&target_name) {
+                if def_symbol.info.location.uri.scheme() != "builtin" {
+                    references.push(def_symbol.info.location.clone());
+                }
             }
         }
 
@@ -478,10 +466,13 @@ async fn main() {
         }
         log::set_max_level(log::LevelFilter::Debug);
 
+        let mut workspace = Workspace::new();
+        populate_builtins(&mut workspace);
+
         Backend {
             client,
             document_map: DashMap::new(),
-            symbol_map: DashMap::new(),
+            workspace,
             parser: FlatcFFIParser,
         }
     });
