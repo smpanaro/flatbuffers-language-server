@@ -1,7 +1,7 @@
 use crate::symbol_table::{
     Enum, Field, Struct, Symbol, SymbolInfo, SymbolKind, SymbolTable, Table, Union,
 };
-use log::{debug, error, info};
+use log::{debug, error};
 use once_cell::sync::Lazy;
 use regex::Regex;
 use std::collections::HashSet;
@@ -26,7 +26,8 @@ pub struct FlatcFFIParser;
 
 // Regex to capture: <line>:<col>: <error|warning>: <message> (, originally at: :<original_line>)
 static RE: Lazy<Regex> = Lazy::new(|| {
-    Regex::new(r"^(\d+):\s*(\d+):\s+(error|warning):\s+(.+?)(?:, originally at: :(\d+))?$").unwrap()
+    Regex::new(r"^.+?:(\d+):\s*(\d+):\s+(error|warning):\s+(.+?)(?:, originally at: :(\d+))?$")
+        .unwrap()
 });
 
 fn is_known_type(type_name: &str, st: &SymbolTable, scalar_types: &HashSet<&str>) -> bool {
