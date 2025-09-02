@@ -18,6 +18,8 @@ Install Rust. (Instructions [here](https://www.rust-lang.org/tools/install).)
 
 ```sh
 $ git clone https://github.com/smpanaro/flatbuffers-language-server.git
+$ git submodule init
+$ git submodule update
 $ cargo build
 $ target/debug/flatbuffers-language-server
 Content-Length: 127
