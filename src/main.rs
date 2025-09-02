@@ -1,7 +1,9 @@
 use crate::symbol_table::Symbol;
 use dashmap::DashMap;
 use log::{debug, error, info};
-use std::collections::HashSet;
+use once_cell::sync::Lazy;
+use regex::Regex;
+use std::collections::{HashMap, HashSet};
 use std::time::Instant;
 use tower_lsp::jsonrpc::Result;
 use tower_lsp::lsp_types::{OneOf, *};
@@ -20,6 +22,8 @@ mod parser;
 mod symbol_table;
 mod utils;
 mod workspace;
+
+static FIELD_RE: Lazy<Regex> = Lazy::new(|| Regex::new(r"^\s*(\w+)\s*:").unwrap());
 
 #[derive(Debug)]
 struct Backend {
@@ -117,15 +121,17 @@ impl Backend {
             let elapsed_time = start_time.elapsed();
             error!("Parsed in {}ms: {}", elapsed_time.as_millis(), uri);
 
-            // Clear old symbols for this file
-            if let Some((_, old_symbol_keys)) = self.workspace.file_definitions.remove(&uri) {
-                for key in old_symbol_keys {
-                    self.workspace.symbols.remove(&key);
-                }
-            }
-            self.workspace.root_types.remove(&uri);
-
+            // Only update workspace state if the parse was successful.
+            // Otherwise, we would be clearing symbols for a file that has a transient syntax error.
             if let Some(st) = symbol_table {
+                // Clear old symbols for this file
+                if let Some((_, old_symbol_keys)) = self.workspace.file_definitions.remove(&uri) {
+                    for key in old_symbol_keys {
+                        self.workspace.symbols.remove(&key);
+                    }
+                }
+                self.workspace.root_types.remove(&uri);
+
                 let symbol_map = st.into_inner();
                 let new_symbol_keys: Vec<String> = symbol_map.keys().cloned().collect();
                 for (key, symbol) in symbol_map {
@@ -134,10 +140,10 @@ impl Backend {
                 self.workspace
                     .file_definitions
                     .insert(uri.clone(), new_symbol_keys);
-            }
 
-            if let Some(rti) = root_type_info {
-                self.workspace.root_types.insert(uri.clone(), rti);
+                if let Some(rti) = root_type_info {
+                    self.workspace.root_types.insert(uri.clone(), rti);
+                }
             }
 
             self.client
@@ -255,6 +261,13 @@ impl LanguageServer for Backend {
                 hover_provider: Some(HoverProviderCapability::Simple(true)),
                 definition_provider: Some(OneOf::Left(true)),
                 references_provider: Some(OneOf::Left(true)),
+                completion_provider: Some(CompletionOptions {
+                    resolve_provider: Some(false),
+                    trigger_characters: Some(vec![":".to_string(), " ".to_string()]),
+                    work_done_progress_options: Default::default(),
+                    all_commit_characters: None,
+                    completion_item: None,
+                }),
                 ..ServerCapabilities::default()
             },
         })
@@ -310,17 +323,13 @@ impl LanguageServer for Backend {
         let uri = params.text_document_position_params.text_document.uri;
         let pos = params.text_document_position_params.position;
 
-        let Some(resolved) = self.resolve_symbol_at(&uri, pos) else {
-            return Ok(None);
-        };
-
-        let res = Ok(Some(Hover {
+        let res = self.resolve_symbol_at(&uri, pos).map(|resolved| Hover {
             contents: HoverContents::Markup(MarkupContent {
                 kind: MarkupKind::Markdown,
                 value: resolved.target.hover_markdown(),
             }),
             range: Some(resolved.range),
-        }));
+        });
 
         let elapsed = start.elapsed();
         info!(
@@ -330,7 +339,7 @@ impl LanguageServer for Backend {
             pos.line + 1,
             pos.character + 1
         );
-        res
+        Ok(res)
     }
 
     async fn goto_definition(
@@ -355,7 +364,6 @@ impl LanguageServer for Backend {
 
     async fn references(&self, params: ReferenceParams) -> Result<Option<Vec<Location>>> {
         let start = Instant::now();
-
         let uri = params.text_document_position.text_document.uri;
         let position = params.text_document_position.position;
 
@@ -451,6 +459,96 @@ impl LanguageServer for Backend {
         } else {
             Some(references)
         })
+    }
+
+    async fn completion(&self, params: CompletionParams) -> Result<Option<CompletionResponse>> {
+        let start = Instant::now();
+        let uri = params.text_document_position.text_document.uri;
+        let position = params.text_document_position.position;
+
+        let Some(doc) = self.document_map.get(uri.as_str()) else {
+            return Ok(None);
+        };
+        let Some(line) = doc.lines().nth(position.line as usize) else {
+            return Ok(None);
+        };
+
+        let curr_char = line
+            .chars()
+            .nth(position.character.saturating_sub(1) as usize);
+        let prev_char = line
+            .chars()
+            .nth(position.character.saturating_sub(2) as usize);
+        if curr_char == Some(' ') && prev_char != Some(':') {
+            return Ok(None);
+        }
+
+        let Some(captures) = FIELD_RE.captures(line) else {
+            return Ok(None);
+        };
+        let field_name = captures.get(1).map_or("", |m| m.as_str());
+
+        let mut items = Vec::new();
+
+        // User-defined symbols
+        for entry in self.workspace.symbols.iter() {
+            let symbol = entry.value();
+            let kind = (&symbol.kind).into();
+
+            if kind != CompletionItemKind::FIELD {
+                let label = symbol.info.name.clone();
+                let sort_text = if field_name.to_lowercase().contains(&label.to_lowercase()) {
+                    format!("0_{}", label)
+                } else {
+                    format!("1_{}", label)
+                };
+                items.push(CompletionItem {
+                    label,
+                    sort_text: Some(sort_text),
+                    kind: Some(kind),
+                    detail: Some(symbol.type_name().to_string()),
+                    documentation: symbol.info.documentation.as_ref().map(|doc| {
+                        Documentation::MarkupContent(MarkupContent {
+                            kind: MarkupKind::Markdown,
+                            value: doc.clone(),
+                        })
+                    }),
+                    ..Default::default()
+                });
+            }
+        }
+
+        // Built-in symbols
+        for (name, symbol) in self.workspace.builtin_symbols.iter() {
+            let sort_text = if field_name.to_lowercase().contains(name) {
+                format!("0_{}", name)
+            } else {
+                format!("1_{}", name)
+            };
+            items.push(CompletionItem {
+                label: name.clone(),
+                sort_text: Some(sort_text),
+                kind: Some(CompletionItemKind::KEYWORD),
+                documentation: symbol.info.documentation.as_ref().map(|doc| {
+                    Documentation::MarkupContent(MarkupContent {
+                        kind: MarkupKind::Markdown,
+                        value: doc.clone(),
+                    })
+                }),
+                ..Default::default()
+            });
+        }
+
+        info!(
+            "completion in {}ms: {} L{}C{} -> {} items",
+            start.elapsed().as_millis(),
+            &uri.path(),
+            position.line + 1,
+            position.character + 1,
+            &items.len()
+        );
+
+        Ok(Some(CompletionResponse::Array(items)))
     }
 }
 

@@ -1,5 +1,5 @@
 use std::collections::HashMap;
-use tower_lsp::lsp_types::{Location, Position, Range, Url};
+use tower_lsp::lsp_types::{CompletionItemKind, Location, Position, Range, Url};
 
 use crate::ext::range::RangeExt;
 
@@ -75,6 +75,17 @@ pub struct Field {
 }
 
 impl Symbol {
+    pub fn type_name(&self) -> &str {
+        match &self.kind {
+            SymbolKind::Enum(_) => "enum",
+            SymbolKind::Union(_) => "union",
+            SymbolKind::Struct(_) => "struct",
+            SymbolKind::Table(_) => "table",
+            SymbolKind::Field(_) => "field",
+            SymbolKind::Scalar => "scalar",
+        }
+    }
+
     pub fn find_symbol<'a>(&'a self, uri: &Url, pos: Position) -> Option<&'a Symbol> {
         if self.info.location.uri.path() != uri.path() {
             return None;
@@ -118,9 +129,7 @@ impl Symbol {
 
     pub fn hover_markdown(&self) -> String {
         let mut markdown = format!(
-            "```flatbuffers
-{}
-```",
+            "```flatbuffers\n{}\n```",
             match &self.kind {
                 SymbolKind::Table(t) =>
                     format!("table {} {{{}}}", self.info.name, t.fields_markdown()),
@@ -130,7 +139,7 @@ impl Symbol {
                     format!("enum {} {{{}}}", self.info.name, e.variants_markdown()),
                 SymbolKind::Union(u) =>
                     format!("union {} {{{}}}", self.info.name, u.variants_markdown()),
-                SymbolKind::Scalar => format!("{} // builtin", self.info.name),
+                SymbolKind::Scalar => format!("{} // scalar", self.info.name),
                 SymbolKind::Field(f) => format!("{}: {}", self.info.name, f.type_name),
             }
         );
@@ -218,9 +227,7 @@ impl Enum {
             return "".to_string();
         }
         format!(
-            "
-{}
-",
+            "\n{}\n",
             self.variants
                 .iter()
                 .map(|v| {
@@ -233,10 +240,7 @@ impl Enum {
                     s
                 })
                 .collect::<Vec<String>>()
-                .join(
-                    "
-"
-                )
+                .join("\n")
         )
     }
 }
@@ -247,17 +251,25 @@ impl Union {
             return "".to_string();
         }
         format!(
-            "
-{}
-",
+            "\n{}\n",
             self.variants
                 .iter()
                 .map(|v| format!("  {}", v.name))
                 .collect::<Vec<String>>()
-                .join(
-                    "
-"
-                )
+                .join("\n")
         )
+    }
+}
+
+impl From<&SymbolKind> for CompletionItemKind {
+    fn from(kind: &SymbolKind) -> Self {
+        match kind {
+            SymbolKind::Table(_) => CompletionItemKind::CLASS,
+            SymbolKind::Struct(_) => CompletionItemKind::STRUCT,
+            SymbolKind::Enum(_) => CompletionItemKind::ENUM,
+            SymbolKind::Union(_) => CompletionItemKind::ENUM, // No specific kind for Union, Enum is close.
+            SymbolKind::Field(_) => CompletionItemKind::FIELD,
+            SymbolKind::Scalar => CompletionItemKind::KEYWORD,
+        }
     }
 }
