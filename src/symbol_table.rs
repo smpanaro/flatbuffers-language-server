@@ -3,6 +3,12 @@ use tower_lsp::lsp_types::{CompletionItemKind, Location, Position, Range, Url};
 
 use crate::ext::range::RangeExt;
 
+#[derive(Debug, Clone)]
+pub struct RootTypeInfo {
+    pub location: Location,
+    pub type_name: String,
+}
+
 // A map from a fully qualified name to its symbol definition
 #[derive(Debug)]
 pub struct SymbolTable(HashMap<String, Symbol>);
