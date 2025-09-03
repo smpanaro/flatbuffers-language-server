@@ -7,7 +7,9 @@ use once_cell::sync::Lazy;
 use regex::Regex;
 use std::collections::HashSet;
 use std::ffi::{CStr, CString};
-use tower_lsp::lsp_types::{Diagnostic, DiagnosticSeverity, Location, Position, Range, Url};
+use tower_lsp::lsp_types::{
+    Diagnostic, DiagnosticSeverity, DiagnosticTag, Location, Position, Range, Url,
+};
 
 use crate::ffi;
 
@@ -224,6 +226,7 @@ impl Parser for FlatcFFIParser {
                             SymbolKind::Field(Field {
                                 type_name,
                                 type_range,
+                                deprecated: field_info.deprecated,
                             }),
                             documentation,
                         );
@@ -417,10 +420,26 @@ impl Parser for FlatcFFIParser {
                             if !is_known_type(&field_def.type_name, &st, &scalar_types) {
                                 diagnostics.push(Diagnostic {
                                     range: field.info.location.range,
-                                    severity: Some(DiagnosticSeverity::ERROR),
+                                    severity: DiagnosticSeverity::ERROR.into(),
                                     message: format!("Undefined type: {}", field_def.type_name),
                                     ..Default::default()
                                 });
+                            }
+                            if field_def.deprecated {
+                                diagnostics.push(Diagnostic {
+                                    range: Range {
+                                        start: field.info.location.range.start,
+                                        end: Position {
+                                            line: field.info.location.range.end.line,
+                                            character: u32::MAX,
+                                        },
+                                    },
+                                    severity: DiagnosticSeverity::HINT.into(),
+                                    tags: vec![DiagnosticTag::UNNECESSARY].into(), // Not Deprecated, which renders as something that needs to be fixed.
+                                    message: "Deprecated. Excluded from generated code."
+                                        .to_string(),
+                                    ..Default::default()
+                                })
                             }
                         }
                     }

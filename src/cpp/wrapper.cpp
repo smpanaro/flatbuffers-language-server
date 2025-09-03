@@ -232,7 +232,7 @@ int get_num_fields(struct FlatbuffersParser* parser, int struct_index) {
 }
 
 struct FieldDefinitionInfo get_field_info(struct FlatbuffersParser* parser, int struct_index, int field_index) {
-    struct FieldDefinitionInfo info = { nullptr, 0, 0, 0, 0 };
+    struct FieldDefinitionInfo info = { nullptr, 0, 0, 0, 0, false };
     if (!parser || struct_index < 0 || static_cast<size_t>(struct_index) >= parser->impl.structs_.vec.size()) {
         return info;
     }
@@ -253,6 +253,7 @@ struct FieldDefinitionInfo get_field_info(struct FlatbuffersParser* parser, int 
     info.line = field_def->decl_line - 1;
     info.col = field_def->decl_col;
     info.type_line = field_def->type_decl_line - 1;
+    info.deprecated = field_def->deprecated;
 
     // For vectors and arrays, type_decl_col points to start of type name,
     // but we want it to point to the end like everything else
