@@ -18,6 +18,9 @@ pub struct Workspace {
 
     /// A map to store information about `root_type` declarations, keyed by file URI.
     pub root_types: DashMap<Url, RootTypeInfo>,
+
+    /// A map from a file's URI to a list of files it includes.
+    pub file_includes: DashMap<Url, Vec<String>>,
 }
 
 impl Workspace {
@@ -27,6 +30,7 @@ impl Workspace {
             builtin_symbols: HashMap::new(),
             file_definitions: DashMap::new(),
             root_types: DashMap::new(),
+            file_includes: DashMap::new(),
         }
     }
 }

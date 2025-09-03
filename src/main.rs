@@ -144,6 +144,10 @@ impl Backend {
                 if let Some(rti) = root_type_info {
                     self.workspace.root_types.insert(uri.clone(), rti);
                 }
+
+                self.workspace
+                    .file_includes
+                    .insert(uri.clone(), included_files.clone());
             }
 
             self.client
@@ -268,6 +272,12 @@ impl LanguageServer for Backend {
                     all_commit_characters: None,
                     completion_item: None,
                 }),
+                code_action_provider: Some(CodeActionProviderCapability::Options(
+                    CodeActionOptions {
+                        code_action_kinds: Some(vec![CodeActionKind::QUICKFIX]),
+                        ..CodeActionOptions::default()
+                    },
+                )),
                 ..ServerCapabilities::default()
             },
         })
@@ -502,6 +512,7 @@ impl LanguageServer for Backend {
                 } else {
                     format!("1_{}", label)
                 };
+
                 items.push(CompletionItem {
                     label,
                     sort_text: Some(sort_text),
@@ -549,6 +560,78 @@ impl LanguageServer for Backend {
         );
 
         Ok(Some(CompletionResponse::Array(items)))
+    }
+
+    async fn code_action(&self, params: CodeActionParams) -> Result<Option<CodeActionResponse>> {
+        let uri = params.text_document.uri;
+        let doc = self.document_map.get(&uri.to_string()).unwrap();
+
+        let mut code_actions = Vec::new();
+
+        for diagnostic in params.context.diagnostics {
+            let undefined_type_re =
+                Regex::new(r"type referenced but not defined \(check namespace\): (\w+)").unwrap();
+            let Some(captures) = undefined_type_re.captures(&diagnostic.message) else {
+                continue;
+            };
+            let type_name = captures.get(1).unwrap().as_str();
+
+            for symbol_entry in self.workspace.symbols.iter() {
+                if symbol_entry.value().info.name == type_name {
+                    let symbol = symbol_entry.value();
+                    let Ok(symbol_path) = symbol.info.location.uri.to_file_path() else {
+                        continue;
+                    };
+                    let Ok(current_path) = uri.to_file_path() else {
+                        continue;
+                    };
+                    let Some(current_dir) = current_path.parent() else {
+                        continue;
+                    };
+                    let Some(relative_path) = pathdiff::diff_paths(&symbol_path, &current_dir)
+                    else {
+                        continue;
+                    };
+
+                    let last_include_line = doc
+                        .lines()
+                        .enumerate()
+                        .filter(|(_, line)| line.starts_with("include "))
+                        .last()
+                        .map(|(i, _)| i as u32);
+                    let insert_line = last_include_line.map_or(0, |line| line + 1);
+
+                    let text_edit = TextEdit {
+                        range: Range::new(
+                            Position::new(insert_line, 0),
+                            Position::new(insert_line, 0),
+                        ),
+                        new_text: format!("include \"{}\";\n", relative_path.to_str().unwrap()),
+                    };
+
+                    let mut changes = HashMap::new();
+                    changes.insert(uri.clone(), vec![text_edit]);
+
+                    let code_action = CodeAction {
+                        title: format!(
+                            "Import `{}` from `{}`",
+                            type_name,
+                            relative_path.to_str().unwrap()
+                        ),
+                        kind: Some(CodeActionKind::QUICKFIX),
+                        diagnostics: Some(vec![diagnostic.clone()]),
+                        edit: Some(WorkspaceEdit {
+                            changes: Some(changes),
+                            ..Default::default()
+                        }),
+                        ..Default::default()
+                    };
+                    code_actions.push(CodeActionOrCommand::CodeAction(code_action));
+                }
+            }
+        }
+
+        Ok(Some(code_actions))
     }
 }
 

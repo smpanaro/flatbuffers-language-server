@@ -32,7 +32,7 @@ pub struct FlatcFFIParser;
 
 // Regex to capture: <line>:<col>: <error|warning>: <message> (, originally at: :<original_line>)
 static RE: Lazy<Regex> = Lazy::new(|| {
-    Regex::new(r"^.+?:(\d+):\s*(\d+):\s+(error|warning):\s+(.+?)(?:, originally at: :(\d+))?$")
+    Regex::new(r"^.+?:(\d+):\s*(\d+):\s+(error|warning):\s+(.+?)(?:, originally at: .+?:(\d+))?$")
         .unwrap()
 });
 
@@ -453,17 +453,40 @@ impl Parser for FlatcFFIParser {
                                     DiagnosticSeverity::WARNING
                                 };
                                 let message = captures[4].trim().to_string();
-                                let diagnostic = Diagnostic {
-                                    range: Range {
-                                        start: Position {
-                                            line: line_num,
-                                            character: col_num,
-                                        },
-                                        end: Position {
-                                            line: line_num,
-                                            character: u32::MAX,
-                                        },
+
+                                let mut range = Range {
+                                    start: Position {
+                                        line: line_num,
+                                        character: col_num,
                                     },
+                                    end: Position {
+                                        line: line_num,
+                                        character: u32::MAX,
+                                    },
+                                };
+
+                                let undefined_type_re = Regex::new(
+                                    r"type referenced but not defined \(check namespace\): (\w+)",
+                                )
+                                .unwrap();
+                                if let Some(captures) = undefined_type_re.captures(&message) {
+                                    if let Some(type_name) = captures.get(1) {
+                                        if let Some(line_content) =
+                                            content.lines().nth(line_num as usize)
+                                        {
+                                            if let Some(start) =
+                                                line_content.find(type_name.as_str())
+                                            {
+                                                let end = start + type_name.as_str().len();
+                                                range.start.character = start as u32;
+                                                range.end.character = end as u32;
+                                            }
+                                        }
+                                    }
+                                }
+
+                                let diagnostic = Diagnostic {
+                                    range,
                                     severity: Some(severity),
                                     message,
                                     ..Default::default()

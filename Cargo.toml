@@ -13,6 +13,7 @@ log = { version = "0.4", features = ["std"] }
 regex = "1.5"
 tempfile = "3.3"
 once_cell = "1.10"
+pathdiff = "0.2.1"
 
 [build-dependencies]
 cc = "1.0"
