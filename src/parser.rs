@@ -9,7 +9,8 @@ use regex::Regex;
 use std::collections::HashSet;
 use std::ffi::{CStr, CString};
 use tower_lsp::lsp_types::{
-    Diagnostic, DiagnosticSeverity, DiagnosticTag, Location, Position, Range, Url,
+    Diagnostic, DiagnosticRelatedInformation, DiagnosticSeverity, DiagnosticTag, Location,
+    Position, Range, Url,
 };
 
 /// A trait for parsing FlatBuffers schema files.
@@ -108,7 +109,9 @@ unsafe fn parse_error_case(
         if let Ok(error_str) = error_c_str.to_str() {
             debug!("flatc FFI error: {}", error_str);
             for line in error_str.lines() {
-                if let Some(captures) = RE.captures(line) {
+                if let Some(already_define_diag) = parse_already_defined(line, content) {
+                    diagnostics.push(already_define_diag);
+                } else if let Some(captures) = RE.captures(line) {
                     let line_num_str = captures.get(5).map_or_else(
                         || captures.get(1).map_or("1", |m| m.as_str()),
                         |m| m.as_str(),
@@ -164,6 +167,72 @@ unsafe fn parse_error_case(
         }
     }
     diagnostics
+}
+
+// Regex to captures duplicate definitions:
+// <1file>:<2line>: <3col>: error: <4type_name> already exists: <5name> previously defined at <6original_file>:<7original_line>:<8original_col>
+static DUPLICATE_RE: Lazy<Regex> = Lazy::new(|| {
+    Regex::new(r"^(.+?):(\d+): (\d+): error: ([a-z\s]+) already exists: (.+?) previously defined at (.+?):(\d+):(\d+)$")
+        .unwrap()
+});
+
+fn parse_already_defined(line: &str, content: &str) -> Option<Diagnostic> {
+    if let Some(captures) = DUPLICATE_RE.captures(line) {
+        let name = captures[5].trim().to_string();
+        let unqualified_name = name.split('.').last().unwrap_or(name.as_str());
+        let unqualified_name_length = unqualified_name.chars().count() as u32;
+
+        let message = format!("the name `{}` is defined multiple times", name);
+        let curr_line = captures[2].parse().unwrap_or(1) - 1;
+        // regex-captured char is the first identifier after the symbol name.
+        let curr_char = content
+            .lines()
+            .nth(curr_line as usize)
+            // TODO: This fails when the duplicate is on the same line.
+            .and_then(|line| line.find(unqualified_name).map(|idx| idx as u32))
+            .unwrap_or_else(|| captures[3].parse().unwrap_or(0));
+        let range = Range {
+            start: Position {
+                line: curr_line,
+                character: curr_char,
+            },
+            end: Position {
+                line: curr_line,
+                character: curr_char + unqualified_name_length,
+            },
+        };
+
+        let prev_line = captures[7].parse().unwrap_or(0) - 1;
+        let prev_char = captures[8]
+            .parse()
+            .unwrap_or(0u32)
+            .saturating_sub(unqualified_name_length);
+        let previous_location = Location {
+            uri: Url::from_file_path(captures[6].trim()).unwrap(),
+            range: Range {
+                start: Position {
+                    line: prev_line,
+                    character: prev_char,
+                },
+                end: Position {
+                    line: prev_line,
+                    character: prev_char + unqualified_name_length,
+                },
+            },
+        };
+        Some(Diagnostic {
+            range,
+            severity: Some(DiagnosticSeverity::ERROR),
+            message,
+            related_information: Some(vec![DiagnosticRelatedInformation {
+                location: previous_location,
+                message: format!("previous definition of `{}` defined here", name),
+            }]),
+            ..Default::default()
+        })
+    } else {
+        None
+    }
 }
 
 /// Extracts all included file paths from the parser.

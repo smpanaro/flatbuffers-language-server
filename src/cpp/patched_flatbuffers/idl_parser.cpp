@@ -896,8 +896,12 @@ CheckedError Parser::AddField(StructDef &struct_def, const std::string &name,
     field.value.offset = static_cast<voffset_t>(struct_def.bytesize);
     struct_def.bytesize += size;
   }
-  if (struct_def.fields.Add(name, &field))
-    return Error("field already exists: " + name);
+  if (struct_def.fields.Add(name, &field)) {
+    auto prev_def = struct_def.fields.Lookup(name);
+    auto prev_loc = prev_def != nullptr ?
+        " previously defined at " + prev_def->file+":"+NumToString(prev_def->decl_line)+":"+NumToString(prev_def->decl_col) : "";
+    return Error("field already exists: " + name + prev_loc);
+  }
   *dest = &field;
   return NoError();
 }
@@ -2419,7 +2423,13 @@ struct EnumValBuilder {
                        (temp->union_type.enum_def == &enum_def));
     auto not_unique = enum_def.vals.Add(name, temp);
     temp = nullptr;
-    if (not_unique) return parser.Error("enum value already exists: " + name);
+    if (not_unique) {
+      auto prev_def = enum_def.vals.Lookup(name);
+      auto prev_loc = prev_def != nullptr ?
+          " previously defined at " + enum_def.file+":"+NumToString(prev_def->decl_line)+":"+NumToString(prev_def->decl_col) : "";
+      std::string type_name = enum_def.is_union ? "union field" : "enum value";
+      return parser.Error(type_name + " already exists: " + name + prev_loc);
+    }
     return NoError();
   }
 
@@ -2662,9 +2672,12 @@ CheckedError Parser::ParseEnum(const bool is_union, EnumDef **dest,
 
 CheckedError Parser::StartStruct(const std::string &name, StructDef **dest) {
   auto &struct_def = *LookupCreateStruct(name, true, true);
-  if (!struct_def.predecl)
-    return Error("datatype already exists: " +
-                 current_namespace_->GetFullyQualifiedName(name));
+  if (!struct_def.predecl)  {
+    auto prev_loc = " previously defined at " + struct_def.file+":"+NumToString(struct_def.decl_line)+":"+NumToString(struct_def.decl_col);
+    std::string type_name = struct_def.fixed ? "struct" : "table";
+    return Error(type_name + " already exists: " +
+                 current_namespace_->GetFullyQualifiedName(name) + prev_loc);
+  }
   struct_def.predecl = false;
   struct_def.name = name;
   struct_def.file = file_being_parsed_;
@@ -3040,8 +3053,13 @@ CheckedError Parser::StartEnum(const std::string &name, bool is_union,
   enum_def.is_union = is_union;
   enum_def.defined_namespace = current_namespace_;
   const auto qualified_name = current_namespace_->GetFullyQualifiedName(name);
-  if (enums_.Add(qualified_name, &enum_def))
-    return Error("enum already exists: " + qualified_name);
+  if (enums_.Add(qualified_name, &enum_def)) {
+    auto prev_def = enums_.Lookup(qualified_name);
+    auto prev_loc = prev_def != nullptr ?
+        " previously defined at " + prev_def->file+":"+NumToString(prev_def->decl_line)+":"+NumToString(prev_def->decl_col) : "";
+    std::string type_name = enum_def.is_union ? "union" : "enum";
+    return Error(type_name + " already exists: " + qualified_name + prev_loc);
+  }
   enum_def.underlying_type.base_type =
       is_union ? BASE_TYPE_UTYPE : BASE_TYPE_INT;
   enum_def.underlying_type.enum_def = &enum_def;
