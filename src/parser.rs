@@ -3,7 +3,7 @@ use crate::symbol_table::{
     Enum, EnumVariant, Field, RootTypeInfo, Struct, Symbol, SymbolInfo, SymbolKind, SymbolTable,
     Table, Union, UnionVariant,
 };
-use log::{debug, error, info};
+use log::{debug, error};
 use once_cell::sync::Lazy;
 use regex::Regex;
 use std::collections::{HashMap, HashSet};
