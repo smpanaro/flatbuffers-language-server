@@ -12,6 +12,8 @@ pub struct Workspace {
     pub file_definitions: DashMap<Url, Vec<String>>,
     /// Map from file URI to the list of files it includes.
     pub file_includes: DashMap<Url, Vec<String>>,
+    /// Map from file URI to the list of files that include it.
+    pub file_included_by: DashMap<Url, Vec<Url>>,
     /// Map from file URI to the root type defined in that file.
     pub root_types: DashMap<Url, RootTypeInfo>,
 }
@@ -68,6 +70,7 @@ impl Workspace {
             builtin_symbols: DashMap::new(),
             file_definitions: DashMap::new(),
             file_includes: DashMap::new(),
+            file_included_by: DashMap::new(),
             root_types: DashMap::new(),
         };
         populate_builtins(&mut workspace);
@@ -87,6 +90,26 @@ impl Workspace {
             }
         }
         self.root_types.remove(uri);
+
+        if let Some((_, old_included_files)) = self.file_includes.remove(uri) {
+            for old_included_file in old_included_files {
+                if let Ok(old_included_uri) = Url::from_file_path(&old_included_file) {
+                    if let Some(mut included_by) = self.file_included_by.get_mut(&old_included_uri)
+                    {
+                        included_by.retain(|x| x != uri);
+                    }
+                }
+            }
+        }
+
+        for included_file in &included_files {
+            if let Ok(included_uri) = Url::from_file_path(included_file) {
+                self.file_included_by
+                    .entry(included_uri)
+                    .or_default()
+                    .push(uri.clone());
+            }
+        }
 
         let symbol_map = st.into_inner();
         let new_symbol_keys: Vec<String> = symbol_map.keys().cloned().collect();

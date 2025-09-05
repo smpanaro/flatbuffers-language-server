@@ -28,8 +28,16 @@ pub struct Backend {
 impl Backend {
     // TODO: Move this to workspace
     pub async fn parse_and_discover(&self, initial_uri: Url, initial_content: Option<String>) {
-        let mut files_to_parse = vec![(initial_uri, initial_content)];
+        let mut files_to_parse = vec![(initial_uri.clone(), initial_content)];
         let mut parsed_files = HashSet::new();
+        let mut all_diagnostics = std::collections::HashMap::new();
+
+        let old_included_files = self
+            .workspace
+            .file_includes
+            .get(&initial_uri)
+            .map(|v| v.value().clone())
+            .unwrap_or_default();
 
         while let Some((uri, content_opt)) = files_to_parse.pop() {
             if !parsed_files.insert(uri.clone()) {
@@ -53,7 +61,7 @@ impl Backend {
             self.document_map.insert(uri.to_string(), content.clone());
 
             let start_time = Instant::now();
-            let (diagnostics, symbol_table, included_files, root_type_info) =
+            let (diagnostics_map, symbol_table, included_files, root_type_info) =
                 self.parser.parse(&uri, &content);
             let elapsed_time = start_time.elapsed();
             error!("Parsed in {}ms: {}", elapsed_time.as_millis(), uri);
@@ -63,9 +71,9 @@ impl Backend {
                     .update_symbols(&uri, st, included_files.clone(), root_type_info);
             }
 
-            self.client
-                .publish_diagnostics(uri.clone(), diagnostics, None)
-                .await;
+            for (file_uri, diagnostics) in diagnostics_map {
+                all_diagnostics.insert(file_uri, diagnostics);
+            }
 
             for included_path_str in included_files {
                 match Url::from_file_path(&included_path_str) {
@@ -79,6 +87,24 @@ impl Backend {
                     }
                 }
             }
+        }
+
+        let mut files_to_update = HashSet::new();
+        files_to_update.insert(initial_uri);
+        for path in old_included_files {
+            if let Ok(uri) = Url::from_file_path(&path) {
+                files_to_update.insert(uri);
+            }
+        }
+        for uri in parsed_files {
+            files_to_update.insert(uri);
+        }
+
+        for uri in files_to_update {
+            let diagnostics = all_diagnostics.remove(&uri).unwrap_or_default();
+            self.client
+                .publish_diagnostics(uri, diagnostics, None)
+                .await;
         }
     }
 }

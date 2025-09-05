@@ -6,7 +6,7 @@ use crate::symbol_table::{
 use log::{debug, error};
 use once_cell::sync::Lazy;
 use regex::Regex;
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::ffi::{CStr, CString};
 use tower_lsp::lsp_types::{
     Diagnostic, DiagnosticRelatedInformation, DiagnosticSeverity, DiagnosticTag, Location,
@@ -20,7 +20,7 @@ pub trait Parser {
         uri: &Url,
         content: &str,
     ) -> (
-        Vec<Diagnostic>,
+        HashMap<Url, Vec<Diagnostic>>,
         Option<SymbolTable>,
         Vec<String>,
         Option<RootTypeInfo>,
@@ -36,21 +36,21 @@ impl Parser for FlatcFFIParser {
         uri: &Url,
         content: &str,
     ) -> (
-        Vec<Diagnostic>,
+        HashMap<Url, Vec<Diagnostic>>,
         Option<SymbolTable>,
         Vec<String>,
         Option<RootTypeInfo>,
     ) {
         let c_content = match CString::new(content) {
             Ok(s) => s,
-            Err(_) => return (vec![], None, vec![], None), // Content has null bytes
+            Err(_) => return (HashMap::new(), None, vec![], None), // Content has null bytes
         };
         let c_filename = CString::new(uri.to_file_path().unwrap().to_str().unwrap()).unwrap();
 
         unsafe {
             let parser_ptr = ffi::parse_schema(c_content.as_ptr(), c_filename.as_ptr());
             if parser_ptr.is_null() {
-                return (vec![], None, vec![], None);
+                return (HashMap::new(), None, vec![], None);
             }
 
             let (diagnostics, symbol_table, included_files, root_type_info) =
@@ -58,7 +58,12 @@ impl Parser for FlatcFFIParser {
                     let (st, included, root_info, diags) = parse_success_case(parser_ptr);
                     (diags, Some(st), included, root_info)
                 } else {
-                    (parse_error_case(parser_ptr, content), None, vec![], None)
+                    (
+                        parse_error_case(parser_ptr, &uri.to_string(), content),
+                        None,
+                        vec![],
+                        None,
+                    )
                 };
 
             ffi::delete_parser(parser_ptr);
@@ -81,18 +86,17 @@ unsafe fn parse_success_case(
     SymbolTable,
     Vec<String>,
     Option<RootTypeInfo>,
-    Vec<Diagnostic>,
+    HashMap<Url, Vec<Diagnostic>>,
 ) {
     let mut st = SymbolTable::new();
-    let mut diagnostics = Vec::new();
+    let mut diagnostics = HashMap::new();
 
     let included_files = extract_included_files(parser_ptr);
     extract_structs_and_tables(parser_ptr, &mut st, &mut diagnostics);
     extract_enums_and_unions(parser_ptr, &mut st, &mut diagnostics);
     let root_type_info = extract_root_type(parser_ptr);
 
-    let semantic_diagnostics = perform_semantic_analysis(&st);
-    diagnostics.extend(semantic_diagnostics);
+    perform_semantic_analysis(&st, &mut diagnostics);
 
     (st, included_files, root_type_info, diagnostics)
 }
@@ -100,18 +104,28 @@ unsafe fn parse_success_case(
 /// Handles the error case by parsing flatc's error message.
 unsafe fn parse_error_case(
     parser_ptr: *mut ffi::FlatbuffersParser,
+    file_name: &str,
     content: &str,
-) -> Vec<Diagnostic> {
-    let mut diagnostics = Vec::new();
+) -> HashMap<Url, Vec<Diagnostic>> {
+    let mut diagnostics_map: HashMap<Url, Vec<Diagnostic>> = HashMap::new();
     let error_str_ptr = ffi::get_parser_error(parser_ptr);
     if !error_str_ptr.is_null() {
         let error_c_str = CStr::from_ptr(error_str_ptr);
         if let Ok(error_str) = error_c_str.to_str() {
-            debug!("flatc FFI error: {}", error_str);
+            debug!("flatc FFI error parsing {}: {}", file_name, error_str);
             for line in error_str.lines() {
-                if let Some(already_define_diag) = parse_already_defined(line, content) {
-                    diagnostics.push(already_define_diag);
+                if let Some((file_uri, already_define_diag)) = parse_already_defined(line) {
+                    diagnostics_map
+                        .entry(file_uri)
+                        .or_default()
+                        .push(already_define_diag);
                 } else if let Some(captures) = RE.captures(line) {
+                    let file_path = captures.get(0).unwrap().as_str().split(':').next().unwrap();
+                    let Ok(file_uri) = Url::from_file_path(file_path) else {
+                        error!("failed to parse file into url: {}", file_path);
+                        continue;
+                    };
+
                     let line_num_str = captures.get(5).map_or_else(
                         || captures.get(1).map_or("1", |m| m.as_str()),
                         |m| m.as_str(),
@@ -156,17 +170,20 @@ unsafe fn parse_error_case(
                         }
                     }
 
-                    diagnostics.push(Diagnostic {
-                        range,
-                        severity: Some(severity),
-                        message,
-                        ..Default::default()
-                    });
+                    diagnostics_map
+                        .entry(file_uri)
+                        .or_default()
+                        .push(Diagnostic {
+                            range,
+                            severity: Some(severity),
+                            message,
+                            ..Default::default()
+                        });
                 }
             }
         }
     }
-    diagnostics
+    diagnostics_map
 }
 
 // Regex to captures duplicate definitions:
@@ -176,8 +193,14 @@ static DUPLICATE_RE: Lazy<Regex> = Lazy::new(|| {
         .unwrap()
 });
 
-fn parse_already_defined(line: &str, content: &str) -> Option<Diagnostic> {
+fn parse_already_defined(line: &str) -> Option<(Url, Diagnostic)> {
     if let Some(captures) = DUPLICATE_RE.captures(line) {
+        let file_path = captures[1].trim();
+        let Ok(file_uri) = Url::from_file_path(file_path) else {
+            error!("failed to parse file into url: {}", file_path);
+            return None;
+        };
+
         let name = captures[5].trim().to_string();
         let unqualified_name = name.split('.').last().unwrap_or(name.as_str());
         let unqualified_name_length = unqualified_name.chars().count() as u32;
@@ -217,16 +240,19 @@ fn parse_already_defined(line: &str, content: &str) -> Option<Diagnostic> {
                 },
             },
         };
-        Some(Diagnostic {
-            range,
-            severity: Some(DiagnosticSeverity::ERROR),
-            message,
-            related_information: Some(vec![DiagnosticRelatedInformation {
-                location: previous_location,
-                message: format!("previous definition of `{}` defined here", name),
-            }]),
-            ..Default::default()
-        })
+        Some((
+            file_uri,
+            Diagnostic {
+                range,
+                severity: Some(DiagnosticSeverity::ERROR),
+                message,
+                related_information: Some(vec![DiagnosticRelatedInformation {
+                    location: previous_location,
+                    message: format!("previous definition of `{}` defined here", name),
+                }]),
+                ..Default::default()
+            },
+        ))
     } else {
         None
     }
@@ -258,7 +284,7 @@ unsafe fn extract_included_files(parser_ptr: *mut ffi::FlatbuffersParser) -> Vec
 unsafe fn extract_structs_and_tables(
     parser_ptr: *mut ffi::FlatbuffersParser,
     st: &mut SymbolTable,
-    diagnostics: &mut Vec<Diagnostic>,
+    diagnostics: &mut HashMap<Url, Vec<Diagnostic>>,
 ) {
     let num_structs = ffi::get_num_structs(parser_ptr);
     for i in 0..num_structs {
@@ -274,15 +300,18 @@ unsafe fn extract_structs_and_tables(
         };
 
         if st.contains_key(&name) {
-            diagnostics.push(Diagnostic {
-                range: Range::new(
-                    Position::new(def_info.line, def_info.col),
-                    Position::new(def_info.line, def_info.col),
-                ),
-                severity: Some(DiagnosticSeverity::ERROR),
-                message: format!("Duplicate definition: {}", name),
-                ..Default::default()
-            });
+            diagnostics
+                .entry(file_uri.clone())
+                .or_default()
+                .push(Diagnostic {
+                    range: Range::new(
+                        Position::new(def_info.line, def_info.col),
+                        Position::new(def_info.line, def_info.col),
+                    ),
+                    severity: Some(DiagnosticSeverity::ERROR),
+                    message: format!("Duplicate definition: {}", name),
+                    ..Default::default()
+                });
             continue;
         }
 
@@ -368,7 +397,7 @@ unsafe fn extract_structs_and_tables(
 unsafe fn extract_enums_and_unions(
     parser_ptr: *mut ffi::FlatbuffersParser,
     st: &mut SymbolTable,
-    diagnostics: &mut Vec<Diagnostic>,
+    diagnostics: &mut HashMap<Url, Vec<Diagnostic>>,
 ) {
     let num_enums = ffi::get_num_enums(parser_ptr);
     for i in 0..num_enums {
@@ -384,15 +413,18 @@ unsafe fn extract_enums_and_unions(
         };
 
         if st.contains_key(&name) {
-            diagnostics.push(Diagnostic {
-                range: Range::new(
-                    Position::new(def_info.line, def_info.col),
-                    Position::new(def_info.line, def_info.col),
-                ),
-                severity: Some(DiagnosticSeverity::ERROR),
-                message: format!("Duplicate definition: {}", name),
-                ..Default::default()
-            });
+            diagnostics
+                .entry(file_uri.clone())
+                .or_default()
+                .push(Diagnostic {
+                    range: Range::new(
+                        Position::new(def_info.line, def_info.col),
+                        Position::new(def_info.line, def_info.col),
+                    ),
+                    severity: Some(DiagnosticSeverity::ERROR),
+                    message: format!("Duplicate definition: {}", name),
+                    ..Default::default()
+                });
             continue;
         }
 
@@ -489,8 +521,7 @@ unsafe fn extract_root_type(parser_ptr: *mut ffi::FlatbuffersParser) -> Option<R
 }
 
 /// Performs second-pass semantic analysis on the symbol table.
-fn perform_semantic_analysis(st: &SymbolTable) -> Vec<Diagnostic> {
-    let mut diagnostics = Vec::new();
+fn perform_semantic_analysis(st: &SymbolTable, diagnostics: &mut HashMap<Url, Vec<Diagnostic>>) {
     let scalar_types: HashSet<_> = [
         "bool", "byte", "ubyte", "int8", "uint8", "short", "ushort", "int16", "uint16", "int",
         "uint", "int32", "uint32", "float", "float32", "long", "ulong", "int64", "uint64",
@@ -510,32 +541,37 @@ fn perform_semantic_analysis(st: &SymbolTable) -> Vec<Diagnostic> {
         for field in fields {
             if let SymbolKind::Field(field_def) = &field.kind {
                 if !is_known_type(&field_def.type_name, st, &scalar_types) {
-                    diagnostics.push(Diagnostic {
-                        range: field.info.location.range,
-                        severity: DiagnosticSeverity::ERROR.into(),
-                        message: format!("Undefined type: {}", field_def.type_name),
-                        ..Default::default()
-                    });
+                    diagnostics
+                        .entry(field.info.location.uri.clone())
+                        .or_default()
+                        .push(Diagnostic {
+                            range: field.info.location.range,
+                            severity: DiagnosticSeverity::ERROR.into(),
+                            message: format!("Undefined type: {}", field_def.type_name),
+                            ..Default::default()
+                        });
                 }
                 if field_def.deprecated {
-                    diagnostics.push(Diagnostic {
-                        range: Range {
-                            start: field.info.location.range.start,
-                            end: Position {
-                                line: field.info.location.range.end.line,
-                                character: u32::MAX,
+                    diagnostics
+                        .entry(field.info.location.uri.clone())
+                        .or_default()
+                        .push(Diagnostic {
+                            range: Range {
+                                start: field.info.location.range.start,
+                                end: Position {
+                                    line: field.info.location.range.end.line,
+                                    character: u32::MAX,
+                                },
                             },
-                        },
-                        severity: DiagnosticSeverity::HINT.into(),
-                        tags: vec![DiagnosticTag::UNNECESSARY].into(),
-                        message: "Deprecated. Excluded from generated code.".to_string(),
-                        ..Default::default()
-                    })
+                            severity: DiagnosticSeverity::HINT.into(),
+                            tags: vec![DiagnosticTag::UNNECESSARY].into(),
+                            message: "Deprecated. Excluded from generated code.".to_string(),
+                            ..Default::default()
+                        });
                 }
             }
         }
     }
-    diagnostics
 }
 
 /// Helper to check if a type is a builtin scalar or defined in the symbol table.
