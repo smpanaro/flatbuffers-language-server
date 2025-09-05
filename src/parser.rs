@@ -184,13 +184,10 @@ fn parse_already_defined(line: &str, content: &str) -> Option<Diagnostic> {
 
         let message = format!("the name `{}` is defined multiple times", name);
         let curr_line = captures[2].parse().unwrap_or(1) - 1;
-        // regex-captured char is the first identifier after the symbol name.
-        let curr_char = content
-            .lines()
-            .nth(curr_line as usize)
-            // TODO: This fails when the duplicate is on the same line.
-            .and_then(|line| line.find(unqualified_name).map(|idx| idx as u32))
-            .unwrap_or_else(|| captures[3].parse().unwrap_or(0));
+        let curr_char = captures[3]
+            .parse()
+            .unwrap_or(0u32)
+            .saturating_sub(unqualified_name_length);
         let range = Range {
             start: Position {
                 line: curr_line,

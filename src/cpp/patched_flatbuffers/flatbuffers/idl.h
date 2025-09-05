@@ -891,6 +891,8 @@ struct ParserState {
         line_start_(nullptr),
         line_(0),
         token_(-1),
+        error_line_(-1),
+        error_cursor_(-1),
         attr_is_trivial_ascii_string_(true) {}
 
  protected:
@@ -916,6 +918,9 @@ struct ParserState {
   const char *line_start_;
   int line_;  // the current line being parsed
   int token_;
+  // overrides for reporting error location
+  int error_line_;
+  int64_t error_cursor_;
 
   // Flag: text in attribute_ is true ASCII string without escape
   // sequences. Only printable ASCII (without [\t\r\n]).
@@ -1097,6 +1102,7 @@ class Parser : public ParserState {
   std::string UnqualifiedName(const std::string &fullQualifiedName);
 
   FLATBUFFERS_CHECKED_ERROR Error(const std::string &msg);
+  FLATBUFFERS_CHECKED_ERROR Error(const std::string &msg, int error_line, int error_cursor);
 
   // @brief Verify that any of 'opts.lang_to_generate' supports Optional scalars
   // in a schema.
@@ -1171,8 +1177,10 @@ class Parser : public ParserState {
                                       const char *filename);
   FLATBUFFERS_CHECKED_ERROR ParseNamespace();
   FLATBUFFERS_CHECKED_ERROR StartStruct(const std::string &name,
+                                        int decl_line, int decl_col,
                                         StructDef **dest);
   FLATBUFFERS_CHECKED_ERROR StartEnum(const std::string &name, bool is_union,
+                                      int decl_line, int decl_col,
                                       EnumDef **dest);
   FLATBUFFERS_CHECKED_ERROR ParseDecl(const char *filename);
   FLATBUFFERS_CHECKED_ERROR ParseService(const char *filename);

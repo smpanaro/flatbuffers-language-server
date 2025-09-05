@@ -373,12 +373,14 @@ void Parser::Message(const std::string &msg) {
   error_ += file_being_parsed_.length() ? AbsolutePath(file_being_parsed_) : "";
   // clang-format off
 
+  int line = error_line_ >= 0 ? error_line_ : line_;
+  int64_t cursor = error_cursor_ >= 0 ? error_cursor_ : CursorPosition();
   #ifdef _WIN32  // MSVC alike
     error_ +=
-        "(" + NumToString(line_) + ", " + NumToString(CursorPosition()) + ")";
+        "(" + NumToString(line) + ", " + NumToString(cursor) + ")";
   #else  // gcc alike
     if (file_being_parsed_.length()) error_ += ":";
-    error_ += NumToString(line_) + ": " + NumToString(CursorPosition());
+    error_ += NumToString(line) + ": " + NumToString(cursor);
   #endif
   // clang-format on
   error_ += ": " + msg;
@@ -392,6 +394,12 @@ void Parser::Warning(const std::string &msg) {
 }
 
 CheckedError Parser::Error(const std::string &msg) {
+  return Error(msg, -1, -1);
+}
+
+CheckedError Parser::Error(const std::string &msg, int error_line, int error_cursor) {
+  error_line_ = error_line;
+  error_cursor_ = error_cursor;
   Message("error: " + msg);
   return CheckedError(true);
 }
@@ -2422,13 +2430,15 @@ struct EnumValBuilder {
     FLATBUFFERS_ASSERT((temp->union_type.enum_def == nullptr) ||
                        (temp->union_type.enum_def == &enum_def));
     auto not_unique = enum_def.vals.Add(name, temp);
+    int temp_line = temp->decl_line;
+    int temp_col = temp->decl_col;
     temp = nullptr;
     if (not_unique) {
       auto prev_def = enum_def.vals.Lookup(name);
       auto prev_loc = prev_def != nullptr ?
           " previously defined at " + enum_def.file+":"+NumToString(prev_def->decl_line)+":"+NumToString(prev_def->decl_col) : "";
       std::string type_name = enum_def.is_union ? "union field" : "enum value";
-      return parser.Error(type_name + " already exists: " + name + prev_loc);
+      return parser.Error(type_name + " already exists: " + name + prev_loc, temp_line, temp_col);
     }
     return NoError();
   }
@@ -2508,14 +2518,12 @@ CheckedError Parser::ParseEnum(const bool is_union, EnumDef **dest,
   const int decl_col = static_cast<int>(CursorPosition());
   EXPECT(kTokenIdentifier);
   EnumDef *enum_def;
-  ECHECK(StartEnum(enum_name, is_union, &enum_def));
+  ECHECK(StartEnum(enum_name, is_union, decl_line, decl_col, &enum_def));
   if (filename != nullptr && !opts.project_root.empty()) {
     enum_def->declaration_file =
         &GetPooledString(FilePath(opts.project_root, filename, opts.binary_schema_absolute_paths));
   }
   enum_def->doc_comment = enum_comment;
-  enum_def->decl_line = decl_line;
-  enum_def->decl_col = decl_col;
   if (!opts.proto_mode) {
     // Give specialized error message, since this type spec used to
     // be optional in the first FlatBuffers release.
@@ -2572,10 +2580,10 @@ CheckedError Parser::ParseEnum(const bool is_union, EnumDef **dest,
     if (opts.proto_mode && attribute_ == "option") {
       ECHECK(ParseProtoOption());
     } else {
-      const int enum_val_line = line_;
-      const int enum_val_col = static_cast<int>(CursorPosition());
       auto &ev = *evb.CreateEnumerator(attribute_);
       auto full_name = ev.name;
+      ev.decl_line = line_;
+      ev.decl_col = static_cast<int>(CursorPosition());
       ev.doc_comment = doc_comment_;
       EXPECT(kTokenIdentifier);
       if (is_union) {
@@ -2619,11 +2627,6 @@ CheckedError Parser::ParseEnum(const bool is_union, EnumDef **dest,
       }
 
       ECHECK(evb.AcceptEnumerator());
-
-      // The EnumVal just created is now the last one in the vector.
-      auto new_val = enum_def->Vals().back();
-      new_val->decl_line = enum_val_line;
-      new_val->decl_col = enum_val_col;
     }
     if (!Is(opts.proto_mode ? ';' : ',')) break;
     NEXT();
@@ -2670,17 +2673,21 @@ CheckedError Parser::ParseEnum(const bool is_union, EnumDef **dest,
   return NoError();
 }
 
-CheckedError Parser::StartStruct(const std::string &name, StructDef **dest) {
+CheckedError Parser::StartStruct(const std::string &name, int decl_line, int decl_col, StructDef **dest) {
   auto &struct_def = *LookupCreateStruct(name, true, true);
   if (!struct_def.predecl)  {
     auto prev_loc = " previously defined at " + struct_def.file+":"+NumToString(struct_def.decl_line)+":"+NumToString(struct_def.decl_col);
     std::string type_name = struct_def.fixed ? "struct" : "table";
     return Error(type_name + " already exists: " +
-                 current_namespace_->GetFullyQualifiedName(name) + prev_loc);
+                 current_namespace_->GetFullyQualifiedName(name) + prev_loc, decl_line, decl_col);
   }
   struct_def.predecl = false;
   struct_def.name = name;
   struct_def.file = file_being_parsed_;
+  if (decl_line >= 0) {
+    struct_def.decl_line = decl_line;
+    struct_def.decl_col = decl_col;
+  }
 
   // Move this struct to the back of the vector just in case it was predeclared,
   // to preserve declaration order.
@@ -2800,11 +2807,9 @@ CheckedError Parser::ParseDecl(const char *filename) {
   const int decl_col = static_cast<int>(CursorPosition());
   EXPECT(kTokenIdentifier);
   StructDef *struct_def;
-  ECHECK(StartStruct(name, &struct_def));
+  ECHECK(StartStruct(name, decl_line, decl_col, &struct_def));
   struct_def->doc_comment = dc;
   struct_def->fixed = fixed;
-  struct_def->decl_line = decl_line;
-  struct_def->decl_col = decl_col;
   if (filename && !opts.project_root.empty()) {
     struct_def->declaration_file =
         &GetPooledString(FilePath(opts.project_root, filename, opts.binary_schema_absolute_paths));
@@ -3002,7 +3007,7 @@ CheckedError Parser::ParseProtoDecl() {
     } else {
       std::string name = attribute_;
       EXPECT(kTokenIdentifier);
-      ECHECK(StartStruct(name, &struct_def));
+      ECHECK(StartStruct(name, -1, -1, &struct_def));
       // Since message definitions can be nested, we create a new namespace.
       auto ns = new Namespace();
       // Copy of current namespace.
@@ -3044,10 +3049,15 @@ CheckedError Parser::ParseProtoDecl() {
 }
 
 CheckedError Parser::StartEnum(const std::string &name, bool is_union,
+                               int decl_line, int decl_col,
                                EnumDef **dest) {
   auto &enum_def = *new EnumDef();
   enum_def.name = name;
   enum_def.file = file_being_parsed_;
+  if (decl_line >= 0) {
+    enum_def.decl_line = decl_line;
+    enum_def.decl_col = decl_col;
+  }
   enum_def.doc_comment = doc_comment_;
 
   enum_def.is_union = is_union;
@@ -3058,7 +3068,7 @@ CheckedError Parser::StartEnum(const std::string &name, bool is_union,
     auto prev_loc = prev_def != nullptr ?
         " previously defined at " + prev_def->file+":"+NumToString(prev_def->decl_line)+":"+NumToString(prev_def->decl_col) : "";
     std::string type_name = enum_def.is_union ? "union" : "enum";
-    return Error(type_name + " already exists: " + qualified_name + prev_loc);
+    return Error(type_name + " already exists: " + qualified_name + prev_loc, decl_line, decl_col);
   }
   enum_def.underlying_type.base_type =
       is_union ? BASE_TYPE_UTYPE : BASE_TYPE_INT;
@@ -3153,11 +3163,11 @@ CheckedError Parser::ParseProtoFields(StructDef *struct_def, bool isextend,
         if (!oneof) NEXT();
         if (oneof && opts.proto_oneof_union) {
           auto name = ConvertCase(attribute_, Case::kUpperCamel) + "Union";
-          ECHECK(StartEnum(name, true, &oneof_union));
+          ECHECK(StartEnum(name, true, -1, -1, &oneof_union));
           type = Type(BASE_TYPE_UNION, nullptr, oneof_union);
         } else {
           auto name = "Anonymous" + NumToString(anonymous_counter_++);
-          ECHECK(StartStruct(name, &anonymous_struct));
+          ECHECK(StartStruct(name, -1, -1, &anonymous_struct));
           type = Type(BASE_TYPE_STRUCT, anonymous_struct);
         }
       } else {
@@ -3282,7 +3292,7 @@ CheckedError Parser::ParseProtoMapField(StructDef *struct_def) {
 
   auto entry_table_name = ConvertCase(field_name, Case::kUpperCamel) + "Entry";
   StructDef *entry_table;
-  ECHECK(StartStruct(entry_table_name, &entry_table));
+  ECHECK(StartStruct(entry_table_name, -1, -1, &entry_table));
   entry_table->has_key = true;
   FieldDef *key_field;
   ECHECK(AddField(*entry_table, "key", key_type, &key_field));
