@@ -1,5 +1,5 @@
 use crate::server::Backend;
-use log::debug;
+use log::{debug, info};
 use tower_lsp::lsp_types::{
     DidChangeTextDocumentParams, DidCloseTextDocumentParams, DidOpenTextDocumentParams,
     DidSaveTextDocumentParams,
@@ -45,6 +45,13 @@ pub async fn handle_did_close(backend: &Backend, params: DidCloseTextDocumentPar
         .document_map
         .remove(&params.text_document.uri.to_string());
 
+    let includers = backend
+        .workspace
+        .file_included_by
+        .get(&params.text_document.uri)
+        .map(|v| v.value().clone())
+        .unwrap_or_default();
+
     // Remove symbols defined in the closed file
     if let Some((_, old_symbol_keys)) = backend
         .workspace
@@ -54,6 +61,15 @@ pub async fn handle_did_close(backend: &Backend, params: DidCloseTextDocumentPar
         for key in old_symbol_keys {
             backend.workspace.symbols.remove(&key);
         }
+    }
+
+    backend
+        .workspace
+        .update_includes(&params.text_document.uri, vec![]);
+
+    // Re-parse files that included the closed file
+    for uri in includers {
+        backend.parse_and_discover(uri.clone(), None).await;
     }
 
     backend
