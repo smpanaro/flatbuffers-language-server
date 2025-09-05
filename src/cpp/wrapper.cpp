@@ -340,3 +340,54 @@ void get_enum_val_documentation(struct FlatbuffersParser* parser, int enum_index
     auto enum_val = enum_def->Vals()[static_cast<size_t>(val_index)];
     join_doc_comments(enum_val->doc_comment, buf, buf_len);
 }
+
+// Functions for include graph
+int get_num_files_with_includes(struct FlatbuffersParser* parser) {
+    if (!parser) return 0;
+    return static_cast<int>(parser->impl.files_included_per_file_.size());
+}
+
+void get_file_with_includes_path(struct FlatbuffersParser* parser, int index, char* buf, int buf_len) {
+    if (!parser || buf == nullptr || buf_len <= 0) {
+        if (buf) buf[0] = '\0';
+        return;
+    }
+    buf[0] = '\0';
+
+    int current_index = 0;
+    for (const auto& pair : parser->impl.files_included_per_file_) {
+        if (current_index == index) {
+            strncpy(buf, pair.first.c_str(), buf_len - 1);
+            buf[buf_len - 1] = '\0'; // Ensure null termination
+            return;
+        }
+        current_index++;
+    }
+}
+
+int get_num_includes_for_file(struct FlatbuffersParser* parser, const char* file_path) {
+    if (!parser || !file_path) return 0;
+    auto it = parser->impl.files_included_per_file_.find(file_path);
+    if (it != parser->impl.files_included_per_file_.end()) {
+        return static_cast<int>(it->second.size());
+    }
+    return 0;
+}
+
+void get_included_file_path(struct FlatbuffersParser* parser, const char* file_path, int index, char* buf, int buf_len) {
+    if (!parser || !file_path || buf == nullptr || buf_len <= 0) {
+        if (buf) buf[0] = '\0';
+        return;
+    }
+    buf[0] = '\0';
+
+    auto it = parser->impl.files_included_per_file_.find(file_path);
+    if (it != parser->impl.files_included_per_file_.end()) {
+        if (index >= 0 && static_cast<size_t>(index) < it->second.size()) {
+            auto set_it = it->second.begin();
+            std::advance(set_it, index);
+            strncpy(buf, set_it->filename.c_str(), buf_len - 1);
+            buf[buf_len - 1] = '\0'; // Ensure null termination
+        }
+    }
+}

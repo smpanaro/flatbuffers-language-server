@@ -3,6 +3,7 @@ use crate::symbol_table::{
     Enum, EnumVariant, Field, RootTypeInfo, Struct, Symbol, SymbolInfo, SymbolKind, SymbolTable,
     Table, Union, UnionVariant,
 };
+use crate::utils::type_utils::extract_base_type_name;
 use log::{debug, error};
 use once_cell::sync::Lazy;
 use regex::Regex;
@@ -99,7 +100,7 @@ unsafe fn parse_success_case(
     extract_enums_and_unions(parser_ptr, &mut st, &mut diagnostics);
     let root_type_info = extract_root_type(parser_ptr);
 
-    perform_semantic_analysis(&st, &mut diagnostics, &included_files, content);
+    perform_semantic_analysis(&st, &mut diagnostics, &included_files, content, parser_ptr);
 
     (st, included_files, root_type_info, diagnostics)
 }
@@ -529,6 +530,7 @@ fn perform_semantic_analysis(
     diagnostics: &mut HashMap<Url, Vec<Diagnostic>>,
     _included_files: &Vec<String>,
     file_contents: &str,
+    parser_ptr: *mut ffi::FlatbuffersParser,
 ) {
     let scalar_types: HashSet<_> = [
         "bool", "byte", "ubyte", "int8", "uint8", "short", "ushort", "int16", "uint16", "int",
@@ -539,27 +541,60 @@ fn perform_semantic_analysis(
     .cloned()
     .collect();
 
-    let mut symbols_by_file: HashMap<Url, Vec<String>> = HashMap::new();
-    for symbol in st.values() {
-        symbols_by_file
-            .entry(symbol.info.location.uri.clone())
-            .or_default()
-            .push(symbol.info.name.clone());
-    }
-
     let mut used_types = HashSet::new();
     for symbol in st.values() {
         if symbol.info.location.uri != st.uri {
             continue;
         }
-        let fields = match &symbol.kind {
-            SymbolKind::Table(t) => &t.fields,
-            SymbolKind::Struct(s) => &s.fields,
+        match &symbol.kind {
+            SymbolKind::Table(t) => {
+                for field in &t.fields {
+                    if let SymbolKind::Field(f) = &field.kind {
+                        used_types.insert(extract_base_type_name(&f.type_name).to_string());
+                    }
+                }
+            }
+            SymbolKind::Struct(s) => {
+                for field in &s.fields {
+                    if let SymbolKind::Field(f) = &field.kind {
+                        used_types.insert(extract_base_type_name(&f.type_name).to_string());
+                    }
+                }
+            }
+            SymbolKind::Union(u) => {
+                for variant in &u.variants {
+                    used_types.insert(variant.name.clone());
+                }
+            }
             _ => continue,
-        };
-        for field in fields {
-            if let SymbolKind::Field(f) = &field.kind {
-                used_types.insert(f.type_name.clone());
+        }
+    }
+
+    let include_graph = unsafe { build_include_graph(parser_ptr) };
+
+    let mut directly_required_files = HashSet::new();
+    for used_type in &used_types {
+        if let Some(symbol) = st.get(used_type) {
+            directly_required_files.insert(symbol.info.location.uri.to_file_path().unwrap());
+        }
+    }
+
+    let mut required_files = HashSet::new();
+    let mut queue: Vec<_> = directly_required_files.into_iter().collect();
+    let mut visited = HashSet::new();
+
+    while let Some(file) = queue.pop() {
+        if visited.contains(&file) {
+            continue;
+        }
+        visited.insert(file.clone());
+        required_files.insert(file.clone());
+
+        if let Some(includes) = include_graph.get(file.to_str().unwrap()) {
+            for include in includes {
+                let mut path = std::path::PathBuf::new();
+                path.push(include);
+                queue.push(path);
             }
         }
     }
@@ -573,38 +608,27 @@ fn perform_semantic_analysis(
                     absolute_path.pop();
                     absolute_path.push(include_path);
 
-                    if let Ok(include_uri) = Url::from_file_path(absolute_path) {
-                        if let Some(symbols_in_include) = symbols_by_file.get(&include_uri) {
-                            let mut is_used = false;
-                            for symbol_name in symbols_in_include {
-                                if used_types.contains(symbol_name) {
-                                    is_used = true;
-                                    break;
-                                }
-                            }
-                            if !is_used {
-                                let range = Range {
-                                    start: Position {
-                                        line: line_num as u32,
-                                        character: 0,
-                                    },
-                                    end: Position {
-                                        line: line_num as u32,
-                                        character: line.len() as u32,
-                                    },
-                                };
-                                diagnostics
-                                    .entry(st.uri.clone())
-                                    .or_default()
-                                    .push(Diagnostic {
-                                        range,
-                                        severity: Some(DiagnosticSeverity::HINT),
-                                        message: format!("unused include: {}", include_path),
-                                        tags: Some(vec![DiagnosticTag::UNNECESSARY]),
-                                        ..Default::default()
-                                    });
-                            }
-                        }
+                    if !required_files.contains(&absolute_path) {
+                        let range = Range {
+                            start: Position {
+                                line: line_num as u32,
+                                character: 0,
+                            },
+                            end: Position {
+                                line: line_num as u32,
+                                character: line.len() as u32,
+                            },
+                        };
+                        diagnostics
+                            .entry(st.uri.clone())
+                            .or_default()
+                            .push(Diagnostic {
+                                range,
+                                severity: Some(DiagnosticSeverity::HINT),
+                                message: format!("unused include: {}", include_path),
+                                tags: Some(vec![DiagnosticTag::UNNECESSARY]),
+                                ..Default::default()
+                            });
                     }
                 }
             }
@@ -652,6 +676,45 @@ fn perform_semantic_analysis(
             }
         }
     }
+}
+
+unsafe fn build_include_graph(
+    parser_ptr: *mut ffi::FlatbuffersParser,
+) -> HashMap<String, Vec<String>> {
+    let mut include_graph = HashMap::new();
+    let num_files = ffi::get_num_files_with_includes(parser_ptr);
+    for i in 0..num_files {
+        let mut path_buffer = vec![0u8; 1024];
+        ffi::get_file_with_includes_path(
+            parser_ptr,
+            i,
+            path_buffer.as_mut_ptr() as *mut i8,
+            path_buffer.len() as i32,
+        );
+        let file_path = CStr::from_ptr(path_buffer.as_ptr() as *const i8)
+            .to_string_lossy()
+            .into_owned();
+
+        let c_file_path = CString::new(file_path.clone()).unwrap();
+        let num_includes = ffi::get_num_includes_for_file(parser_ptr, c_file_path.as_ptr());
+        let mut includes = Vec::new();
+        for j in 0..num_includes {
+            let mut include_path_buffer = vec![0u8; 1024];
+            ffi::get_included_file_path(
+                parser_ptr,
+                c_file_path.as_ptr(),
+                j,
+                include_path_buffer.as_mut_ptr() as *mut i8,
+                include_path_buffer.len() as i32,
+            );
+            let include_path = CStr::from_ptr(include_path_buffer.as_ptr() as *const i8)
+                .to_string_lossy()
+                .into_owned();
+            includes.push(include_path);
+        }
+        include_graph.insert(file_path, includes);
+    }
+    include_graph
 }
 
 /// Helper to check if a type is a builtin scalar or defined in the symbol table.

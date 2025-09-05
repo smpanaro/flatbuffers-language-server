@@ -92,6 +92,12 @@ void get_field_type_name(struct FlatbuffersParser* parser, int struct_index, int
 int get_num_all_included_files(struct FlatbuffersParser* parser);
 void get_all_included_file_path(struct FlatbuffersParser* parser, int index, char* buf, int buf_len);
 
+// Functions for include graph
+int get_num_files_with_includes(struct FlatbuffersParser* parser);
+void get_file_with_includes_path(struct FlatbuffersParser* parser, int index, char* buf, int buf_len);
+int get_num_includes_for_file(struct FlatbuffersParser* parser, const char* file_path);
+void get_included_file_path(struct FlatbuffersParser* parser, const char* file_path, int index, char* buf, int buf_len);
+
 // Functions for documentation
 void get_struct_documentation(struct FlatbuffersParser* parser, int index, char* buf, int buf_len);
 void get_enum_documentation(struct FlatbuffersParser* parser, int index, char* buf, int buf_len);

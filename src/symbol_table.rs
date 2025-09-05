@@ -193,6 +193,10 @@ impl SymbolTable {
         self.table.contains_key(key)
     }
 
+    pub fn get(&self, key: &str) -> Option<&Symbol> {
+        self.table.get(key)
+    }
+
     pub fn values(&self) -> impl Iterator<Item = &Symbol> {
         self.table.values()
     }
