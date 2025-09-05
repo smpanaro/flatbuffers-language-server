@@ -11,7 +11,10 @@ pub struct RootTypeInfo {
 
 // A map from a fully qualified name to its symbol definition
 #[derive(Debug)]
-pub struct SymbolTable(HashMap<String, Symbol>);
+pub struct SymbolTable {
+    pub uri: Url,
+    table: HashMap<String, Symbol>,
+}
 
 // Represents a single symbol in the source code
 #[derive(Debug, Clone)]
@@ -174,25 +177,28 @@ impl Symbol {
 
 impl SymbolTable {
     /// Create a new token map.
-    pub fn new() -> SymbolTable {
-        SymbolTable(HashMap::with_capacity(2048))
+    pub fn new(uri: Url) -> SymbolTable {
+        SymbolTable {
+            uri,
+            table: HashMap::with_capacity(2048),
+        }
     }
 
     pub fn insert(&mut self, symbol: Symbol) {
         // TODO: Should this key include namespace?
-        self.0.insert(symbol.info.name.clone(), symbol);
+        self.table.insert(symbol.info.name.clone(), symbol);
     }
 
     pub fn contains_key(&self, key: &str) -> bool {
-        self.0.contains_key(key)
+        self.table.contains_key(key)
     }
 
     pub fn values(&self) -> impl Iterator<Item = &Symbol> {
-        self.0.values()
+        self.table.values()
     }
 
     pub fn into_inner(self) -> HashMap<String, Symbol> {
-        self.0
+        self.table
     }
 }
 

@@ -17,6 +17,34 @@ pub async fn handle_code_action(
     let mut code_actions = Vec::new();
 
     for diagnostic in params.context.diagnostics {
+        let unused_include_re = Regex::new(r"unused include: (.+)").unwrap();
+        if let Some(_) = unused_include_re.captures(&diagnostic.message) {
+            let range = diagnostic.range;
+            let text_edit = TextEdit {
+                range: Range {
+                    start: range.start,
+                    end: Position {
+                        line: range.end.line + 1,
+                        character: 0,
+                    },
+                },
+                new_text: "".to_string(),
+            };
+            let mut changes = HashMap::new();
+            changes.insert(uri.clone(), vec![text_edit]);
+            let code_action = CodeAction {
+                title: "Remove unused include".to_string(),
+                kind: Some(CodeActionKind::QUICKFIX),
+                diagnostics: Some(vec![diagnostic.clone()]),
+                edit: Some(WorkspaceEdit {
+                    changes: Some(changes),
+                    ..Default::default()
+                }),
+                ..Default::default()
+            };
+            code_actions.push(CodeActionOrCommand::CodeAction(code_action));
+        }
+
         let undefined_type_re =
             Regex::new(r"type referenced but not defined \(check namespace\): (\w+)").unwrap();
         let Some(captures) = undefined_type_re.captures(&diagnostic.message) else {

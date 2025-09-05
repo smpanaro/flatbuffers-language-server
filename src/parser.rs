@@ -55,7 +55,8 @@ impl Parser for FlatcFFIParser {
 
             let (diagnostics, symbol_table, included_files, root_type_info) =
                 if ffi::is_parser_success(parser_ptr) {
-                    let (st, included, root_info, diags) = parse_success_case(parser_ptr);
+                    let (st, included, root_info, diags) =
+                        parse_success_case(parser_ptr, uri, content);
                     (diags, Some(st), included, root_info)
                 } else {
                     (
@@ -82,13 +83,15 @@ static RE: Lazy<Regex> = Lazy::new(|| {
 /// Handles the successful parse case.
 unsafe fn parse_success_case(
     parser_ptr: *mut ffi::FlatbuffersParser,
+    uri: &Url,
+    content: &str,
 ) -> (
     SymbolTable,
     Vec<String>,
     Option<RootTypeInfo>,
     HashMap<Url, Vec<Diagnostic>>,
 ) {
-    let mut st = SymbolTable::new();
+    let mut st = SymbolTable::new(uri.clone());
     let mut diagnostics = HashMap::new();
 
     let included_files = extract_all_included_files(parser_ptr);
@@ -96,7 +99,7 @@ unsafe fn parse_success_case(
     extract_enums_and_unions(parser_ptr, &mut st, &mut diagnostics);
     let root_type_info = extract_root_type(parser_ptr);
 
-    perform_semantic_analysis(&st, &mut diagnostics);
+    perform_semantic_analysis(&st, &mut diagnostics, &included_files, content);
 
     (st, included_files, root_type_info, diagnostics)
 }
@@ -521,7 +524,12 @@ unsafe fn extract_root_type(parser_ptr: *mut ffi::FlatbuffersParser) -> Option<R
 }
 
 /// Performs second-pass semantic analysis on the symbol table.
-fn perform_semantic_analysis(st: &SymbolTable, diagnostics: &mut HashMap<Url, Vec<Diagnostic>>) {
+fn perform_semantic_analysis(
+    st: &SymbolTable,
+    diagnostics: &mut HashMap<Url, Vec<Diagnostic>>,
+    _included_files: &Vec<String>,
+    file_contents: &str,
+) {
     let scalar_types: HashSet<_> = [
         "bool", "byte", "ubyte", "int8", "uint8", "short", "ushort", "int16", "uint16", "int",
         "uint", "int32", "uint32", "float", "float32", "long", "ulong", "int64", "uint64",
@@ -530,6 +538,78 @@ fn perform_semantic_analysis(st: &SymbolTable, diagnostics: &mut HashMap<Url, Ve
     .iter()
     .cloned()
     .collect();
+
+    let mut symbols_by_file: HashMap<Url, Vec<String>> = HashMap::new();
+    for symbol in st.values() {
+        symbols_by_file
+            .entry(symbol.info.location.uri.clone())
+            .or_default()
+            .push(symbol.info.name.clone());
+    }
+
+    let mut used_types = HashSet::new();
+    for symbol in st.values() {
+        if symbol.info.location.uri != st.uri {
+            continue;
+        }
+        let fields = match &symbol.kind {
+            SymbolKind::Table(t) => &t.fields,
+            SymbolKind::Struct(s) => &s.fields,
+            _ => continue,
+        };
+        for field in fields {
+            if let SymbolKind::Field(f) = &field.kind {
+                used_types.insert(f.type_name.clone());
+            }
+        }
+    }
+
+    for (line_num, line) in file_contents.lines().enumerate() {
+        if line.starts_with("include") {
+            if let Some(start) = line.find('"') {
+                if let Some(end) = line.rfind('"') {
+                    let include_path = &line[start + 1..end];
+                    let mut absolute_path = st.uri.to_file_path().unwrap();
+                    absolute_path.pop();
+                    absolute_path.push(include_path);
+
+                    if let Ok(include_uri) = Url::from_file_path(absolute_path) {
+                        if let Some(symbols_in_include) = symbols_by_file.get(&include_uri) {
+                            let mut is_used = false;
+                            for symbol_name in symbols_in_include {
+                                if used_types.contains(symbol_name) {
+                                    is_used = true;
+                                    break;
+                                }
+                            }
+                            if !is_used {
+                                let range = Range {
+                                    start: Position {
+                                        line: line_num as u32,
+                                        character: 0,
+                                    },
+                                    end: Position {
+                                        line: line_num as u32,
+                                        character: line.len() as u32,
+                                    },
+                                };
+                                diagnostics
+                                    .entry(st.uri.clone())
+                                    .or_default()
+                                    .push(Diagnostic {
+                                        range,
+                                        severity: Some(DiagnosticSeverity::HINT),
+                                        message: format!("unused include: {}", include_path),
+                                        tags: Some(vec![DiagnosticTag::UNNECESSARY]),
+                                        ..Default::default()
+                                    });
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
 
     for symbol in st.values() {
         let fields = match &symbol.kind {
