@@ -69,6 +69,8 @@ impl Backend {
             if let Some(st) = symbol_table {
                 self.workspace
                     .update_symbols(&uri, st, included_files.clone(), root_type_info);
+            } else {
+                self.workspace.update_includes(&uri, included_files.clone());
             }
 
             for (file_uri, diagnostics) in diagnostics_map {

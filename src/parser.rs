@@ -3,7 +3,7 @@ use crate::symbol_table::{
     Enum, EnumVariant, Field, RootTypeInfo, Struct, Symbol, SymbolInfo, SymbolKind, SymbolTable,
     Table, Union, UnionVariant,
 };
-use log::{debug, error};
+use log::{debug, error, info};
 use once_cell::sync::Lazy;
 use regex::Regex;
 use std::collections::{HashMap, HashSet};
@@ -61,7 +61,7 @@ impl Parser for FlatcFFIParser {
                     (
                         parse_error_case(parser_ptr, &uri.to_string(), content),
                         None,
-                        vec![],
+                        extract_all_included_files(parser_ptr),
                         None,
                     )
                 };
@@ -91,7 +91,7 @@ unsafe fn parse_success_case(
     let mut st = SymbolTable::new();
     let mut diagnostics = HashMap::new();
 
-    let included_files = extract_included_files(parser_ptr);
+    let included_files = extract_all_included_files(parser_ptr);
     extract_structs_and_tables(parser_ptr, &mut st, &mut diagnostics);
     extract_enums_and_unions(parser_ptr, &mut st, &mut diagnostics);
     let root_type_info = extract_root_type(parser_ptr);
@@ -259,12 +259,12 @@ fn parse_already_defined(line: &str) -> Option<(Url, Diagnostic)> {
 }
 
 /// Extracts all included file paths from the parser.
-unsafe fn extract_included_files(parser_ptr: *mut ffi::FlatbuffersParser) -> Vec<String> {
+unsafe fn extract_all_included_files(parser_ptr: *mut ffi::FlatbuffersParser) -> Vec<String> {
     let mut included_files = Vec::new();
-    let num_included = ffi::get_num_included_files(parser_ptr);
+    let num_included = ffi::get_num_all_included_files(parser_ptr);
     for i in 0..num_included {
         let mut path_buffer = vec![0u8; 1024];
-        ffi::get_included_file_path(
+        ffi::get_all_included_file_path(
             parser_ptr,
             i,
             path_buffer.as_mut_ptr() as *mut i8,

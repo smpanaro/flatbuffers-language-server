@@ -91,6 +91,21 @@ impl Workspace {
         }
         self.root_types.remove(uri);
 
+        self.update_includes(uri, included_files);
+
+        let symbol_map = st.into_inner();
+        let new_symbol_keys: Vec<String> = symbol_map.keys().cloned().collect();
+        for (key, symbol) in symbol_map {
+            self.symbols.insert(key, symbol);
+        }
+        self.file_definitions.insert(uri.clone(), new_symbol_keys);
+
+        if let Some(rti) = root_type_info {
+            self.root_types.insert(uri.clone(), rti);
+        }
+    }
+
+    pub fn update_includes(&self, uri: &Url, included_files: Vec<String>) {
         if let Some((_, old_included_files)) = self.file_includes.remove(uri) {
             for old_included_file in old_included_files {
                 if let Ok(old_included_uri) = Url::from_file_path(&old_included_file) {
@@ -109,17 +124,6 @@ impl Workspace {
                     .or_default()
                     .push(uri.clone());
             }
-        }
-
-        let symbol_map = st.into_inner();
-        let new_symbol_keys: Vec<String> = symbol_map.keys().cloned().collect();
-        for (key, symbol) in symbol_map {
-            self.symbols.insert(key, symbol);
-        }
-        self.file_definitions.insert(uri.clone(), new_symbol_keys);
-
-        if let Some(rti) = root_type_info {
-            self.root_types.insert(uri.clone(), rti);
         }
 
         self.file_includes.insert(uri.clone(), included_files);

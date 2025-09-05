@@ -181,12 +181,6 @@ struct RootTypeDefinitionInfo get_root_type_info(struct FlatbuffersParser* parse
     return info;
 }
 
-// Functions for included files
-int get_num_included_files(struct FlatbuffersParser* parser) {
-    if (!parser) return 0;
-    return static_cast<int>(parser->impl.GetIncludedFiles().size());
-}
-
 void join_doc_comments(const std::vector<std::string>& doc_comment, char* buf, int buf_len) {
     if (buf == nullptr || buf_len <= 0) return;
     buf[0] = '\0';
@@ -205,21 +199,34 @@ void join_doc_comments(const std::vector<std::string>& doc_comment, char* buf, i
     }
 }
 
-void get_included_file_path(struct FlatbuffersParser* parser, int index, char* buf, int buf_len) {
+int get_num_all_included_files(struct FlatbuffersParser* parser) {
+    if (!parser) return 0;
+    int count = 0;
+    for (const auto& pair : parser->impl.files_included_per_file_) {
+        count += pair.second.size();
+    }
+    return count;
+}
+
+void get_all_included_file_path(struct FlatbuffersParser* parser, int index, char* buf, int buf_len) {
+
     if (!parser || buf == nullptr || buf_len <= 0) {
         if (buf) buf[0] = '\0';
         return;
     }
     buf[0] = '\0';
 
-    auto included_files = parser->impl.GetIncludedFiles();
-    if (index < 0 || static_cast<size_t>(index) >= included_files.size()) {
-        return;
+    int current_index = 0;
+    for (const auto& pair : parser->impl.files_included_per_file_) {
+        for (const auto& included_file : pair.second) {
+            if (current_index == index) {
+                strncpy(buf, included_file.filename.c_str(), buf_len - 1);
+                buf[buf_len - 1] = '\0'; // Ensure null termination
+                return;
+            }
+            current_index++;
+        }
     }
-
-    const auto& file_path = included_files[static_cast<size_t>(index)].filename;
-    strncpy(buf, file_path.c_str(), buf_len - 1);
-    buf[buf_len - 1] = '\0'; // Ensure null termination
 }
 
 // Functions for fields
