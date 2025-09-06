@@ -46,6 +46,8 @@ struct FieldDefinitionInfo {
     unsigned type_line;
     unsigned type_col;
     bool deprecated;
+    bool has_id;
+    int id;
 };
 
 struct RootTypeDefinitionInfo {

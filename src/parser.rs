@@ -364,6 +364,8 @@ unsafe fn extract_structs_and_tables(
                     type_name,
                     type_range,
                     deprecated: field_info.deprecated,
+                    has_id: field_info.has_id,
+                    id: field_info.id,
                 }),
                 documentation,
             );

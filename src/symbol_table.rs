@@ -82,6 +82,8 @@ pub struct Field {
     pub type_name: String, // The name of the field's type, e.g., "string" or "Vec3"
     pub type_range: Range,
     pub deprecated: bool,
+    pub has_id: bool,
+    pub id: i32,
 }
 
 impl Symbol {

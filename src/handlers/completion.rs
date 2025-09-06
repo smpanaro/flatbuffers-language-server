@@ -1,4 +1,6 @@
+use crate::analysis::find_enclosing_table;
 use crate::server::Backend;
+use crate::symbol_table::SymbolKind;
 use log::info;
 use once_cell::sync::Lazy;
 use regex::Regex;
@@ -6,38 +8,106 @@ use std::time::Instant;
 use tower_lsp::jsonrpc::Result;
 use tower_lsp::lsp_types::{
     CompletionItem, CompletionItemKind, CompletionParams, CompletionResponse, Documentation,
-    MarkupContent, MarkupKind,
+    MarkupContent, MarkupKind, Position, Range, TextEdit, Url,
 };
 
 static FIELD_RE: Lazy<Regex> = Lazy::new(|| Regex::new(r"^\s*(\w+)\s*:").unwrap());
+static ID_ATTR_RE: Lazy<Regex> = Lazy::new(|| Regex::new(r"(?i)\b(i|id|id:)\s*\d*$").unwrap());
 
-pub async fn handle_completion(
+fn handle_id_completion(
     backend: &Backend,
-    params: CompletionParams,
-) -> Result<Option<CompletionResponse>> {
-    let start = Instant::now();
-    let uri = params.text_document_position.text_document.uri;
-    let position = params.text_document_position.position;
+    uri: &Url,
+    position: Position,
+    line: &str,
+) -> Option<CompletionResponse> {
+    if let Some(start_paren) = line[..position.character as usize].rfind('(') {
+        let trigger_text = &line[start_paren + 1..position.character as usize];
+        if let Some(mat) = ID_ATTR_RE.find(trigger_text) {
+            if let Some(table_symbol) = find_enclosing_table(&backend.workspace, uri, position) {
+                if let SymbolKind::Table(table) = &table_symbol.kind {
+                    let mut max_id = -1;
+                    let mut has_ids = false;
+                    let mut style_with_space = true;
 
-    let Some(doc) = backend.document_map.get(uri.as_str()) else {
-        return Ok(None);
-    };
-    let Some(line) = doc.lines().nth(position.line as usize) else {
-        return Ok(None);
-    };
+                    for field in &table.fields {
+                        if let SymbolKind::Field(f) = &field.kind {
+                            if f.has_id {
+                                has_ids = true;
+                                if f.id > max_id {
+                                    max_id = f.id;
+                                }
+                                // Check styling
+                                if let Some(line) = backend
+                                    .document_map
+                                    .get(uri.as_str())
+                                    .unwrap()
+                                    .lines()
+                                    .nth(field.info.location.range.start.line as usize)
+                                {
+                                    if let Some(id_attr) = line.find("id:") {
+                                        if line.chars().nth(id_attr + 3).unwrap_or(' ') != ' ' {
+                                            style_with_space = false;
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
 
-    let curr_char = line
-        .chars()
-        .nth(position.character.saturating_sub(1) as usize);
-    let prev_char = line
-        .chars()
-        .nth(position.character.saturating_sub(2) as usize);
+                    if has_ids {
+                        let next_id = max_id + 1;
+                        let label = if style_with_space {
+                            format!("id: {}", next_id)
+                        } else {
+                            format!("id:{}", next_id)
+                        };
+
+                        let range = Range {
+                            start: Position {
+                                line: position.line,
+                                character: (start_paren + 1 + mat.start()) as u32,
+                            },
+                            end: position,
+                        };
+
+                        let item = CompletionItem {
+                            label,
+                            kind: Some(CompletionItemKind::PROPERTY),
+                            detail: Some("next available id".to_string()),
+                            documentation: Some(Documentation::MarkupContent(MarkupContent {
+                                kind: MarkupKind::Markdown,
+                                value: "ids must be contiguous and start at 0".to_string(),
+                            })),
+                            text_edit: Some(tower_lsp::lsp_types::CompletionTextEdit::Edit(
+                                TextEdit {
+                                    range,
+                                    new_text: if style_with_space {
+                                        format!("id: {}", next_id)
+                                    } else {
+                                        format!("id:{}", next_id)
+                                    },
+                                },
+                            )),
+                            ..Default::default()
+                        };
+                        return Some(CompletionResponse::Array(vec![item]));
+                    }
+                }
+            }
+        }
+    }
+    None
+}
+
+fn handle_field_type_completion(backend: &Backend, line: &str) -> Option<CompletionResponse> {
+    let curr_char = line.chars().last();
+    let prev_char = line.chars().nth(line.chars().count().saturating_sub(2));
     if curr_char == Some(' ') && prev_char != Some(':') {
-        return Ok(None);
+        return None;
     }
 
     let Some(captures) = FIELD_RE.captures(line) else {
-        return Ok(None);
+        return None;
     };
     let field_name = captures.get(1).map_or("", |m| m.as_str());
 
@@ -94,14 +164,42 @@ pub async fn handle_completion(
         });
     }
 
+    Some(CompletionResponse::Array(items))
+}
+
+pub async fn handle_completion(
+    backend: &Backend,
+    params: CompletionParams,
+) -> Result<Option<CompletionResponse>> {
+    let start = Instant::now();
+    let uri = params.text_document_position.text_document.uri;
+    let position = params.text_document_position.position;
+
+    let Some(doc) = backend.document_map.get(uri.as_str()) else {
+        return Ok(None);
+    };
+    let Some(line) = doc.lines().nth(position.line as usize) else {
+        return Ok(None);
+    };
+
+    let response = if let Some(response) = handle_id_completion(backend, &uri, position, line) {
+        Some(response)
+    } else {
+        handle_field_type_completion(backend, line)
+    };
+
+    let elapsed = start.elapsed();
     info!(
         "completion in {}ms: {} L{}C{} -> {} items",
-        start.elapsed().as_millis(),
+        elapsed.as_millis(),
         &uri.path(),
         position.line + 1,
         position.character + 1,
-        &items.len()
+        response.as_ref().map_or(0, |r| match r {
+            CompletionResponse::Array(ref a) => a.len(),
+            CompletionResponse::List(ref l) => l.items.len(),
+        })
     );
 
-    Ok(Some(CompletionResponse::Array(items)))
+    Ok(response)
 }

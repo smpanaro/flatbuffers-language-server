@@ -2,6 +2,7 @@ use crate::ext::range::RangeExt;
 use crate::symbol_table::{self, Symbol};
 use crate::utils;
 use crate::workspace::Workspace;
+
 use tower_lsp::lsp_types::{Position, Range, Url};
 
 /// Represents what symbol was found at a given location, and what it resolves to.
@@ -91,4 +92,36 @@ pub fn resolve_symbol_at(
         range,
         ref_name,
     })
+}
+
+pub fn find_enclosing_table<'a>(
+    workspace: &'a Workspace,
+    uri: &Url,
+    position: Position,
+) -> Option<Symbol> {
+    let mut symbols_before_cursor: Vec<_> = workspace
+        .symbols
+        .iter()
+        .filter(|entry| {
+            let symbol = entry.value();
+            if symbol.info.location.uri != *uri {
+                return false;
+            }
+            if symbol.info.location.range.start < position {
+                return true;
+            }
+            false
+        })
+        .map(|entry| entry.value().clone())
+        .collect();
+
+    symbols_before_cursor.sort_by_key(|s| s.info.location.range.start);
+
+    if let Some(last_symbol) = symbols_before_cursor.last() {
+        if let symbol_table::SymbolKind::Table(_) = &last_symbol.kind {
+            return Some(last_symbol.clone());
+        }
+    }
+
+    None
 }

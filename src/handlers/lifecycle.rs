@@ -1,5 +1,5 @@
 use crate::server::Backend;
-use log::{debug, info};
+use log::debug;
 use tower_lsp::lsp_types::{
     DidChangeTextDocumentParams, DidCloseTextDocumentParams, DidOpenTextDocumentParams,
     DidSaveTextDocumentParams,
