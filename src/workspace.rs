@@ -16,6 +16,7 @@ pub struct Workspace {
     pub file_included_by: DashMap<Url, Vec<Url>>,
     /// Map from file URI to the root type defined in that file.
     pub root_types: DashMap<Url, RootTypeInfo>,
+    pub builtin_attributes: DashMap<String, String>,
 }
 
 fn populate_builtins(workspace: &mut Workspace) {
@@ -72,8 +73,10 @@ impl Workspace {
             file_includes: DashMap::new(),
             file_included_by: DashMap::new(),
             root_types: DashMap::new(),
+            builtin_attributes: DashMap::new(),
         };
         populate_builtins(&mut workspace);
+        populate_builtin_attributes(&mut workspace);
         workspace
     }
 
@@ -133,5 +136,43 @@ impl Workspace {
 impl Default for Workspace {
     fn default() -> Self {
         Self::new()
+    }
+}
+
+fn populate_builtin_attributes(workspace: &mut Workspace) {
+    let attributes = [
+        ("deprecated", "Omit generated code for this field."),
+        (
+            "required",
+            "Require this field to be set. Generated code will enforce this.",
+        ),
+        (
+            "key",
+            "Use this field as a key for sorting vectors of its containing table.",
+        ),
+        (
+            "hash",
+            "Allow this field's JSON value to be a string whose hash is stored in this uint32/uint64 field.",
+        ),
+        (
+            "force_align",
+            "Force alignment to be higher than this struct or vector's natural alignment.",
+        ),
+        (
+            "nested_flatbuffer",
+            "Mark this [ubyte] field as containing FlatBuffer data with the specified root type.",
+        ),
+        (
+            "flexbuffer",
+            "Mark this [ubyte] field as containing FlexBuffer data.",
+        ),
+        // ("bit_flags", "This enum's values are bit masks"), // Only valid on enums. TODO: Support non-field attributes.
+        // ("original_order", "Keep the original order of fields."), // Docs basically say don't use this.
+    ];
+
+    for (name, doc) in attributes {
+        workspace
+            .builtin_attributes
+            .insert(name.to_string(), doc.to_string());
     }
 }

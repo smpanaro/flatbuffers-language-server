@@ -12,27 +12,45 @@ use tower_lsp::lsp_types::{
 };
 
 static FIELD_RE: Lazy<Regex> = Lazy::new(|| Regex::new(r"^\s*(\w+)\s*:").unwrap());
-static ID_ATTR_RE: Lazy<Regex> = Lazy::new(|| Regex::new(r"(?i)\b(i|id|id:)\s*\d*$").unwrap());
 
-fn handle_id_completion(
+fn handle_attribute_completion(
     backend: &Backend,
     uri: &Url,
     position: Position,
     line: &str,
 ) -> Option<CompletionResponse> {
     if let Some(start_paren) = line[..position.character as usize].rfind('(') {
+        // Ignore if inside a comment
+        if let Some(comment_start) = line.find("//") {
+            if start_paren > comment_start {
+                return None;
+            }
+        }
+
         let trigger_text = &line[start_paren + 1..position.character as usize];
-        if let Some(mat) = ID_ATTR_RE.find(trigger_text) {
+        let last_word = trigger_text
+            .split(|c: char| c.is_whitespace() || c == ',' || c == ':')
+            .last()
+            .unwrap_or("");
+
+        let mut items = Vec::new();
+        let common_attributes = ["deprecated", "required", "key", "id"];
+        let trigger_char = line[start_paren..position.character as usize]
+            .chars()
+            .last()
+            .unwrap_or('\0');
+        let attribute_prefix = if trigger_char == ',' { " " } else { "" };
+
+        // ID completion
+        if "id".starts_with(last_word) {
             if let Some(table_symbol) = find_enclosing_table(&backend.workspace, uri, position) {
                 if let SymbolKind::Table(table) = &table_symbol.kind {
                     let mut max_id = -1;
-                    let mut has_ids = false;
                     let mut style_with_space = true;
 
                     for field in &table.fields {
                         if let SymbolKind::Field(f) = &field.kind {
                             if f.has_id {
-                                has_ids = true;
                                 if f.id > max_id {
                                     max_id = f.id;
                                 }
@@ -54,7 +72,8 @@ fn handle_id_completion(
                         }
                     }
 
-                    if has_ids {
+                    let has_id_attribute = line.find("id:") != None;
+                    if !has_id_attribute {
                         let next_id = max_id + 1;
                         let label = if style_with_space {
                             format!("id: {}", next_id)
@@ -65,19 +84,22 @@ fn handle_id_completion(
                         let range = Range {
                             start: Position {
                                 line: position.line,
-                                character: (start_paren + 1 + mat.start()) as u32,
+                                character: (position.character - last_word.len() as u32),
                             },
                             end: position,
                         };
 
-                        let item = CompletionItem {
+                        let insert_text = Some(attribute_prefix.to_string() + &label);
+                        items.push(CompletionItem {
                             label,
+                            insert_text: insert_text,
                             kind: Some(CompletionItemKind::PROPERTY),
                             detail: Some("next available id".to_string()),
                             documentation: Some(Documentation::MarkupContent(MarkupContent {
                                 kind: MarkupKind::Markdown,
-                                value: "ids must be contiguous and start at 0".to_string(),
+                                value: "The next available field id for this table. IDs must be contiguous and start at 0.".to_string(),
                             })),
+                            sort_text: Some("00".to_string()),
                             text_edit: Some(tower_lsp::lsp_types::CompletionTextEdit::Edit(
                                 TextEdit {
                                     range,
@@ -89,12 +111,47 @@ fn handle_id_completion(
                                 },
                             )),
                             ..Default::default()
-                        };
-                        return Some(CompletionResponse::Array(vec![item]));
+                        });
                     }
                 }
             }
         }
+
+        // Other attributes
+        let attribute_list = &line[start_paren..];
+        let value_attributes = ["force_align", "nested_flatbuffer", "hash"]; // attributes that require a value
+        for entry in backend.workspace.builtin_attributes.iter() {
+            let (name, doc) = (entry.key(), entry.value());
+
+            if attribute_list.contains(name) {
+                continue;
+            }
+
+            if name.starts_with(last_word) {
+                let sort_text = if common_attributes.contains(&name.as_str()) {
+                    format!("0_{}", name)
+                } else {
+                    format!("1_{}", name)
+                };
+                let insert_suffix = if value_attributes.contains(&name.as_str()) {
+                    ":"
+                } else {
+                    ""
+                };
+                items.push(CompletionItem {
+                    label: name.clone(),
+                    insert_text: Some(attribute_prefix.to_string() + &name + insert_suffix),
+                    kind: Some(CompletionItemKind::PROPERTY),
+                    documentation: Some(Documentation::MarkupContent(MarkupContent {
+                        kind: MarkupKind::Markdown,
+                        value: doc.clone(),
+                    })),
+                    sort_text: Some(sort_text),
+                    ..Default::default()
+                });
+            }
+        }
+        return Some(CompletionResponse::Array(items));
     }
     None
 }
@@ -182,11 +239,12 @@ pub async fn handle_completion(
         return Ok(None);
     };
 
-    let response = if let Some(response) = handle_id_completion(backend, &uri, position, line) {
-        Some(response)
-    } else {
-        handle_field_type_completion(backend, line)
-    };
+    let response =
+        if let Some(response) = handle_attribute_completion(backend, &uri, position, line) {
+            Some(response)
+        } else {
+            handle_field_type_completion(backend, line)
+        };
 
     let elapsed = start.elapsed();
     info!(
