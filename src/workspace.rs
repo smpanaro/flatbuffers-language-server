@@ -2,7 +2,7 @@ use crate::symbol_table::{RootTypeInfo, Symbol, SymbolInfo, SymbolKind};
 use dashmap::DashMap;
 use tower_lsp::lsp_types::{Location, Range, Url};
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct Workspace {
     /// All symbols defined in the workspace.
     pub symbols: DashMap<String, Symbol>,

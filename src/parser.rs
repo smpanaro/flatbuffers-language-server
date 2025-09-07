@@ -28,7 +28,7 @@ pub trait Parser {
     );
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone, Copy)]
 pub struct FlatcFFIParser;
 
 impl Parser for FlatcFFIParser {

@@ -18,3 +18,10 @@ pathdiff = "0.2.1"
 [build-dependencies]
 cc = "1.0"
 bindgen = "0.60"
+
+[dev-dependencies]
+insta = { version = "1.34.0", features = ["serde"] }
+
+[[test]]
+name = "integration"
+path = "tests/integration/main.rs"

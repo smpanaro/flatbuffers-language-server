@@ -18,7 +18,7 @@ use tower_lsp::lsp_types::{
 };
 use tower_lsp::{Client, LanguageServer};
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct Backend {
     pub client: Client,
     pub document_map: DashMap<String, String>,
@@ -27,6 +27,14 @@ pub struct Backend {
 }
 
 impl Backend {
+    pub fn new(client: Client) -> Self {
+        Self {
+            client,
+            document_map: DashMap::new(),
+            workspace: Workspace::new(),
+            parser: FlatcFFIParser,
+        }
+    }
     // TODO: Move this to workspace
     pub async fn parse_and_discover(&self, initial_uri: Url, initial_content: Option<String>) {
         let mut files_to_parse = vec![(initial_uri.clone(), initial_content)];
