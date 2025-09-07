@@ -16,7 +16,7 @@ pub struct Workspace {
     pub file_included_by: DashMap<Url, Vec<Url>>,
     /// Map from file URI to the root type defined in that file.
     pub root_types: DashMap<Url, RootTypeInfo>,
-    pub builtin_attributes: DashMap<String, String>,
+    pub builtin_attributes: DashMap<String, Attribute>,
 }
 
 fn populate_builtins(workspace: &mut Workspace) {
@@ -139,40 +139,48 @@ impl Default for Workspace {
     }
 }
 
+#[derive(Debug, Clone)]
+pub struct Attribute {
+    pub name: String,
+    pub doc: String,
+    pub restricted_to_types: Option<Vec<String>>,
+}
+
 fn populate_builtin_attributes(workspace: &mut Workspace) {
-    let attributes = [
-        ("deprecated", "Omit generated code for this field."),
-        (
-            "required",
-            "Require this field to be set. Generated code will enforce this.",
-        ),
-        (
-            "key",
-            "Use this field as a key for sorting vectors of its containing table.",
-        ),
+    const BUILTIN_ATTRIBUTES: &[(&str, &str, Option<&[&str]>)] = &[
+        ("deprecated", "Omit generated code for this field.", None),
+        ("required", "Require this field to be set. Generated code will enforce this.", None),
+        ("key", "Use this field as a key for sorting vectors of its containing table.", None),
         (
             "hash",
-            "Allow this field's JSON value to be a string whose hash is stored in this uint32/uint64 field.",
+            "Allow this field's JSON value to be a string, in which case its hash is stored in this field.",
+            Some(&["uint32", "uint64", "uint", "ulong"]),
         ),
-        (
-            "force_align",
-            "Force alignment to be higher than this struct or vector's natural alignment.",
-        ),
+        ("force_align", "Force alignment to be higher than this struct or vector field's natural alignment.", None),
         (
             "nested_flatbuffer",
-            "Mark this [ubyte] field as containing FlatBuffer data with the specified root type.",
+            "Mark this field as containing FlatBuffer data with the specified root type.",
+            Some(&["[ubyte]", "[uint8]"]),
         ),
         (
             "flexbuffer",
-            "Mark this [ubyte] field as containing FlexBuffer data.",
+            "Mark this field as containing FlexBuffer data.",
+            Some(&["[ubyte]", "[uint8]"]),
         ),
-        // ("bit_flags", "This enum's values are bit masks"), // Only valid on enums. TODO: Support non-field attributes.
-        // ("original_order", "Keep the original order of fields."), // Docs basically say don't use this.
+        // ("bit_flags", "This enum's values are bit masks", None), // Only valid on enums. TODO: Support non-field attributes.
+        // ("original_order", "Keep the original order of fields.", None), // Docs basically say don't use this.
     ];
 
-    for (name, doc) in attributes {
-        workspace
-            .builtin_attributes
-            .insert(name.to_string(), doc.to_string());
+    let attributes: Vec<Attribute> = BUILTIN_ATTRIBUTES
+        .iter()
+        .map(|(name, doc, restricted)| Attribute {
+            name: (*name).into(),
+            doc: (*doc).into(),
+            restricted_to_types: restricted.map(|r| r.iter().map(|&s| s.into()).collect()),
+        })
+        .collect();
+
+    for attr in attributes {
+        workspace.builtin_attributes.insert(attr.name.clone(), attr);
     }
 }

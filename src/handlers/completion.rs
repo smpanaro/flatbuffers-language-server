@@ -121,10 +121,15 @@ fn handle_attribute_completion(
         let attribute_list = &line[start_paren..];
         let value_attributes = ["force_align", "nested_flatbuffer", "hash"]; // attributes that require a value
         for entry in backend.workspace.builtin_attributes.iter() {
-            let (name, doc) = (entry.key(), entry.value());
+            let (name, attr) = (entry.key(), entry.value());
 
             if attribute_list.contains(name) {
                 continue;
+            }
+            if let Some(restricted_to_types) = &attr.restricted_to_types {
+                if !restricted_to_types.iter().any(|t| line.contains(t)) {
+                    continue;
+                }
             }
 
             if name.starts_with(last_word) {
@@ -144,7 +149,7 @@ fn handle_attribute_completion(
                     kind: Some(CompletionItemKind::PROPERTY),
                     documentation: Some(Documentation::MarkupContent(MarkupContent {
                         kind: MarkupKind::Markdown,
-                        value: doc.clone(),
+                        value: attr.doc.clone(),
                     })),
                     sort_text: Some(sort_text),
                     ..Default::default()
