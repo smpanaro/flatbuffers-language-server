@@ -1,5 +1,8 @@
 use crate::harness::TestHarness;
-use tower_lsp::lsp_types::{notification, Position, Range};
+use tower_lsp::lsp_types::{
+    notification, request, CodeActionContext, CodeActionOrCommand, CodeActionParams,
+    DiagnosticSeverity, DiagnosticTag, Position, Range, TextDocumentIdentifier, Url,
+};
 
 #[tokio::test]
 async fn diagnostic_error_has_correct_range() {
@@ -29,6 +32,39 @@ async fn diagnostic_error_has_correct_range() {
     let expected_range = Range::new(Position::new(0, 19), Position::new(0, 31)); // "invalid_type"
     assert_eq!(diagnostic.range, expected_range);
     // Note: We deliberately do NOT assert on `diagnostic.message`.
+}
+
+#[tokio::test]
+async fn multiple_files() {
+    let content_a = r#"
+union Any { Foo }
+"#;
+    let content_b = r#"
+/** Error on a different line. */
+union Whichever { One }
+"#;
+    let mut harness = TestHarness::new();
+    harness
+        .initialize_and_open(&[("a.fbs", content_a), ("b.fbs", content_b)])
+        .await;
+
+    let diagnostics_a = harness
+        .notification::<notification::PublishDiagnostics>()
+        .await;
+    assert_eq!(diagnostics_a.uri, Url::parse("file:///a.fbs").unwrap());
+    assert_eq!(
+        diagnostics_a.diagnostics[0].range,
+        Range::new(Position::new(1, 12), Position::new(1, 15))
+    );
+
+    let diagnostics_b = harness
+        .notification::<notification::PublishDiagnostics>()
+        .await;
+    assert_eq!(diagnostics_b.uri, Url::parse("file:///b.fbs").unwrap());
+    assert_eq!(
+        diagnostics_b.diagnostics[0].range,
+        Range::new(Position::new(2, 18), Position::new(2, 21))
+    );
 }
 
 #[tokio::test]
@@ -80,4 +116,114 @@ async fn duplicate_enum_variant() {
         related_information[0].location.range,
         Range::new(Position::new(0, 20), Position::new(0, 21))
     );
+}
+
+#[tokio::test]
+async fn missing_include() {
+    let included_content = "enum MyEnum: byte { A, B }";
+    let content = r#"
+table Foo {
+    e: MyEnum;
+}
+"#;
+    let mut harness = TestHarness::new();
+    harness
+        .initialize_and_open(&[("schema.fbs", content), ("included.fbs", included_content)])
+        .await;
+
+    let diagnostics = harness
+        .notification::<notification::PublishDiagnostics>()
+        .await;
+    let diagnostic = &diagnostics.diagnostics[0];
+    assert_eq!(
+        diagnostic.range,
+        Range::new(Position::new(2, 7), Position::new(2, 13))
+    );
+    // Consume included.fbs diagnostics.
+    let _ = harness
+        .notification::<notification::PublishDiagnostics>()
+        .await;
+
+    // This is quickfix-able.
+    let schema_uri = Url::from_file_path("/schema.fbs").unwrap();
+    let code_actions = harness
+        .call::<request::CodeActionRequest>(CodeActionParams {
+            text_document: TextDocumentIdentifier {
+                uri: schema_uri.clone(),
+            },
+            range: Range {
+                start: Position::new(2, 7),
+                end: Position::new(2, 7),
+            },
+            context: CodeActionContext {
+                diagnostics: vec![diagnostic.clone()],
+                ..Default::default()
+            },
+            work_done_progress_params: Default::default(),
+            partial_result_params: Default::default(),
+        })
+        .await;
+
+    let code_action = match code_actions.unwrap()[0].clone() {
+        CodeActionOrCommand::CodeAction(a) => Some(a),
+        _ => None,
+    }
+    .unwrap();
+
+    let changes = code_action
+        .edit
+        .and_then(|e| e.changes)
+        .and_then(|c| c.get(&schema_uri).cloned())
+        .unwrap();
+    assert_eq!(changes.len(), 1);
+    assert_eq!(changes[0].new_text, "include \"included.fbs\";\n");
+    assert_eq!(
+        changes[0].range,
+        Range::new(Position::new(0, 0), Position::new(0, 0))
+    );
+}
+
+#[tokio::test]
+async fn undefined_vector_type() {
+    let content = "table Foo { bar: [Baz]; }";
+    let mut harness = TestHarness::new();
+    harness
+        .initialize_and_open(&[("schema.fbs", content)])
+        .await;
+
+    let diagnostics = harness
+        .notification::<notification::PublishDiagnostics>()
+        .await;
+    let diagnostic = &diagnostics.diagnostics[0];
+    assert_eq!(
+        diagnostic.range,
+        Range::new(Position::new(0, 18), Position::new(0, 21)),
+        "range should exclude vector brackets"
+    );
+}
+
+#[tokio::test]
+async fn deprecated_field() {
+    let content = r#"
+table Foo {
+    f: [int];
+    depr: int (deprecated);
+}
+"#;
+    let mut harness = TestHarness::new();
+    harness
+        .initialize_and_open(&[("schema.fbs", content)])
+        .await;
+
+    let diagnostics = harness
+        .notification::<notification::PublishDiagnostics>()
+        .await;
+    let diagnostic = &diagnostics.diagnostics[0];
+    assert_eq!(
+        diagnostic.range,
+        Range::new(Position::new(3, 4), Position::new(3, u32::MAX)),
+    );
+    assert_eq!(diagnostic.severity, DiagnosticSeverity::HINT.into());
+    // This tag is more appropriate for flatbuffers' usage of deprecation.
+    assert_eq!(diagnostic.tags, vec![DiagnosticTag::UNNECESSARY].into())
 }

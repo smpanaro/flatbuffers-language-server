@@ -5,15 +5,15 @@ expression: "serde_json::to_string_pretty(&res).unwrap()"
 {
   "contents": {
     "kind": "markdown",
-    "value": "```flatbuffers\ntable Widget {\n  name: string\n}\n```"
+    "value": "```flatbuffers\nstruct Point {\n  x: float\n  y: float\n}\n```\n\n---\n\n A 2D coordinate.\n\n---\n\nSize: 8 bytes\n\nAlignment: 4 bytes"
   },
   "range": {
     "start": {
-      "line": 6,
-      "character": 12
+      "line": 8,
+      "character": 13
     },
     "end": {
-      "line": 6,
+      "line": 8,
       "character": 18
     }
   }

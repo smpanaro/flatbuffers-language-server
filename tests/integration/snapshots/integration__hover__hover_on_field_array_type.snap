@@ -5,16 +5,16 @@ expression: "serde_json::to_string_pretty(&res).unwrap()"
 {
   "contents": {
     "kind": "markdown",
-    "value": "```flatbuffers\ntable Widget {\n  name: string\n}\n```"
+    "value": "```flatbuffers\nint // scalar\n```\n\n---\n\n32-bit signed integer"
   },
   "range": {
     "start": {
-      "line": 6,
-      "character": 12
+      "line": 2,
+      "character": 8
     },
     "end": {
-      "line": 6,
-      "character": 18
+      "line": 2,
+      "character": 11
     }
   }
 }
