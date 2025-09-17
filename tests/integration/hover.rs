@@ -2,8 +2,32 @@ use crate::harness::TestHarness;
 use crate::helpers::parse_fixture;
 use insta::assert_snapshot;
 use tower_lsp::lsp_types::{
-    request, HoverParams, TextDocumentIdentifier, TextDocumentPositionParams, Url,
+    request, Hover, HoverParams, TextDocumentIdentifier, TextDocumentPositionParams,
 };
+
+async fn get_hover_response(
+    harness: &mut TestHarness,
+    main_fixture: &str,
+    other_files: &[(&str, &str)],
+) -> Option<Hover> {
+    let (content, position) = parse_fixture(main_fixture);
+
+    let mut workspace = vec![("schema.fbs", content.as_str())];
+    workspace.extend_from_slice(other_files);
+
+    harness.initialize_and_open(&workspace).await;
+
+    let main_file_uri = harness.root_uri.join("schema.fbs").unwrap();
+    harness
+        .call::<request::HoverRequest>(HoverParams {
+            text_document_position_params: TextDocumentPositionParams {
+                text_document: TextDocumentIdentifier { uri: main_file_uri },
+                position,
+            },
+            work_done_progress_params: Default::default(),
+        })
+        .await
+}
 
 #[tokio::test]
 async fn hover_on_table_definition() {
@@ -12,26 +36,9 @@ table $0MyTable {
     a: int;
 }
 "#;
-    let (content, position) = parse_fixture(fixture);
-
     let mut harness = TestHarness::new();
-    harness
-        .initialize_and_open(&[("schema.fbs", &content)])
-        .await;
-
-    let res = harness
-        .call::<request::HoverRequest>(HoverParams {
-            text_document_position_params: TextDocumentPositionParams {
-                text_document: TextDocumentIdentifier {
-                    uri: Url::from_file_path("/schema.fbs").unwrap(),
-                },
-                position,
-            },
-            work_done_progress_params: Default::default(),
-        })
-        .await;
-
-    assert_snapshot!(serde_json::to_string_pretty(&res).unwrap());
+    let response = get_hover_response(&mut harness, fixture, &[]).await;
+    assert_snapshot!(serde_json::to_string_pretty(&response).unwrap());
 }
 
 #[tokio::test]
@@ -41,26 +48,9 @@ table MyTable {
     a: $0int;
 }
 "#;
-    let (content, position) = parse_fixture(fixture);
-
     let mut harness = TestHarness::new();
-    harness
-        .initialize_and_open(&[("schema.fbs", &content)])
-        .await;
-
-    let res = harness
-        .call::<request::HoverRequest>(HoverParams {
-            text_document_position_params: TextDocumentPositionParams {
-                text_document: TextDocumentIdentifier {
-                    uri: Url::from_file_path("/schema.fbs").unwrap(),
-                },
-                position,
-            },
-            work_done_progress_params: Default::default(),
-        })
-        .await;
-
-    assert_snapshot!(serde_json::to_string_pretty(&res).unwrap());
+    let response = get_hover_response(&mut harness, fixture, &[]).await;
+    assert_snapshot!(serde_json::to_string_pretty(&response).unwrap());
 }
 
 #[tokio::test]
@@ -74,26 +64,9 @@ table ProductionLine {
     widget: $0Widget;
 }
 "#;
-    let (content, position) = parse_fixture(fixture);
-
     let mut harness = TestHarness::new();
-    harness
-        .initialize_and_open(&[("schema.fbs", &content)])
-        .await;
-
-    let res = harness
-        .call::<request::HoverRequest>(HoverParams {
-            text_document_position_params: TextDocumentPositionParams {
-                text_document: TextDocumentIdentifier {
-                    uri: Url::from_file_path("/schema.fbs").unwrap(),
-                },
-                position,
-            },
-            work_done_progress_params: Default::default(),
-        })
-        .await;
-
-    assert_snapshot!(serde_json::to_string_pretty(&res).unwrap());
+    let response = get_hover_response(&mut harness, fixture, &[]).await;
+    assert_snapshot!(serde_json::to_string_pretty(&response).unwrap());
 }
 
 #[tokio::test]
@@ -109,26 +82,9 @@ table Line {
     points: [$0Point];
 }
 "#;
-    let (content, position) = parse_fixture(fixture);
-
     let mut harness = TestHarness::new();
-    harness
-        .initialize_and_open(&[("schema.fbs", &content)])
-        .await;
-
-    let res = harness
-        .call::<request::HoverRequest>(HoverParams {
-            text_document_position_params: TextDocumentPositionParams {
-                text_document: TextDocumentIdentifier {
-                    uri: Url::from_file_path("/schema.fbs").unwrap(),
-                },
-                position,
-            },
-            work_done_progress_params: Default::default(),
-        })
-        .await;
-
-    assert_snapshot!(serde_json::to_string_pretty(&res).unwrap());
+    let response = get_hover_response(&mut harness, fixture, &[]).await;
+    assert_snapshot!(serde_json::to_string_pretty(&response).unwrap());
 }
 
 #[tokio::test]
@@ -138,26 +94,9 @@ struct MyStruct {
     a: [$0int:3];
 }
 "#;
-    let (content, position) = parse_fixture(fixture);
-
     let mut harness = TestHarness::new();
-    harness
-        .initialize_and_open(&[("schema.fbs", &content)])
-        .await;
-
-    let res = harness
-        .call::<request::HoverRequest>(HoverParams {
-            text_document_position_params: TextDocumentPositionParams {
-                text_document: TextDocumentIdentifier {
-                    uri: Url::from_file_path("/schema.fbs").unwrap(),
-                },
-                position,
-            },
-            work_done_progress_params: Default::default(),
-        })
-        .await;
-
-    assert_snapshot!(serde_json::to_string_pretty(&res).unwrap());
+    let response = get_hover_response(&mut harness, fixture, &[]).await;
+    assert_snapshot!(serde_json::to_string_pretty(&response).unwrap());
 }
 
 #[tokio::test]
@@ -172,26 +111,9 @@ union MyUnion {
     $0MyTable
 }
 "#;
-    let (content, position) = parse_fixture(fixture);
-
     let mut harness = TestHarness::new();
-    harness
-        .initialize_and_open(&[("schema.fbs", &content)])
-        .await;
-
-    let res = harness
-        .call::<request::HoverRequest>(HoverParams {
-            text_document_position_params: TextDocumentPositionParams {
-                text_document: TextDocumentIdentifier {
-                    uri: Url::from_file_path("/schema.fbs").unwrap(),
-                },
-                position,
-            },
-            work_done_progress_params: Default::default(),
-        })
-        .await;
-
-    assert_snapshot!(serde_json::to_string_pretty(&res).unwrap());
+    let response = get_hover_response(&mut harness, fixture, &[]).await;
+    assert_snapshot!(serde_json::to_string_pretty(&response).unwrap());
 }
 
 #[tokio::test]
@@ -205,24 +127,33 @@ table MyTable {
 
 root_type $0MyTable;
 "#;
-    let (content, position) = parse_fixture(fixture);
-
     let mut harness = TestHarness::new();
-    harness
-        .initialize_and_open(&[("schema.fbs", &content)])
-        .await;
+    let response = get_hover_response(&mut harness, fixture, &[]).await;
+    assert_snapshot!(serde_json::to_string_pretty(&response).unwrap());
+}
 
-    let res = harness
-        .call::<request::HoverRequest>(HoverParams {
-            text_document_position_params: TextDocumentPositionParams {
-                text_document: TextDocumentIdentifier {
-                    uri: Url::from_file_path("/schema.fbs").unwrap(),
-                },
-                position,
-            },
-            work_done_progress_params: Default::default(),
-        })
-        .await;
+#[tokio::test]
+async fn hover_on_included_definition() {
+    let included_fixture = r#"
+// This is from another file.
+table IncludedTable {
+    b: bool;
+}
+"#;
 
-    assert_snapshot!(serde_json::to_string_pretty(&res).unwrap());
+    let main_fixture = r#"
+include "included.fbs";
+
+table MyTable {
+    a: $0IncludedTable;
+}
+"#;
+    let mut harness = TestHarness::new();
+    let response = get_hover_response(
+        &mut harness,
+        main_fixture,
+        &[("included.fbs", included_fixture)],
+    )
+    .await;
+    assert_snapshot!(serde_json::to_string_pretty(&response).unwrap());
 }

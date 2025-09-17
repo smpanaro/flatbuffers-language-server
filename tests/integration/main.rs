@@ -4,6 +4,7 @@ mod diagnostics;
 mod harness;
 mod helpers;
 mod hover;
+mod scenarios;
 
 #[tokio::test]
 async fn initialize_server_test() {

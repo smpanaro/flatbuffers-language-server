@@ -1,0 +1,5 @@
+---
+source: tests/integration/scenarios.rs
+expression: "serde_json::to_string_pretty(&cleared_diags).unwrap()"
+---
+[]

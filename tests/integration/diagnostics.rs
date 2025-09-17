@@ -1,27 +1,23 @@
 use crate::harness::TestHarness;
 use tower_lsp::lsp_types::{
     notification, request, CodeActionContext, CodeActionOrCommand, CodeActionParams,
-    DiagnosticSeverity, DiagnosticTag, Position, Range, TextDocumentIdentifier, Url,
+    DiagnosticSeverity, DiagnosticTag, Position, Range, TextDocumentIdentifier,
 };
 
 #[tokio::test]
 async fn diagnostic_error_has_correct_range() {
-    // 1. Define the fixture
     let content = "table MyTable { a: invalid_type; }";
-
-    // 2. Setup the harness and open the file
     let mut harness = TestHarness::new();
     harness
         .initialize_and_open(&[("schema.fbs", content)])
         .await;
 
-    // 3. Wait for the diagnostics notification
     let params = harness
         .notification::<notification::PublishDiagnostics>()
         .await;
 
-    // 4. Perform programmatic assertions
-    assert_eq!(params.uri.path(), "/schema.fbs");
+    let schema_uri = harness.root_uri.join("schema.fbs").unwrap();
+    assert_eq!(params.uri, schema_uri);
     assert_eq!(
         params.diagnostics.len(),
         1,
@@ -31,7 +27,6 @@ async fn diagnostic_error_has_correct_range() {
     let diagnostic = &params.diagnostics[0];
     let expected_range = Range::new(Position::new(0, 19), Position::new(0, 31)); // "invalid_type"
     assert_eq!(diagnostic.range, expected_range);
-    // Note: We deliberately do NOT assert on `diagnostic.message`.
 }
 
 #[tokio::test]
@@ -48,21 +43,24 @@ union Whichever { One }
         .initialize_and_open(&[("a.fbs", content_a), ("b.fbs", content_b)])
         .await;
 
-    let diagnostics_a = harness
+    let params_a = harness
         .notification::<notification::PublishDiagnostics>()
         .await;
-    assert_eq!(diagnostics_a.uri, Url::parse("file:///a.fbs").unwrap());
+
+    let a_uri = harness.root_uri.join("a.fbs").unwrap();
+    assert_eq!(params_a.uri, a_uri);
     assert_eq!(
-        diagnostics_a.diagnostics[0].range,
+        params_a.diagnostics[0].range,
         Range::new(Position::new(1, 12), Position::new(1, 15))
     );
 
-    let diagnostics_b = harness
+    let params_b = harness
         .notification::<notification::PublishDiagnostics>()
         .await;
-    assert_eq!(diagnostics_b.uri, Url::parse("file:///b.fbs").unwrap());
+    let b_uri = harness.root_uri.join("b.fbs").unwrap();
+    assert_eq!(params_b.uri, b_uri);
     assert_eq!(
-        diagnostics_b.diagnostics[0].range,
+        params_b.diagnostics[0].range,
         Range::new(Position::new(2, 18), Position::new(2, 21))
     );
 }
@@ -78,10 +76,10 @@ enum MyEnum: byte { C, D }
         .initialize_and_open(&[("schema.fbs", content)])
         .await;
 
-    let diagnostics = harness
+    let params = harness
         .notification::<notification::PublishDiagnostics>()
         .await;
-    let diagnostic = &diagnostics.diagnostics[0];
+    let diagnostic = &params.diagnostics[0];
     assert_eq!(
         diagnostic.range,
         Range::new(Position::new(2, 5), Position::new(2, 11))
@@ -102,10 +100,10 @@ async fn duplicate_enum_variant() {
         .initialize_and_open(&[("schema.fbs", content)])
         .await;
 
-    let diagnostics = harness
+    let params = harness
         .notification::<notification::PublishDiagnostics>()
         .await;
-    let diagnostic = &diagnostics.diagnostics[0];
+    let diagnostic = &params.diagnostics[0];
     assert_eq!(
         diagnostic.range,
         Range::new(Position::new(0, 26), Position::new(0, 27))
@@ -131,10 +129,10 @@ table Foo {
         .initialize_and_open(&[("schema.fbs", content), ("included.fbs", included_content)])
         .await;
 
-    let diagnostics = harness
+    let params = harness
         .notification::<notification::PublishDiagnostics>()
         .await;
-    let diagnostic = &diagnostics.diagnostics[0];
+    let diagnostic = &params.diagnostics[0];
     assert_eq!(
         diagnostic.range,
         Range::new(Position::new(2, 7), Position::new(2, 13))
@@ -145,7 +143,7 @@ table Foo {
         .await;
 
     // This is quickfix-able.
-    let schema_uri = Url::from_file_path("/schema.fbs").unwrap();
+    let schema_uri = harness.root_uri.join("schema.fbs").unwrap();
     let code_actions = harness
         .call::<request::CodeActionRequest>(CodeActionParams {
             text_document: TextDocumentIdentifier {
@@ -191,10 +189,10 @@ async fn undefined_vector_type() {
         .initialize_and_open(&[("schema.fbs", content)])
         .await;
 
-    let diagnostics = harness
+    let params = harness
         .notification::<notification::PublishDiagnostics>()
         .await;
-    let diagnostic = &diagnostics.diagnostics[0];
+    let diagnostic = &params.diagnostics[0];
     assert_eq!(
         diagnostic.range,
         Range::new(Position::new(0, 18), Position::new(0, 21)),
@@ -215,15 +213,15 @@ table Foo {
         .initialize_and_open(&[("schema.fbs", content)])
         .await;
 
-    let diagnostics = harness
+    let params = harness
         .notification::<notification::PublishDiagnostics>()
         .await;
-    let diagnostic = &diagnostics.diagnostics[0];
+    let diagnostic = &params.diagnostics[0];
     assert_eq!(
         diagnostic.range,
         Range::new(Position::new(3, 4), Position::new(3, u32::MAX)),
     );
-    assert_eq!(diagnostic.severity, DiagnosticSeverity::HINT.into());
+    assert_eq!(diagnostic.severity, Some(DiagnosticSeverity::HINT));
     // This tag is more appropriate for flatbuffers' usage of deprecation.
-    assert_eq!(diagnostic.tags, vec![DiagnosticTag::UNNECESSARY].into())
+    assert_eq!(diagnostic.tags, Some(vec![DiagnosticTag::UNNECESSARY]))
 }
