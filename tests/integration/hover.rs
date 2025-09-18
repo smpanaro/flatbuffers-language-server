@@ -157,3 +157,19 @@ table MyTable {
     .await;
     assert_snapshot!(serde_json::to_string_pretty(&response).unwrap());
 }
+
+#[tokio::test]
+async fn hover_mid_type_name() {
+    let fixture = r#"
+table Widget {
+    name: string;
+}
+
+table ProductionLine {
+    widget: Wid$0get;
+}
+"#;
+    let mut harness = TestHarness::new();
+    let response = get_hover_response(&mut harness, fixture, &[]).await;
+    assert_snapshot!(serde_json::to_string_pretty(&response).unwrap());
+}

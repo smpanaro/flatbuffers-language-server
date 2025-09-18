@@ -1,6 +1,9 @@
-use crate::harness::TestHarness;
+use crate::{harness::TestHarness, helpers::parse_fixture};
 use insta::assert_snapshot;
-use tower_lsp::lsp_types::{notification, Position, Range, VersionedTextDocumentIdentifier};
+use tower_lsp::lsp_types::{
+    notification, request, HoverParams, Position, Range, TextDocumentIdentifier,
+    TextDocumentPositionParams, VersionedTextDocumentIdentifier,
+};
 
 #[tokio::test]
 async fn error_appears_on_change_and_is_then_cleared() {
@@ -88,4 +91,61 @@ async fn diagnostics_are_cleared_on_close() {
         .await;
     assert!(cleared_diags.diagnostics.is_empty());
     assert_eq!(cleared_diags.uri, schema_uri);
+}
+
+#[tokio::test]
+async fn hover_works_after_file_close() {
+    let included_fixture = r#"
+// This is from another file.
+table IncludedTable {
+    b: bool;
+}
+"#;
+
+    let main_fixture = r#"
+include "included.fbs";
+
+table MyTable {
+    a: $0IncludedTable;
+}
+"#;
+
+    let (content, position) = parse_fixture(main_fixture);
+
+    let mut harness = TestHarness::new();
+    harness
+        .initialize_and_open(&[
+            ("schema.fbs", content.as_str()),
+            ("included.fbs", included_fixture),
+        ])
+        .await;
+
+    let schema_uri = harness.root_uri.join("schema.fbs").unwrap();
+    let included_uri = harness.root_uri.join("included.fbs").unwrap();
+
+    let hover_params = HoverParams {
+        text_document_position_params: TextDocumentPositionParams {
+            text_document: TextDocumentIdentifier { uri: schema_uri },
+            position,
+        },
+        work_done_progress_params: Default::default(),
+    };
+
+    let initial_response = harness
+        .call::<request::HoverRequest>(hover_params.clone())
+        .await
+        .unwrap();
+
+    harness.close_file(included_uri.clone()).await;
+
+    let post_close_response = harness
+        .call::<request::HoverRequest>(hover_params.clone())
+        .await
+        .unwrap();
+
+    assert_eq!(
+        initial_response.range.unwrap(),
+        Range::new(Position::new(4, 7), Position::new(4, 20))
+    );
+    assert_eq!(initial_response, post_close_response);
 }
