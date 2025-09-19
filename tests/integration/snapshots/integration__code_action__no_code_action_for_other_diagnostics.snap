@@ -1,0 +1,5 @@
+---
+source: tests/integration/code_action.rs
+expression: "serde_json::to_string_pretty(&actions).unwrap()"
+---
+[]

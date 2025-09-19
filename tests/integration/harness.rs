@@ -22,6 +22,7 @@ pub enum ServerMessage {
 pub struct TestHarness {
     req_stream: DuplexStream,
     res_stream: DuplexStream,
+    read_buffer: Vec<u8>,
     responses: VecDeque<String>,
     unhandled_notifications: VecDeque<Request>,
     request_id: i64,
@@ -45,6 +46,7 @@ impl TestHarness {
         Self {
             req_stream: req_client,
             res_stream: res_client,
+            read_buffer: Vec::new(),
             responses: VecDeque::new(),
             unhandled_notifications: VecDeque::new(),
             request_id: 0,
@@ -57,27 +59,6 @@ impl TestHarness {
         format!("Content-Length: {}\r\n\r\n{}", payload.len(), payload)
     }
 
-    fn decode(text: &str) -> Vec<String> {
-        let mut ret = Vec::new();
-        let mut temp = text;
-
-        while !temp.is_empty() {
-            let p = temp.find("\r\n\r\n").unwrap();
-            let (header, body) = temp.split_at(p + 4);
-            let len = header
-                .strip_prefix("Content-Length: ")
-                .unwrap()
-                .strip_suffix("\r\n\r\n")
-                .unwrap();
-            let len: usize = len.parse().unwrap();
-            let (body, rest) = body.split_at(len);
-            ret.push(body.to_string());
-            temp = rest;
-        }
-
-        ret
-    }
-
     async fn send_request(&mut self, req: Request) {
         let req = serde_json::to_string(&req).unwrap();
         let req = Self::encode(&req);
@@ -85,11 +66,48 @@ impl TestHarness {
     }
 
     async fn recv_message(&mut self) -> ServerMessage {
-        // Ensure our buffer has messages to process.
-        if self.responses.is_empty() {
-            self.fill_buffer()
-                .await
-                .expect("Failed to read from server");
+        // Loop until we have successfully parsed at least one message.
+        while self.responses.is_empty() {
+            // fill_buffer now just reads bytes without trying to interpret them.
+            if self.fill_buffer().await.is_err() {
+                // Handle the error, e.g., the stream was closed.
+                panic!("Failed to read from server");
+            }
+
+            // Now, try to parse messages from our persistent buffer.
+            loop {
+                let buf_str = String::from_utf8_lossy(&self.read_buffer);
+                if let Some(p) = buf_str.find("\r\n\r\n") {
+                    let header_end = p + 4;
+                    let header = &buf_str[..p];
+
+                    // Extract Content-Length
+                    let len_str = header
+                        .strip_prefix("Content-Length: ")
+                        .expect("Missing Content-Length header");
+                    let len: usize = len_str.parse().expect("Invalid Content-Length value");
+
+                    let message_end = header_end + len;
+
+                    // If we don't have the full message yet, break and wait for more data.
+                    if self.read_buffer.len() < message_end {
+                        break;
+                    }
+
+                    // We have a full message, so we can process it.
+                    let message_bytes = &self.read_buffer[header_end..message_end];
+                    let msg_str = String::from_utf8(message_bytes.to_vec())
+                        .expect("Server sent invalid UTF-8");
+
+                    self.responses.push_back(msg_str);
+
+                    // IMPORTANT: Remove the consumed message from the buffer.
+                    self.read_buffer.drain(..message_end);
+                } else {
+                    // No complete header found, wait for more data.
+                    break;
+                }
+            }
         }
 
         let msg_str = self.responses.pop_front().unwrap();
@@ -290,11 +308,7 @@ impl TestHarness {
             )),
             // We received some bytes.
             Ok(Ok(n)) => {
-                let text = String::from_utf8(buf[..n].to_vec()).expect("server sent invalid UTF-8");
-                for msg in Self::decode(&text) {
-                    // Add new messages to the back of the queue.
-                    self.responses.push_back(msg);
-                }
+                self.read_buffer.extend_from_slice(&buf[..n]);
                 Ok(())
             }
             // An I/O error occurred.
@@ -304,6 +318,32 @@ impl TestHarness {
                 io::ErrorKind::TimedOut,
                 "timed out waiting for a response",
             )),
+        }
+    }
+
+    pub async fn wait_for_diagnostic(&mut self, message: &str) -> Option<Diagnostic> {
+        loop {
+            let params = self
+                .notification::<notification::PublishDiagnostics>()
+                .await;
+            for diag in params.diagnostics {
+                if diag.message.contains(message) {
+                    return Some(diag);
+                }
+            }
+        }
+    }
+
+    pub async fn get_first_diagnostic_for_file(&mut self, uri: &Url) -> Diagnostic {
+        loop {
+            let params = self
+                .notification::<notification::PublishDiagnostics>()
+                .await;
+            if &params.uri == uri {
+                if !params.diagnostics.is_empty() {
+                    return params.diagnostics[0].clone();
+                }
+            }
         }
     }
 }

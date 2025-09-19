@@ -1,0 +1,265 @@
+use crate::harness::TestHarness;
+use crate::helpers::parse_fixture;
+use insta::assert_snapshot;
+use tower_lsp::lsp_types::{
+    notification, request, CompletionContext, CompletionParams, CompletionTriggerKind,
+    TextDocumentIdentifier, TextDocumentPositionParams, VersionedTextDocumentIdentifier,
+};
+
+async fn get_completion_list(
+    harness: &mut TestHarness,
+    main_fixture: &str,
+    other_files: &[(&str, &str)],
+) -> String {
+    let (final_content, position) = parse_fixture(main_fixture);
+
+    let cursor_line = position.line as usize;
+    let initial_content: String = final_content
+        .lines()
+        .enumerate()
+        .filter(|(i, _)| *i != cursor_line)
+        .map(|(_, line)| line)
+        .collect::<Vec<_>>()
+        .join("\n");
+
+    let mut initial_workspace = vec![("schema.fbs", initial_content.as_str())];
+    initial_workspace.extend_from_slice(other_files);
+    harness.initialize_and_open(&initial_workspace).await;
+
+    let main_file_uri = harness.root_uri.join("schema.fbs").unwrap();
+
+    // Wait for initial diagnostics to be published for all files.
+    for _ in 0..initial_workspace.len() {
+        let diags = harness
+            .notification::<notification::PublishDiagnostics>()
+            .await;
+        assert_eq!(diags.diagnostics.len(), 0, "unexpected diagnostics");
+    }
+
+    harness
+        .change_file(
+            VersionedTextDocumentIdentifier {
+                uri: main_file_uri.clone(),
+                version: 2,
+            },
+            &final_content,
+        )
+        .await;
+
+    let response = harness
+        .call::<request::Completion>(CompletionParams {
+            text_document_position: TextDocumentPositionParams {
+                text_document: TextDocumentIdentifier { uri: main_file_uri },
+                position,
+            },
+            work_done_progress_params: Default::default(),
+            partial_result_params: Default::default(),
+            context: Some(CompletionContext {
+                trigger_kind: CompletionTriggerKind::INVOKED,
+                trigger_character: None,
+            }),
+        })
+        .await;
+
+    let mut items = response
+        .map(|resp| match resp {
+            tower_lsp::lsp_types::CompletionResponse::Array(items) => items,
+            tower_lsp::lsp_types::CompletionResponse::List(list) => list.items,
+        })
+        .unwrap_or_default();
+    items.sort_by_key(|item| item.sort_text.as_ref().unwrap_or(&item.label).to_owned());
+
+    let completion_labels: Vec<String> = items.into_iter().map(|item| item.label).collect();
+
+    serde_json::to_string_pretty(&completion_labels).unwrap()
+}
+
+#[tokio::test]
+async fn completion_for_type_in_field_name() {
+    let fixture = r#"
+// Naive alpha sort would place this first.
+table Abacus {}
+
+// This should come first since the field name contains this type.
+table Widget {
+    a: int;
+}
+
+table Collection {
+    primaryWidget: $0
+}
+"#;
+    let mut harness = TestHarness::new();
+    let response = get_completion_list(&mut harness, fixture, &[]).await;
+    assert_snapshot!(response);
+}
+
+#[tokio::test]
+#[ignore = "Root type completions are not supported."]
+async fn completion_for_root_type() {
+    let fixture = r#"
+namespace MyNamespace;
+
+table MyTable {}
+table AnotherTable {}
+
+root_type $0
+"#;
+    let mut harness = TestHarness::new();
+    let response = get_completion_list(&mut harness, fixture, &[]).await;
+    assert_snapshot!(response);
+}
+
+#[tokio::test]
+#[ignore = "Keyword completions are not supported."]
+async fn completion_for_keywords() {
+    let fixture = "t$0";
+    let mut harness = TestHarness::new();
+    let response = get_completion_list(&mut harness, fixture, &[]).await;
+    assert_snapshot!(response);
+}
+
+#[tokio::test]
+async fn completion_includes_all_primitive_types() {
+    let fixture = r#"
+table MyTable {
+    a: $0
+}
+"#;
+    let mut harness = TestHarness::new();
+    let response = get_completion_list(&mut harness, fixture, &[]).await;
+    assert_snapshot!(response);
+}
+
+#[tokio::test]
+async fn completion_for_field_type_prefix() {
+    let fixture = r#"
+table MyTable {
+    a: u$0
+}
+"#;
+    let mut harness = TestHarness::new();
+    let response = get_completion_list(&mut harness, fixture, &[]).await;
+    assert_snapshot!(response);
+}
+
+#[tokio::test]
+async fn completion_from_included_file() {
+    let included_fixture = r#"
+/// A table from another file.
+table IncludedTable {}
+struct IncludedStruct {
+    must_have_a_field: float;
+}
+"#;
+
+    let main_fixture = r#"
+table MyTable {
+    a: In$0
+}
+"#;
+    let mut harness = TestHarness::new();
+    let response = get_completion_list(
+        &mut harness,
+        main_fixture,
+        &[("included.fbs", included_fixture)],
+    )
+    .await;
+    assert_snapshot!(response);
+}
+
+#[tokio::test]
+#[ignore = "Table attribute completions are not supported."]
+async fn completion_for_attribute_on_table() {
+    let fixture = r#"
+table MyTable($0) {}
+"#;
+    let mut harness = TestHarness::new();
+    let response = get_completion_list(&mut harness, fixture, &[]).await;
+    assert_snapshot!(response);
+}
+
+#[tokio::test]
+#[ignore = "Table attribute completions are not supported."]
+async fn completion_for_filtered_attribute_on_table() {
+    let fixture = r#"
+table MyTable(h$0) {}
+"#;
+    let mut harness = TestHarness::new();
+    let response = get_completion_list(&mut harness, fixture, &[]).await;
+    assert_snapshot!(response);
+}
+
+#[tokio::test]
+async fn completion_for_attribute_on_field() {
+    let fixture = r#"
+table MyTable {
+    my_field: int ($0);
+}
+"#;
+    let mut harness = TestHarness::new();
+    let response = get_completion_list(&mut harness, fixture, &[]).await;
+    assert_snapshot!(response);
+}
+
+#[tokio::test]
+async fn completion_for_filtered_attribute_on_field() {
+    let fixture = r#"
+table MyTable {
+    my_field: int (k$0);
+}
+"#;
+    let mut harness = TestHarness::new();
+    let response = get_completion_list(&mut harness, fixture, &[]).await;
+    assert_snapshot!(response);
+}
+
+#[tokio::test]
+async fn completion_for_partial_attribute_on_field() {
+    let fixture = r#"
+table MyTable {
+    my_field: int ($0
+}
+"#;
+    let mut harness = TestHarness::new();
+    let response = get_completion_list(&mut harness, fixture, &[]).await;
+    assert_snapshot!(response);
+}
+
+#[tokio::test]
+async fn completion_for_partial_filtered_attribute_on_field() {
+    let fixture = r#"
+table MyTable {
+    my_field: int (k$0
+}
+"#;
+    let mut harness = TestHarness::new();
+    let response = get_completion_list(&mut harness, fixture, &[]).await;
+    assert_snapshot!(response);
+}
+
+#[tokio::test]
+async fn completion_for_second_field_id_attribute() {
+    let fixture = r#"
+table FieldType {}
+table MyTable {
+    first_field: FieldType (id: 0, required);
+    second_field: int (i$0
+}
+"#;
+    let mut harness = TestHarness::new();
+    let response = get_completion_list(&mut harness, fixture, &[]).await;
+    assert_snapshot!(response);
+}
+
+#[tokio::test]
+async fn completion_for_second_attribute() {
+    let fixture = r#"
+table MyTable {
+    first_field: int (id: 0, $0
+}
+"#;
+    let mut harness = TestHarness::new();
+    let response = get_completion_list(&mut harness, fixture, &[]).await;
+    assert_snapshot!(response);
+}

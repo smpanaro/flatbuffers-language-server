@@ -1,0 +1,14 @@
+---
+source: tests/integration/completion.rs
+expression: response
+---
+[
+  "ubyte",
+  "uint",
+  "uint16",
+  "uint32",
+  "uint64",
+  "ulong",
+  "ushort",
+  "double"
+]

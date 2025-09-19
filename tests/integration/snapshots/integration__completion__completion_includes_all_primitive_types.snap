@@ -1,0 +1,27 @@
+---
+source: tests/integration/completion.rs
+expression: response
+---
+[
+  "MyTable",
+  "bool",
+  "byte",
+  "double",
+  "float",
+  "float32",
+  "float64",
+  "int",
+  "int16",
+  "int32",
+  "int64",
+  "long",
+  "short",
+  "string",
+  "ubyte",
+  "uint",
+  "uint16",
+  "uint32",
+  "uint64",
+  "ulong",
+  "ushort"
+]

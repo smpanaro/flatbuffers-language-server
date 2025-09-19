@@ -1,9 +1,12 @@
 use harness::TestHarness;
 
+mod code_action;
+mod completion;
 mod diagnostics;
 mod harness;
 mod helpers;
 mod hover;
+mod references;
 mod scenarios;
 
 #[tokio::test]

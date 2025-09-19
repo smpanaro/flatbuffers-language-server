@@ -1,0 +1,10 @@
+---
+source: tests/integration/completion.rs
+expression: response
+---
+[
+  "deprecated",
+  "key",
+  "required",
+  "force_align"
+]
