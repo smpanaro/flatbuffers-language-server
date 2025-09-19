@@ -11,7 +11,7 @@ use tower_lsp::lsp_types::{
     MarkupContent, MarkupKind, Position, Range, TextEdit, Url,
 };
 
-static FIELD_RE: Lazy<Regex> = Lazy::new(|| Regex::new(r"^\s*(\w+)\s*:").unwrap());
+static FIELD_RE: Lazy<Regex> = Lazy::new(|| Regex::new(r"^\s*(\w+)\s*:\s*(\w*)").unwrap());
 
 fn handle_attribute_completion(
     backend: &Backend,
@@ -172,6 +172,7 @@ fn handle_field_type_completion(backend: &Backend, line: &str) -> Option<Complet
         return None;
     };
     let field_name = captures.get(1).map_or("", |m| m.as_str());
+    let partial_type_name = captures.get(2).map_or("", |m| m.as_str());
 
     let mut items = Vec::new();
 
@@ -182,11 +183,11 @@ fn handle_field_type_completion(backend: &Backend, line: &str) -> Option<Complet
 
         if kind != CompletionItemKind::FIELD {
             let label = symbol.info.name.clone();
-            let sort_text = if field_name.to_lowercase().contains(&label.to_lowercase()) {
-                format!("0_{}", label)
-            } else {
-                format!("1_{}", label)
-            };
+
+            if !include_completion(partial_type_name, label.as_str()) {
+                continue;
+            }
+            let sort_text = field_sort_text(field_name, partial_type_name, label.as_str());
 
             items.push(CompletionItem {
                 label,
@@ -207,11 +208,11 @@ fn handle_field_type_completion(backend: &Backend, line: &str) -> Option<Complet
     // Built-in symbols
     for item in backend.workspace.builtin_symbols.iter() {
         let (name, symbol) = (item.key(), item.value());
-        let sort_text = if field_name.to_lowercase().contains(name) {
-            format!("0_{}", name)
-        } else {
-            format!("1_{}", name)
-        };
+        if !include_completion(partial_type_name, name.as_str()) {
+            continue;
+        }
+        let sort_text = field_sort_text(field_name, partial_type_name, name.as_str());
+
         items.push(CompletionItem {
             label: name.clone(),
             sort_text: Some(sort_text),
@@ -227,6 +228,36 @@ fn handle_field_type_completion(backend: &Backend, line: &str) -> Option<Complet
     }
 
     Some(CompletionResponse::Array(items))
+}
+
+fn include_completion(field_partial_type: &str, completion_type_name: &str) -> bool {
+    field_partial_type.is_empty()
+        || completion_type_name
+            .to_lowercase()
+            .contains(&field_partial_type.to_lowercase())
+}
+
+fn field_sort_text(
+    field_name: &str,
+    field_partial_type: &str,
+    completion_type_name: &str,
+) -> String {
+    if !field_partial_type.is_empty()
+        && completion_type_name
+            .to_lowercase()
+            .starts_with(&field_partial_type.to_lowercase())
+    {
+        // myWidget: Gi => Gizmo type
+        format!("0_{}", completion_type_name)
+    } else if field_name
+        .to_lowercase()
+        .contains(&completion_type_name.to_lowercase())
+    {
+        // myWidget: => Widget type
+        format!("1_{}", completion_type_name)
+    } else {
+        format!("2_{}", completion_type_name)
+    }
 }
 
 pub async fn handle_completion(
