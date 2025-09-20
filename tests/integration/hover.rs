@@ -30,6 +30,41 @@ async fn get_hover_response(
 }
 
 #[tokio::test]
+async fn hover_on_keyword() {
+    let fixture = r#"
+$0table MyTable {
+    a: int;
+}
+"#;
+    let mut harness = TestHarness::new();
+    let response = get_hover_response(&mut harness, fixture, &[]).await;
+    assert_snapshot!(serde_json::to_string_pretty(&response).unwrap());
+}
+
+#[tokio::test]
+async fn hover_on_root_type_keyword() {
+    let fixture = r#"
+table MyTable { a:int; }
+$0root_type MyTable;
+"#;
+    let mut harness = TestHarness::new();
+    let response = get_hover_response(&mut harness, fixture, &[]).await;
+    assert_snapshot!(serde_json::to_string_pretty(&response).unwrap());
+}
+
+#[tokio::test]
+async fn hover_on_field_named_table() {
+    let fixture = r#"
+table MyTable {
+    t$0able: int;
+}
+"#;
+    let mut harness = TestHarness::new();
+    let response = get_hover_response(&mut harness, fixture, &[]).await;
+    assert_snapshot!(serde_json::to_string_pretty(&response).unwrap());
+}
+
+#[tokio::test]
 async fn hover_on_table_definition() {
     let fixture = r#"
 table $0MyTable {

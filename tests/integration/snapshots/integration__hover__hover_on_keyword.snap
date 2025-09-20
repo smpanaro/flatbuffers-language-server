@@ -1,0 +1,20 @@
+---
+source: tests/integration/hover.rs
+expression: "serde_json::to_string_pretty(&response).unwrap()"
+---
+{
+  "contents": {
+    "kind": "markdown",
+    "value": "A type with fields.\n\nThe main way of grouping data in FlatBuffers. Fields can be added and removed while maintaining backwards compatibility allowing the type to evolve over time.\n\n```flatbuffers\ntable Film {\n    title:string;\n    duration:int (deprecated);\n}\n```\n"
+  },
+  "range": {
+    "start": {
+      "line": 1,
+      "character": 0
+    },
+    "end": {
+      "line": 1,
+      "character": 5
+    }
+  }
+}

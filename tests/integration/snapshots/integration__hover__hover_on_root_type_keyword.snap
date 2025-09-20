@@ -1,0 +1,20 @@
+---
+source: tests/integration/hover.rs
+expression: "serde_json::to_string_pretty(&response).unwrap()"
+---
+{
+  "contents": {
+    "kind": "markdown",
+    "value": "Declares the root table of a serialized FlatBuffer.\n\nMust be a table. This is the \"entry point\" when reading serialized data.\n\n```flatbuffers\ntable Discography {}\n\nroot_type Discography;\n```\n\nFor example in Go:\n```go\nbuf, err := os.ReadFile(\"discog.dat\")\n// handle err\ndiscography := example.GetRootAsDiscography(buf, 0)\n```\n"
+  },
+  "range": {
+    "start": {
+      "line": 2,
+      "character": 0
+    },
+    "end": {
+      "line": 2,
+      "character": 9
+    }
+  }
+}

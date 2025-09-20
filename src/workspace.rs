@@ -8,6 +8,8 @@ pub struct Workspace {
     pub symbols: DashMap<String, Symbol>,
     /// Symbols that are built-in to the FlatBuffers language.
     pub builtin_symbols: DashMap<String, Symbol>,
+    /// Keywords in the FlatBuffers language.
+    pub keywords: DashMap<String, String>,
     /// Map from file URI to the list of symbol keys defined in that file.
     pub file_definitions: DashMap<Url, Vec<String>>,
     /// Map from file URI to the list of files it includes.
@@ -64,11 +66,151 @@ fn populate_builtins(workspace: &mut Workspace) {
     }
 }
 
+fn populate_keywords(workspace: &mut Workspace) {
+    let keywords = [
+        (
+            "table",
+            r#"A type with fields.
+
+The main way of grouping data in FlatBuffers. Fields can be added and removed while maintaining backwards compatibility allowing the type to evolve over time.
+
+```flatbuffers
+table Film {
+    title:string;
+    duration:int (deprecated);
+}
+```
+"#,
+        ),
+        (
+            "struct",
+            r#"A scalar type with fields.
+
+All fields are required and must be scalar types, including other structs. Once defined structs cannot be modified. Structs use less memory than tables and are faster to access.
+
+```flatbuffers
+struct Vec3 {
+    x:float;
+    y:float;
+    z:float;
+}
+```
+"#,
+        ),
+        (
+            "enum",
+            r#"A set of named constant values.
+
+New values may be added, but old values cannot be removed or deprecated.
+
+```flatbuffers
+enum Size:byte {
+  Small = 0,
+  Medium,
+  Large
+}
+```
+"#,
+        ),
+        (
+            "union",
+            r#"A set of possible table types.
+
+Essentially an enum stored with a value that is one of its types.
+
+```flatbuffers
+table Photo { captured_at:uint64; }
+table Video { duration:uint; }
+
+union Medium {
+    Photo,
+    Video
+}
+
+table View {
+    viewed_at:uint64;
+    medium:Medium; // Which Photo or Video was viewed.
+}
+```
+"#,
+        ),
+        (
+            "namespace",
+            r#"Specify a namespace to use in generated code.
+
+Support for this varies by language.
+
+```flatbuffers
+namespace Game.Core;
+
+table Player {}
+```
+
+Generates the following C++:
+```cpp
+namespace Game {
+  namespace Core {
+
+    struct Player;
+// ...
+```
+"#,
+        ),
+        (
+            "root_type",
+            r#"Declares the root table of a serialized FlatBuffer.
+
+Must be a table. This is the "entry point" when reading serialized data.
+
+```flatbuffers
+table Discography {}
+
+root_type Discography;
+```
+
+For example in Go:
+```go
+buf, err := os.ReadFile("discog.dat")
+// handle err
+discography := example.GetRootAsDiscography(buf, 0)
+```
+"#,
+        ),
+        (
+            "include",
+            r#"Include types from another schema file.
+
+```flatbuffers
+include "core.fbs";
+```
+"#,
+        ),
+        (
+            "attribute",
+            r#"A user-defined attribute that can be queried when parsing the schema.
+
+```flatbuffers
+attribute "internal_feature";
+
+table Watch {
+    brand:string;
+    release_date:string (internal_feature);
+}
+"#,
+        ),
+    ];
+
+    for (kw, doc) in keywords.iter() {
+        workspace.keywords.insert(kw.to_string(), doc.to_string());
+    }
+}
+
 impl Workspace {
     pub fn new() -> Self {
         let mut workspace = Self {
             symbols: DashMap::new(),
             builtin_symbols: DashMap::new(),
+            keywords: DashMap::new(),
             file_definitions: DashMap::new(),
             file_includes: DashMap::new(),
             file_included_by: DashMap::new(),
@@ -76,6 +218,7 @@ impl Workspace {
             builtin_attributes: DashMap::new(),
         };
         populate_builtins(&mut workspace);
+        populate_keywords(&mut workspace);
         populate_builtin_attributes(&mut workspace);
         workspace
     }

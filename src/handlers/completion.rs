@@ -297,150 +297,19 @@ fn handle_root_type_completion(backend: &Backend, line: &str) -> Option<Completi
     Some(CompletionResponse::Array(items))
 }
 
-fn handle_keyword_completion(line: &str) -> Option<CompletionResponse> {
+fn handle_keyword_completion(backend: &Backend, line: &str) -> Option<CompletionResponse> {
     let partial_keyword = line.trim();
-    let keywords = [
-        (
-            "table",
-            r#"A type with fields.
-
-The main way of grouping data in FlatBuffers. Fields can be added and removed while maintaining backwards compatibility allowing the type to evolve over time.
-
-```flatbuffers
-table Film {
-    title:string;
-    duration:int (deprecated);
-}
-```
-"#,
-        ),
-        (
-            "struct",
-            r#"A scalar type with fields.
-
-All fields are required and must be scalar types, including other structs. Once defined structs cannot be modified. Structs use less memory than tables and are faster to access.
-
-```flatbuffers
-struct Vec3 {
-    x:float;
-    y:float;
-    z:float;
-}
-```
-"#,
-        ),
-        (
-            "enum",
-            r#"A set of named constant values.
-
-New values may be added, but old values cannot be removed or deprecated.
-
-```flatbuffers
-enum Size:byte {
-  Small = 0,
-  Medium,
-  Large
-}
-```
-"#,
-        ),
-        (
-            "union",
-            r#"A set of possible table types.
-
-Essentially a enum stored with a value that is one of its types.
-
-```flatbuffers
-table Photo { captured_at:uint64; }
-table Video { duration:uint; }
-
-union Medium {
-    Photo,
-    Video
-}
-
-table View {
-    viewed_at:uint64;
-    medium:Medium; // Which Photo or Video was viewed.
-}
-```
-"#,
-        ),
-        (
-            "namespace",
-            r#"Specify a namespace to use in generated code.
-
-Support for this varies by language.
-
-```flatbuffers
-namespace Game.Core;
-
-table Player {}
-```
-
-Generates the following C++:
-```cpp
-namespace Game {
-  namespace Core {
-
-    struct Player;
-// ...
-```
-"#,
-        ),
-        (
-            "root_type",
-            r#"Declares the root table of a serialized FlatBuffer.
-
-Must be a table. This is the "entry point" when reading serialized data.
-
-```flatbuffers
-table Discography {}
-
-root_type Discography;
-```
-
-For example in Go:
-```go
-buf, err := os.ReadFile("discog.dat")
-// handle err
-discography := example.GetRootAsDiscography(buf, 0)
-```
-"#,
-        ),
-        (
-            "include",
-            r#"Include types from another schema file.
-
-```flatbuffers
-include "core.fbs";
-```
-"#,
-        ),
-        (
-            "attribute",
-            r#"A user-defined attribute that can be queried when parsing the schema.
-
-```flatbuffers
-attribute "internal_feature";
-
-table Watch {
-    brand:string;
-    release_date:string (internal_feature);
-}
-"#,
-        ),
-    ];
-
-    let items: Vec<CompletionItem> = keywords
+    let items: Vec<CompletionItem> = backend
+        .workspace
+        .keywords
         .iter()
-        .filter(|(kw, _)| kw.starts_with(partial_keyword))
-        .map(|(kw, doc)| CompletionItem {
-            label: kw.to_string(),
+        .filter(|item| item.key().starts_with(partial_keyword))
+        .map(|item| CompletionItem {
+            label: item.key().clone(),
             kind: Some(CompletionItemKind::KEYWORD),
             documentation: Some(Documentation::MarkupContent(MarkupContent {
                 kind: MarkupKind::Markdown,
-                value: doc.to_string(),
+                value: item.value().clone(),
             })),
             ..Default::default()
         })
@@ -518,7 +387,7 @@ pub async fn handle_completion(
         } else if let Some(response) = handle_field_type_completion(backend, &line) {
             Some(response)
         } else {
-            handle_keyword_completion(&line)
+            handle_keyword_completion(backend, &line)
         };
 
     let elapsed = start.elapsed();
