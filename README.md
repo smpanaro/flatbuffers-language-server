@@ -10,6 +10,7 @@ Not a lot, but better than nothing!
 
 - Hover to see type definitions and comments.
 - Click to go to definition.
+- Completions as you type.
 - Some diagnostics (any errors produced by `flatc`).
 
 # Usage
