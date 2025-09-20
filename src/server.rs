@@ -3,6 +3,7 @@ use crate::parser::{FlatcFFIParser, Parser};
 use crate::workspace::Workspace;
 use dashmap::DashMap;
 use log::{error, info};
+use ropey::Rope;
 use std::collections::HashSet;
 use std::time::Instant;
 use tokio::fs;
@@ -21,7 +22,7 @@ use tower_lsp::{Client, LanguageServer};
 #[derive(Debug, Clone)]
 pub struct Backend {
     pub client: Client,
-    pub document_map: DashMap<String, String>,
+    pub document_map: DashMap<String, Rope>,
     pub workspace: Workspace,
     pub parser: FlatcFFIParser,
 }
@@ -54,20 +55,24 @@ impl Backend {
             }
 
             let content = if let Some(c) = content_opt {
+                self.document_map
+                    .insert(uri.to_string(), Rope::from_str(&c));
                 c
             } else if let Some(doc) = self.document_map.get(&uri.to_string()) {
-                doc.value().clone()
+                doc.value().to_string()
             } else {
                 match fs::read_to_string(uri.to_file_path().unwrap()).await {
-                    Ok(text) => text,
+                    Ok(text) => {
+                        self.document_map
+                            .insert(uri.to_string(), Rope::from_str(&text));
+                        text
+                    }
                     Err(e) => {
                         error!("Failed to read file {}: {}", uri, e);
                         continue;
                     }
                 }
             };
-
-            self.document_map.insert(uri.to_string(), content.clone());
 
             let start_time = Instant::now();
             let (diagnostics_map, symbol_table, included_files, root_type_info) =

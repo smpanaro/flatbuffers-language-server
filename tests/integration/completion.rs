@@ -33,6 +33,8 @@ async fn get_completion_list(
         let diags = harness
             .notification::<notification::PublishDiagnostics>()
             .await;
+        // Catch unrelated errors (e.g. struct with no fields) that prevent
+        // the initial symbols from being loaded.
         assert_eq!(diags.diagnostics.len(), 0, "unexpected diagnostics");
     }
 
@@ -95,13 +97,13 @@ table Collection {
 }
 
 #[tokio::test]
-#[ignore = "Root type completions are not supported."]
 async fn completion_for_root_type() {
     let fixture = r#"
 namespace MyNamespace;
 
 table MyTable {}
 table AnotherTable {}
+struct RootTypeCannotBeStruct { a: int; }
 
 root_type $0
 "#;
@@ -111,9 +113,36 @@ root_type $0
 }
 
 #[tokio::test]
-#[ignore = "Keyword completions are not supported."]
 async fn completion_for_keywords() {
-    let fixture = "t$0";
+    let fixture = r#"
+table T {}
+t$0
+"#;
+    let mut harness = TestHarness::new();
+    let response = get_completion_list(&mut harness, fixture, &[]).await;
+    assert_snapshot!(response);
+}
+
+#[tokio::test]
+async fn no_completion_on_new_line_in_table_block() {
+    let fixture = r#"
+table MyTable {
+    $0
+}
+"#;
+    let mut harness = TestHarness::new();
+    let response = get_completion_list(&mut harness, fixture, &[]).await;
+    assert_snapshot!(response);
+}
+
+#[tokio::test]
+async fn no_completion_on_new_line_in_struct_block() {
+    let fixture = r#"
+struct MyStruct {
+    a: int;
+    $0
+}
+"#;
     let mut harness = TestHarness::new();
     let response = get_completion_list(&mut harness, fixture, &[]).await;
     assert_snapshot!(response);

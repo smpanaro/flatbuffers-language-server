@@ -15,11 +15,12 @@ pub async fn handle_did_open(backend: &Backend, params: DidOpenTextDocumentParam
 pub async fn handle_did_change(backend: &Backend, mut params: DidChangeTextDocumentParams) {
     debug!("Changed: {}", params.text_document.uri);
     let content = params.content_changes.remove(0).text;
+    backend.document_map.insert(
+        params.text_document.uri.to_string(),
+        ropey::Rope::from_str(&content),
+    );
     backend
-        .document_map
-        .insert(params.text_document.uri.to_string(), content.clone());
-    backend
-        .parse_and_discover(params.text_document.uri, Some(content))
+        .parse_and_discover(params.text_document.uri, None)
         .await;
 }
 

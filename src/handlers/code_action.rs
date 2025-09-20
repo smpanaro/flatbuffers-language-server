@@ -71,7 +71,7 @@ pub async fn handle_code_action(
                 let last_include_line = doc
                     .lines()
                     .enumerate()
-                    .filter(|(_, line)| line.starts_with("include "))
+                    .filter(|(_, line)| line.to_string().starts_with("include "))
                     .last()
                     .map(|(i, _)| i as u32);
                 let insert_line = last_include_line.map_or(0, |line| line + 1);

@@ -1,0 +1,8 @@
+---
+source: tests/integration/completion.rs
+expression: response
+---
+[
+  "AnotherTable",
+  "MyTable"
+]
