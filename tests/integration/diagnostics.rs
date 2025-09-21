@@ -225,3 +225,121 @@ table Foo {
     // This tag is more appropriate for flatbuffers' usage of deprecation.
     assert_eq!(diagnostic.tags, Some(vec![DiagnosticTag::UNNECESSARY]))
 }
+
+#[tokio::test]
+#[ignore = "Missing semicolon diagnostic not supported."]
+async fn missing_semicolon_include() {
+    let content = r#"
+include "coffee.fbs"
+include "pastries.fbs";
+"#;
+    let mut harness = TestHarness::new();
+    harness
+        .initialize_and_open(&[("schema.fbs", content)])
+        .await;
+
+    let params = harness
+        .notification::<notification::PublishDiagnostics>()
+        .await;
+    let diagnostic = &params.diagnostics[0];
+    assert_eq!(
+        diagnostic.range,
+        Range::new(Position::new(1, 20), Position::new(1, 20)),
+    );
+    assert_eq!(diagnostic.message, "expected `;`, found `include`");
+
+    let related_information = diagnostic.related_information.as_ref().unwrap();
+    assert_eq!(related_information.len(), 2);
+
+    assert_eq!(
+        related_information[0].location.range,
+        Range::new(Position::new(2, 0), Position::new(2, 7)),
+    );
+    assert_eq!(
+        related_information[0].message,
+        "unexpected token" // the second "include"
+    );
+
+    assert_eq!(
+        related_information[1].location.range,
+        Range::new(Position::new(1, 20), Position::new(1, 20)),
+    );
+    assert_eq!(related_information[1].message, "add `;`, here: `;`");
+}
+
+#[tokio::test]
+#[ignore = "Missing semicolon diagnostic not supported."]
+async fn missing_semicolon_field() {
+    let content = r#"
+table Coffee {
+    roast: string
+
+    origin: string;
+}
+"#;
+    let mut harness = TestHarness::new();
+    harness
+        .initialize_and_open(&[("schema.fbs", content)])
+        .await;
+
+    let params = harness
+        .notification::<notification::PublishDiagnostics>()
+        .await;
+    let diagnostic = &params.diagnostics[0];
+    assert_eq!(
+        diagnostic.range,
+        Range::new(Position::new(2, 17), Position::new(2, 17)),
+    );
+    assert_eq!(diagnostic.message, "expected `;`, found `origin`");
+
+    let related_information = diagnostic.related_information.as_ref().unwrap();
+    assert_eq!(related_information.len(), 2);
+
+    assert_eq!(
+        related_information[0].location.range,
+        Range::new(Position::new(4, 4), Position::new(4, 10)),
+    );
+    assert_eq!(
+        related_information[0].message,
+        "unexpected token" // "origin"
+    );
+
+    assert_eq!(
+        related_information[1].location.range,
+        Range::new(Position::new(2, 17), Position::new(2, 17)),
+    );
+    assert_eq!(related_information[1].message, "add `;`, here: `;`");
+}
+
+#[tokio::test]
+#[ignore = "Missing semicolon diagnostic not supported."]
+async fn missing_semicolon_end_of_file() {
+    let content = r#"
+table Coffee {}
+
+root_type Coffee
+"#;
+    let mut harness = TestHarness::new();
+    harness
+        .initialize_and_open(&[("schema.fbs", content)])
+        .await;
+
+    let params = harness
+        .notification::<notification::PublishDiagnostics>()
+        .await;
+    let diagnostic = &params.diagnostics[0];
+    assert_eq!(
+        diagnostic.range,
+        Range::new(Position::new(3, 16), Position::new(3, 16)),
+    );
+    assert_eq!(diagnostic.message, "expected `;`, found `end of file`");
+
+    let related_information = diagnostic.related_information.as_ref().unwrap();
+    assert_eq!(related_information.len(), 1);
+
+    assert_eq!(
+        related_information[0].location.range,
+        Range::new(Position::new(3, 16), Position::new(3, 16)),
+    );
+    assert_eq!(related_information[0].message, "add `;`, here: `;`");
+}
