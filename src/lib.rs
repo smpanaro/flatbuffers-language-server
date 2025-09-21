@@ -4,6 +4,7 @@ use log::info;
 use tower_lsp::{LspService, Server};
 
 pub mod analysis;
+pub mod diagnostics;
 pub mod ext;
 pub mod ffi;
 pub mod handlers;

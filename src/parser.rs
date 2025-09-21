@@ -1,3 +1,4 @@
+use crate::diagnostics::{self, DiagnosticHandler};
 use crate::ffi;
 use crate::symbol_table::{
     Enum, EnumVariant, Field, RootTypeInfo, Struct, Symbol, SymbolInfo, SymbolKind, SymbolTable,
@@ -5,13 +6,10 @@ use crate::symbol_table::{
 };
 use crate::utils::type_utils::extract_base_type_name;
 use log::{debug, error};
-use once_cell::sync::Lazy;
-use regex::Regex;
 use std::collections::{HashMap, HashSet};
 use std::ffi::{CStr, CString};
 use tower_lsp::lsp_types::{
-    Diagnostic, DiagnosticRelatedInformation, DiagnosticSeverity, DiagnosticTag, Location,
-    Position, Range, Url,
+    Diagnostic, DiagnosticSeverity, DiagnosticTag, Location, Position, Range, Url,
 };
 
 /// A trait for parsing FlatBuffers schema files.
@@ -75,12 +73,6 @@ impl Parser for FlatcFFIParser {
     }
 }
 
-// Regex to capture: <line>:<col>: <error|warning>: <message> (, originally at: :<original_line>)
-static RE: Lazy<Regex> = Lazy::new(|| {
-    Regex::new(r"^.+?:(\d+):\s*(\d+):\s+(error|warning):\s+(.+?)(?:, originally at: .+?:(\d+))?$")
-        .unwrap()
-});
-
 /// Handles the successful parse case.
 unsafe fn parse_success_case(
     parser_ptr: *mut ffi::FlatbuffersParser,
@@ -113,153 +105,32 @@ unsafe fn parse_error_case(
 ) -> HashMap<Url, Vec<Diagnostic>> {
     let mut diagnostics_map: HashMap<Url, Vec<Diagnostic>> = HashMap::new();
     let error_str_ptr = ffi::get_parser_error(parser_ptr);
+
     if !error_str_ptr.is_null() {
         let error_c_str = CStr::from_ptr(error_str_ptr);
         if let Ok(error_str) = error_c_str.to_str() {
             debug!("flatc FFI error parsing {}: {}", file_name, error_str);
+
+            let handlers: Vec<Box<dyn DiagnosticHandler>> = vec![
+                Box::new(diagnostics::duplicate_definition::DuplicateDefinitionHandler),
+                Box::new(diagnostics::undefined_type::UndefinedTypeHandler),
+                Box::new(diagnostics::generic::GenericDiagnosticHandler),
+            ];
+
             for line in error_str.lines() {
-                if let Some((file_uri, already_define_diag)) = parse_already_defined(line) {
-                    diagnostics_map
-                        .entry(file_uri)
-                        .or_default()
-                        .push(already_define_diag);
-                } else if let Some(captures) = RE.captures(line) {
-                    let file_path = captures.get(0).unwrap().as_str().split(':').next().unwrap();
-                    let Ok(file_uri) = Url::from_file_path(file_path) else {
-                        error!("failed to parse file into url: {}", file_path);
-                        continue;
-                    };
-
-                    let line_num_str = captures.get(5).map_or_else(
-                        || captures.get(1).map_or("1", |m| m.as_str()),
-                        |m| m.as_str(),
-                    );
-                    let line_num: u32 = line_num_str.parse().unwrap_or(1u32).saturating_sub(1);
-                    let col_num: u32 = captures
-                        .get(2)
-                        .map_or("1", |m| m.as_str())
-                        .parse()
-                        .unwrap_or(1u32)
-                        .saturating_sub(1);
-                    let severity = if &captures[3] == "error" {
-                        DiagnosticSeverity::ERROR
-                    } else {
-                        DiagnosticSeverity::WARNING
-                    };
-                    let message = captures[4].trim().to_string();
-
-                    let mut range = Range {
-                        start: Position {
-                            line: line_num,
-                            character: col_num,
-                        },
-                        end: Position {
-                            line: line_num,
-                            character: u32::MAX,
-                        },
-                    };
-
-                    let undefined_type_re =
-                        Regex::new(r"type referenced but not defined \(check namespace\): (\w+)")
-                            .unwrap();
-                    if let Some(captures) = undefined_type_re.captures(&message) {
-                        if let Some(type_name) = captures.get(1) {
-                            if let Some(line_content) = content.lines().nth(line_num as usize) {
-                                if let Some(start) = line_content.find(type_name.as_str()) {
-                                    let end = start + type_name.as_str().len();
-                                    range.start.character = start as u32;
-                                    range.end.character = end as u32;
-                                }
-                            }
-                        }
+                for handler in &handlers {
+                    if let Some((file_uri, diagnostic)) = handler.handle(line, content) {
+                        diagnostics_map
+                            .entry(file_uri)
+                            .or_default()
+                            .push(diagnostic);
+                        break;
                     }
-
-                    diagnostics_map
-                        .entry(file_uri)
-                        .or_default()
-                        .push(Diagnostic {
-                            range,
-                            severity: Some(severity),
-                            message,
-                            ..Default::default()
-                        });
                 }
             }
         }
     }
     diagnostics_map
-}
-
-// Regex to captures duplicate definitions:
-// <1file>:<2line>: <3col>: error: <4type_name> already exists: <5name> previously defined at <6original_file>:<7original_line>:<8original_col>
-static DUPLICATE_RE: Lazy<Regex> = Lazy::new(|| {
-    Regex::new(r"^(.+?):(\d+): (\d+): error: ([a-z\s]+) already exists: (.+?) previously defined at (.+?):(\d+):(\d+)$")
-        .unwrap()
-});
-
-fn parse_already_defined(line: &str) -> Option<(Url, Diagnostic)> {
-    if let Some(captures) = DUPLICATE_RE.captures(line) {
-        let file_path = captures[1].trim();
-        let Ok(file_uri) = Url::from_file_path(file_path) else {
-            error!("failed to parse file into url: {}", file_path);
-            return None;
-        };
-
-        let name = captures[5].trim().to_string();
-        let unqualified_name = name.split('.').last().unwrap_or(name.as_str());
-        let unqualified_name_length = unqualified_name.chars().count() as u32;
-
-        let message = format!("the name `{}` is defined multiple times", name);
-        let curr_line = captures[2].parse().unwrap_or(1) - 1;
-        let curr_char = captures[3]
-            .parse()
-            .unwrap_or(0u32)
-            .saturating_sub(unqualified_name_length);
-        let range = Range {
-            start: Position {
-                line: curr_line,
-                character: curr_char,
-            },
-            end: Position {
-                line: curr_line,
-                character: curr_char + unqualified_name_length,
-            },
-        };
-
-        let prev_line = captures[7].parse().unwrap_or(0) - 1;
-        let prev_char = captures[8]
-            .parse()
-            .unwrap_or(0u32)
-            .saturating_sub(unqualified_name_length);
-        let previous_location = Location {
-            uri: Url::from_file_path(captures[6].trim()).unwrap(),
-            range: Range {
-                start: Position {
-                    line: prev_line,
-                    character: prev_char,
-                },
-                end: Position {
-                    line: prev_line,
-                    character: prev_char + unqualified_name_length,
-                },
-            },
-        };
-        Some((
-            file_uri,
-            Diagnostic {
-                range,
-                severity: Some(DiagnosticSeverity::ERROR),
-                message,
-                related_information: Some(vec![DiagnosticRelatedInformation {
-                    location: previous_location,
-                    message: format!("previous definition of `{}` defined here", name),
-                }]),
-                ..Default::default()
-            },
-        ))
-    } else {
-        None
-    }
 }
 
 /// Extracts all included file paths from the parser.
