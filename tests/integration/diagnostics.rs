@@ -235,13 +235,28 @@ include "pastries.fbs";
 "#;
     let mut harness = TestHarness::new();
     harness
-        .initialize_and_open(&[("schema.fbs", content)])
+        .initialize_and_open(&[
+            ("schema.fbs", content),
+            ("coffee.fbs", "namespace coffee;"),
+            ("pastries.fbs", "namespace pastries;"),
+        ])
         .await;
 
-    let params = harness
-        .notification::<notification::PublishDiagnostics>()
-        .await;
-    let diagnostic = &params.diagnostics[0];
+    let schema_uri = harness.root_uri.join("schema.fbs").unwrap();
+    let mut diagnostics = vec![];
+    for _ in 0..4 {
+        let param = harness
+            .notification::<notification::PublishDiagnostics>()
+            .await;
+        if param.uri == schema_uri {
+            diagnostics = param.diagnostics;
+        } else {
+            assert!(param.diagnostics.is_empty());
+        }
+    }
+    assert_eq!(diagnostics.len(), 1);
+
+    let diagnostic = &diagnostics[0];
     assert_eq!(
         diagnostic.range,
         Range::new(Position::new(1, 20), Position::new(1, 20)),
@@ -264,7 +279,7 @@ include "pastries.fbs";
         related_information[1].location.range,
         Range::new(Position::new(1, 20), Position::new(1, 20)),
     );
-    assert_eq!(related_information[1].message, "add `;`, here: `;`");
+    assert_eq!(related_information[1].message, "add `;` here");
 }
 
 #[tokio::test]
@@ -308,7 +323,7 @@ table Coffee {
         related_information[1].location.range,
         Range::new(Position::new(2, 17), Position::new(2, 17)),
     );
-    assert_eq!(related_information[1].message, "add `;`, here: `;`");
+    assert_eq!(related_information[1].message, "add `;` here");
 }
 
 #[tokio::test]
@@ -341,5 +356,5 @@ root_type Coffee
         related_information[0].location.range,
         Range::new(Position::new(3, 16), Position::new(3, 16)),
     );
-    assert_eq!(related_information[0].message, "add `;`, here: `;`");
+    assert_eq!(related_information[0].message, "add `;` here");
 }
