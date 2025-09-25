@@ -227,7 +227,6 @@ table Foo {
 }
 
 #[tokio::test]
-#[ignore = "Missing semicolon diagnostic not supported."]
 async fn missing_semicolon_include() {
     let content = r#"
 include "coffee.fbs"
@@ -259,7 +258,7 @@ include "pastries.fbs";
     let diagnostic = &diagnostics[0];
     assert_eq!(
         diagnostic.range,
-        Range::new(Position::new(1, 20), Position::new(1, 20)),
+        Range::new(Position::new(1, 20), Position::new(1, 21)),
     );
     assert_eq!(diagnostic.message, "expected `;`, found `include`");
 
@@ -277,13 +276,12 @@ include "pastries.fbs";
 
     assert_eq!(
         related_information[1].location.range,
-        Range::new(Position::new(1, 20), Position::new(1, 20)),
+        Range::new(Position::new(1, 20), Position::new(1, 21)),
     );
     assert_eq!(related_information[1].message, "add `;` here");
 }
 
 #[tokio::test]
-#[ignore = "Missing semicolon diagnostic not supported."]
 async fn missing_semicolon_field() {
     let content = r#"
 table Coffee {
@@ -303,7 +301,7 @@ table Coffee {
     let diagnostic = &params.diagnostics[0];
     assert_eq!(
         diagnostic.range,
-        Range::new(Position::new(2, 17), Position::new(2, 17)),
+        Range::new(Position::new(2, 17), Position::new(2, 18)),
     );
     assert_eq!(diagnostic.message, "expected `;`, found `origin`");
 
@@ -321,13 +319,12 @@ table Coffee {
 
     assert_eq!(
         related_information[1].location.range,
-        Range::new(Position::new(2, 17), Position::new(2, 17)),
+        Range::new(Position::new(2, 17), Position::new(2, 18)),
     );
     assert_eq!(related_information[1].message, "add `;` here");
 }
 
 #[tokio::test]
-#[ignore = "Missing semicolon diagnostic not supported."]
 async fn missing_semicolon_end_of_file() {
     let content = r#"
 table Coffee {}
@@ -345,7 +342,7 @@ root_type Coffee
     let diagnostic = &params.diagnostics[0];
     assert_eq!(
         diagnostic.range,
-        Range::new(Position::new(3, 16), Position::new(3, 16)),
+        Range::new(Position::new(3, 16), Position::new(3, 17)),
     );
     assert_eq!(diagnostic.message, "expected `;`, found `end of file`");
 
@@ -354,7 +351,171 @@ root_type Coffee
 
     assert_eq!(
         related_information[0].location.range,
-        Range::new(Position::new(3, 16), Position::new(3, 16)),
+        Range::new(Position::new(3, 16), Position::new(3, 17)),
     );
     assert_eq!(related_information[0].message, "add `;` here");
+}
+
+#[tokio::test]
+async fn missing_semicolon_comment() {
+    let content = r#"
+table ids {
+    one: int (id: 0)
+    // two: int (id: 1);
+}
+"#;
+    let mut harness = TestHarness::new();
+    harness
+        .initialize_and_open(&[("schema.fbs", content)])
+        .await;
+
+    let params = harness
+        .notification::<notification::PublishDiagnostics>()
+        .await;
+    let diagnostic = &params.diagnostics[0];
+    assert_eq!(
+        diagnostic.range,
+        Range::new(Position::new(2, 20), Position::new(2, 21)),
+    );
+    assert_eq!(diagnostic.message, "expected `;`, found `}`");
+
+    let related_information = diagnostic.related_information.as_ref().unwrap();
+    assert_eq!(related_information.len(), 2);
+
+    assert_eq!(
+        related_information[0].location.range,
+        Range::new(Position::new(4, 0), Position::new(4, 1)),
+    );
+    assert_eq!(
+        related_information[0].message,
+        "unexpected token" // the closing brace
+    );
+
+    assert_eq!(
+        related_information[1].location.range,
+        Range::new(Position::new(2, 20), Position::new(2, 21)),
+    );
+    assert_eq!(related_information[1].message, "add `;` here");
+}
+
+#[tokio::test]
+async fn expecting_bracket() {
+    let content = r#"
+table Foo {
+    foo: [int;
+}
+"#;
+    let mut harness = TestHarness::new();
+    harness
+        .initialize_and_open(&[("schema.fbs", content)])
+        .await;
+
+    let params = harness
+        .notification::<notification::PublishDiagnostics>()
+        .await;
+    let diagnostic = &params.diagnostics[0];
+    assert_eq!(
+        diagnostic.range,
+        Range::new(Position::new(2, 13), Position::new(2, 14)),
+    );
+    assert_eq!(diagnostic.message, "expected `]`, found `;`");
+
+    let related_information = diagnostic.related_information.as_ref().unwrap();
+    assert_eq!(related_information.len(), 2);
+
+    assert_eq!(
+        related_information[0].location.range,
+        Range::new(Position::new(2, 13), Position::new(2, 14)),
+    );
+    assert_eq!(
+        related_information[0].message,
+        "unexpected token" // ";"
+    );
+
+    assert_eq!(
+        related_information[1].location.range,
+        Range::new(Position::new(2, 13), Position::new(2, 14)),
+    );
+    assert_eq!(related_information[1].message, "add `]` here");
+}
+
+#[tokio::test]
+async fn expecting_bracket_no_semicolon() {
+    let content = r#"
+table Foo {
+    foo: [int
+}
+"#;
+    let mut harness = TestHarness::new();
+    harness
+        .initialize_and_open(&[("schema.fbs", content)])
+        .await;
+
+    let params = harness
+        .notification::<notification::PublishDiagnostics>()
+        .await;
+    let diagnostic = &params.diagnostics[0];
+    assert_eq!(
+        diagnostic.range,
+        Range::new(Position::new(2, 13), Position::new(2, 14)),
+    );
+    assert_eq!(diagnostic.message, "expected `]`, found `}`");
+
+    let related_information = diagnostic.related_information.as_ref().unwrap();
+    assert_eq!(related_information.len(), 2);
+
+    assert_eq!(
+        related_information[0].location.range,
+        Range::new(Position::new(3, 0), Position::new(3, 1)),
+    );
+    assert_eq!(
+        related_information[0].message,
+        "unexpected token" // "}"
+    );
+
+    assert_eq!(
+        related_information[1].location.range,
+        Range::new(Position::new(2, 13), Position::new(2, 14)),
+    );
+    assert_eq!(related_information[1].message, "add `]` here");
+}
+
+#[tokio::test]
+async fn expecting_table_brace() {
+    let content = r#"
+table Foo
+    foo: int;
+"#;
+    let mut harness = TestHarness::new();
+    harness
+        .initialize_and_open(&[("schema.fbs", content)])
+        .await;
+
+    let params = harness
+        .notification::<notification::PublishDiagnostics>()
+        .await;
+    let diagnostic = &params.diagnostics[0];
+    assert_eq!(
+        diagnostic.range,
+        Range::new(Position::new(1, 9), Position::new(1, 10)),
+    );
+    assert_eq!(diagnostic.message, "expected `{`, found `foo`");
+
+    let related_information = diagnostic.related_information.as_ref().unwrap();
+    assert_eq!(related_information.len(), 2);
+
+    assert_eq!(
+        related_information[0].location.range,
+        Range::new(Position::new(2, 4), Position::new(2, 7)),
+    );
+    assert_eq!(
+        related_information[0].message,
+        "unexpected token" // "foo"
+    );
+
+    assert_eq!(
+        related_information[1].location.range,
+        Range::new(Position::new(1, 9), Position::new(1, 10)),
+    );
+    assert_eq!(related_information[1].message, "add `{` here");
 }

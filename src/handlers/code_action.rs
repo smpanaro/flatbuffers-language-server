@@ -4,7 +4,7 @@ use std::collections::HashMap;
 use tower_lsp::jsonrpc::Result;
 use tower_lsp::lsp_types::{
     CodeAction, CodeActionKind, CodeActionOrCommand, CodeActionParams, CodeActionResponse,
-    Position, Range, TextEdit, WorkspaceEdit,
+    DiagnosticSeverity, NumberOrString, Position, Range, TextEdit, WorkspaceEdit,
 };
 
 pub async fn handle_code_action(
@@ -17,6 +17,46 @@ pub async fn handle_code_action(
     let mut code_actions = Vec::new();
 
     for diagnostic in params.context.diagnostics {
+        if diagnostic.code == Some(NumberOrString::String("expecting-token".to_string()))
+            && diagnostic.severity == Some(DiagnosticSeverity::ERROR)
+        {
+            if let Some(data) = &diagnostic.data {
+                if let Some(expected) = data.get("expected").map(|v| v.as_str()).flatten() {
+                    let end_of_line = data
+                        .get("eol")
+                        .map(|v| v.as_bool())
+                        .flatten()
+                        .unwrap_or(false);
+                    if expected != "identifier" {
+                        let start = diagnostic.range.start;
+                        let insertion_pos = Position::new(
+                            start.line,
+                            // Diagnostic character is truncated to the end of the line,
+                            // regardless of sent diagnostic.
+                            start.character + if end_of_line { 1 } else { 0 },
+                        );
+                        let text_edit = TextEdit {
+                            range: Range::new(insertion_pos, insertion_pos),
+                            new_text: expected.to_string(),
+                        };
+                        let mut changes = HashMap::new();
+                        changes.insert(uri.clone(), vec![text_edit]);
+                        let code_action = CodeAction {
+                            title: format!("Add missing `{}`", expected),
+                            kind: Some(CodeActionKind::QUICKFIX),
+                            diagnostics: Some(vec![diagnostic.clone()]),
+                            edit: Some(WorkspaceEdit {
+                                changes: Some(changes),
+                                ..Default::default()
+                            }),
+                            ..Default::default()
+                        };
+                        code_actions.push(CodeActionOrCommand::CodeAction(code_action));
+                    }
+                }
+            }
+        }
+
         let unused_include_re = Regex::new(r"unused include: (.+)").unwrap();
         if let Some(_) = unused_include_re.captures(&diagnostic.message) {
             let range = diagnostic.range;

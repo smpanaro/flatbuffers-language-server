@@ -140,3 +140,65 @@ async fn no_code_action_for_other_diagnostics() {
     let redacted_response = response_str.replace(&harness.root_uri.to_string(), "[ROOT_URI]/");
     assert_snapshot!(redacted_response);
 }
+
+#[tokio::test]
+async fn expecting_token_quickfix() {
+    let schema_fixture = r#"
+table Foo {
+    foo: [int;
+}
+"#;
+
+    let mut harness = TestHarness::new();
+    let response = get_code_actions_for_workspace(
+        &mut harness,
+        &[("schema.fbs", schema_fixture)],
+        "schema.fbs",
+        "expected `]`, found `;`",
+    )
+    .await;
+
+    let redacted_response = response.replace(&harness.root_uri.to_string(), "[ROOT_URI]/");
+    assert_snapshot!(redacted_response);
+}
+
+#[tokio::test]
+async fn missing_semicolon_quickfix() {
+    let schema_fixture = r#"
+table MyTable {}
+root_type MyTable"#;
+    let mut harness = TestHarness::new();
+    let response = get_code_actions_for_workspace(
+        &mut harness,
+        &[("schema.fbs", schema_fixture)],
+        "schema.fbs",
+        "expected `;`, found `end of file`",
+    )
+    .await;
+
+    let redacted_response = response.replace(&harness.root_uri.to_string(), "[ROOT_URI]/");
+    assert_snapshot!(redacted_response);
+}
+
+#[tokio::test]
+async fn missing_semicolon_include_quickfix() {
+    let schema_fixture = r#"
+include "coffee.fbs"
+include "pastries.fbs";
+"#;
+    let mut harness = TestHarness::new();
+    let response = get_code_actions_for_workspace(
+        &mut harness,
+        &[
+            ("schema.fbs", schema_fixture),
+            ("coffee.fbs", "namespace coffee;"),
+            ("pastries.fbs", "namespace pastries;"),
+        ],
+        "schema.fbs",
+        "expected `;`, found `include`",
+    )
+    .await;
+
+    let redacted_response = response.replace(&harness.root_uri.to_string(), "[ROOT_URI]/");
+    assert_snapshot!(redacted_response);
+}

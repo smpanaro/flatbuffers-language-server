@@ -113,6 +113,7 @@ unsafe fn parse_error_case(
 
             let handlers: Vec<Box<dyn DiagnosticHandler>> = vec![
                 Box::new(diagnostics::duplicate_definition::DuplicateDefinitionHandler),
+                Box::new(diagnostics::expecting_token::ExpectingTokenHandler),
                 Box::new(diagnostics::undefined_type::UndefinedTypeHandler),
                 Box::new(diagnostics::generic::GenericDiagnosticHandler),
             ];

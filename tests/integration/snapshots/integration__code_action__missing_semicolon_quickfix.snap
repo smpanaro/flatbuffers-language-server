@@ -1,0 +1,68 @@
+---
+source: tests/integration/code_action.rs
+expression: redacted_response
+---
+[
+  {
+    "title": "Add missing `;`",
+    "kind": "quickfix",
+    "diagnostics": [
+      {
+        "range": {
+          "start": {
+            "line": 2,
+            "character": 17
+          },
+          "end": {
+            "line": 2,
+            "character": 18
+          }
+        },
+        "severity": 1,
+        "code": "expecting-token",
+        "message": "expected `;`, found `end of file`",
+        "relatedInformation": [
+          {
+            "location": {
+              "uri": "[ROOT_URI]/schema.fbs",
+              "range": {
+                "start": {
+                  "line": 2,
+                  "character": 17
+                },
+                "end": {
+                  "line": 2,
+                  "character": 18
+                }
+              }
+            },
+            "message": "add `;` here"
+          }
+        ],
+        "data": {
+          "eol": true,
+          "expected": ";"
+        }
+      }
+    ],
+    "edit": {
+      "changes": {
+        "[ROOT_URI]/schema.fbs": [
+          {
+            "range": {
+              "start": {
+                "line": 2,
+                "character": 18
+              },
+              "end": {
+                "line": 2,
+                "character": 18
+              }
+            },
+            "newText": ";"
+          }
+        ]
+      }
+    }
+  }
+]

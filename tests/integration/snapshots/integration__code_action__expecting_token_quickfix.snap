@@ -1,0 +1,84 @@
+---
+source: tests/integration/code_action.rs
+expression: redacted_response
+---
+[
+  {
+    "title": "Add missing `]`",
+    "kind": "quickfix",
+    "diagnostics": [
+      {
+        "range": {
+          "start": {
+            "line": 2,
+            "character": 13
+          },
+          "end": {
+            "line": 2,
+            "character": 14
+          }
+        },
+        "severity": 1,
+        "code": "expecting-token",
+        "message": "expected `]`, found `;`",
+        "relatedInformation": [
+          {
+            "location": {
+              "uri": "[ROOT_URI]/schema.fbs",
+              "range": {
+                "start": {
+                  "line": 2,
+                  "character": 13
+                },
+                "end": {
+                  "line": 2,
+                  "character": 14
+                }
+              }
+            },
+            "message": "unexpected token"
+          },
+          {
+            "location": {
+              "uri": "[ROOT_URI]/schema.fbs",
+              "range": {
+                "start": {
+                  "line": 2,
+                  "character": 13
+                },
+                "end": {
+                  "line": 2,
+                  "character": 14
+                }
+              }
+            },
+            "message": "add `]` here"
+          }
+        ],
+        "data": {
+          "eol": false,
+          "expected": "]"
+        }
+      }
+    ],
+    "edit": {
+      "changes": {
+        "[ROOT_URI]/schema.fbs": [
+          {
+            "range": {
+              "start": {
+                "line": 2,
+                "character": 13
+              },
+              "end": {
+                "line": 2,
+                "character": 13
+              }
+            },
+            "newText": "]"
+          }
+        ]
+      }
+    }
+  }
+]
