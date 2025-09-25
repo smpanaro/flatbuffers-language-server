@@ -8,6 +8,7 @@ mod helpers;
 mod hover;
 mod references;
 mod scenarios;
+mod test_logger;
 
 #[tokio::test]
 async fn initialize_server_test() {

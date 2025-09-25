@@ -10,6 +10,8 @@ use tower_lsp::lsp_types::request::Request as LspRequest;
 use tower_lsp::lsp_types::*;
 use tower_lsp::{LspService, Server};
 
+use super::test_logger;
+
 // This file leverages code from:
 // https://github.com/veryl-lang/veryl/blob/fdac1dfafff82e1227239b77930700927b091de1/crates/languageserver/src/tests.rs#L15
 
@@ -33,6 +35,7 @@ pub struct TestHarness {
 
 impl TestHarness {
     pub fn new() -> Self {
+        test_logger::init();
         let (req_client, req_server) = io::duplex(1024);
         let (res_server, res_client) = io::duplex(1024);
 

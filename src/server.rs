@@ -36,6 +36,7 @@ impl Backend {
             parser: FlatcFFIParser,
         }
     }
+
     // TODO: Move this to workspace
     pub async fn parse_and_discover(&self, initial_uri: Url, initial_content: Option<String>) {
         let mut files_to_parse = vec![(initial_uri.clone(), initial_content)];
