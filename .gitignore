@@ -1,2 +1,4 @@
 /target
 *.snap.new
+compile_commands.json
+.cache

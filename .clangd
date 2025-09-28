@@ -1,0 +1,38 @@
+# Alternatively:
+# brew install bear
+# bear -- cargo build
+CompileFlags:
+  Add: ["-std=c++11", "-Wall", "-Wextra"]
+
+---
+If:
+  PathMatch: [".*src/cpp/.*\\.*"]
+CompileFlags:
+  Add:
+    [
+      "-I../../src/cpp/patched_flatbuffers",
+      "-I../../third_party/flatbuffers/include",
+      "-I../../src/cpp",
+    ]
+
+---
+If:
+  PathMatch: [".*src/cpp/patched_flatbuffers/.*\\.*"]
+CompileFlags:
+  Add:
+    [
+      "-I../../../src/cpp/patched_flatbuffers",
+      "-I../../../third_party/flatbuffers/include",
+    ]
+
+---
+If:
+  PathMatch: [".*src/cpp/patched_flatbuffers/flatbuffers.*\\.*"]
+CompileFlags:
+  Add: ["-I../../../../third_party/flatbuffers/include"]
+
+---
+If:
+  PathMatch: [".*third_party/flatbuffers.*"]
+Diagnostics:
+  Suppress: "*"
