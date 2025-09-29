@@ -52,6 +52,7 @@ fn populate_builtins(workspace: &mut Workspace) {
         let symbol = Symbol {
             info: SymbolInfo {
                 name: type_name.to_string(),
+                namespace: vec![],
                 location: Location {
                     uri: Url::parse("builtin:scalar").unwrap(),
                     range: Range::default(),

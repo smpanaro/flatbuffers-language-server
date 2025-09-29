@@ -1,3 +1,4 @@
+use crate::utils::parsed_type::ParsedType;
 use std::collections::HashMap;
 use tower_lsp::lsp_types::{CompletionItemKind, Location, Position, Range, Url};
 
@@ -7,6 +8,7 @@ use crate::ext::range::RangeExt;
 pub struct RootTypeInfo {
     pub location: Location,
     pub type_name: String,
+    pub parsed_type: ParsedType,
 }
 
 // A map from a fully qualified name to its symbol definition
@@ -38,6 +40,7 @@ pub enum SymbolKind {
 #[derive(Debug, Clone)]
 pub struct SymbolInfo {
     pub name: String,
+    pub namespace: Vec<String>,
     pub location: Location,
     pub documentation: Option<String>,
 }
@@ -70,6 +73,7 @@ pub struct Enum {
 pub struct UnionVariant {
     pub name: String,
     pub location: Location,
+    pub parsed_type: ParsedType,
 }
 
 #[derive(Debug, Clone)]
@@ -79,8 +83,10 @@ pub struct Union {
 
 #[derive(Debug, Clone)]
 pub struct Field {
-    pub type_name: String, // The name of the field's type, e.g., "string" or "Vec3"
-    pub type_range: Range,
+    pub type_name: String, // The name of the field's underlying type, e.g., "string" or "Vec3" (excludes vector/array tokens)
+    pub type_display_name: String, // The fully-qualified name of the type, including vector and array tokens
+    pub type_range: Range, // The full range covered by the type on the line. ie including brackets but not annotations
+    pub parsed_type: ParsedType,
     pub deprecated: bool,
     pub has_id: bool,
     pub id: i32,
@@ -140,21 +146,28 @@ impl Symbol {
     }
 
     pub fn hover_markdown(&self) -> String {
-        let mut markdown = format!(
-            "```flatbuffers\n{}\n```",
-            match &self.kind {
-                SymbolKind::Table(t) =>
-                    format!("table {} {{{}}}", self.info.name, t.fields_markdown()),
-                SymbolKind::Struct(s) =>
-                    format!("struct {} {{{}}}", self.info.name, s.fields_markdown()),
-                SymbolKind::Enum(e) =>
-                    format!("enum {} {{{}}}", self.info.name, e.variants_markdown()),
-                SymbolKind::Union(u) =>
-                    format!("union {} {{{}}}", self.info.name, u.variants_markdown()),
-                SymbolKind::Scalar => format!("{} // scalar", self.info.name),
-                SymbolKind::Field(f) => format!("{}: {}", self.info.name, f.type_name),
+        let mut code_content = String::new();
+        if !self.info.namespace.is_empty() {
+            code_content.push_str(&format!("namespace {};\n\n", self.info.namespace.join(".")));
+        }
+
+        let definition = match &self.kind {
+            SymbolKind::Table(t) => format!("table {} {{{}}}", self.info.name, t.fields_markdown()),
+            SymbolKind::Struct(s) => {
+                format!("struct {} {{{}}}", self.info.name, s.fields_markdown())
             }
-        );
+            SymbolKind::Enum(e) => format!("enum {} {{{}}}", self.info.name, e.variants_markdown()),
+            SymbolKind::Union(u) => {
+                format!("union {} {{{}}}", self.info.name, u.variants_markdown())
+            }
+            SymbolKind::Scalar => format!("{} // scalar", self.info.name),
+            SymbolKind::Field(f) => {
+                format!("{}: {}", self.info.name, f.parsed_type.to_display_string())
+            }
+        };
+        code_content.push_str(&definition);
+
+        let mut markdown = format!("```flatbuffers\n{}\n```", code_content);
 
         if let Some(doc) = &self.info.documentation {
             if !doc.is_empty() {
@@ -186,9 +199,8 @@ impl SymbolTable {
         }
     }
 
-    pub fn insert(&mut self, symbol: Symbol) {
-        // TODO: Should this key include namespace?
-        self.table.insert(symbol.info.name.clone(), symbol);
+    pub fn insert(&mut self, key: String, symbol: Symbol) {
+        self.table.insert(key, symbol);
     }
 
     pub fn contains_key(&self, key: &str) -> bool {
@@ -218,7 +230,11 @@ fn fields_markdown(fields: &[Symbol]) -> String {
             .iter()
             .filter_map(|field| {
                 if let SymbolKind::Field(f) = &field.kind {
-                    Some(format!("  {}: {}", field.info.name, &f.type_name))
+                    Some(format!(
+                        "  {}: {}",
+                        field.info.name,
+                        f.parsed_type.to_display_string()
+                    ))
                 } else {
                     None
                 }

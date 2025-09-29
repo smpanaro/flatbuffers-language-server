@@ -174,28 +174,70 @@ fn handle_field_type_completion(backend: &Backend, line: &str) -> Option<Complet
         return None;
     };
     let field_name = captures.get(1).map_or("", |m| m.as_str());
-    let partial_type_name = captures.get(2).map_or("", |m| m.as_str());
+    let partial_text = captures.get(2).map_or("", |m| m.as_str());
 
     let mut items = Vec::new();
+
+    // Build a map to detect name collisions
+    let mut name_collisions: std::collections::HashMap<String, usize> =
+        std::collections::HashMap::new();
+    for entry in backend.workspace.symbols.iter() {
+        let symbol = entry.value();
+        if let SymbolKind::Field(_) = &symbol.kind {
+            continue;
+        }
+        *name_collisions.entry(symbol.info.name.clone()).or_default() += 1;
+    }
 
     // User-defined symbols
     for entry in backend.workspace.symbols.iter() {
         let symbol = entry.value();
-        let kind = (&symbol.kind).into();
+        let kind: CompletionItemKind = (&symbol.kind).into();
+        if kind == CompletionItemKind::FIELD {
+            continue;
+        }
 
-        if kind != CompletionItemKind::FIELD {
-            let label = symbol.info.name.clone();
+        let base_name = &symbol.info.name;
+        let qualified_name = if symbol.info.namespace.is_empty() {
+            base_name.clone()
+        } else {
+            format!("{}.{}", symbol.info.namespace.join("."), base_name)
+        };
 
-            if !include_completion(partial_type_name, label.as_str()) {
-                continue;
-            }
-            let sort_text = field_sort_text(field_name, partial_type_name, label.as_str());
+        let (is_match, sort_text) = field_sort_text(
+            field_name,
+            partial_text,
+            &symbol.info.name,
+            &symbol.info.namespace,
+            false,
+        );
+
+        if is_match {
+            let has_collision = name_collisions.get(base_name).map_or(false, |&c| c > 1);
+
+            let detail = if symbol.info.namespace.is_empty() {
+                symbol.type_name().to_string()
+            } else {
+                format!(
+                    "{} in {}",
+                    symbol.type_name(),
+                    symbol.info.namespace.join(".")
+                )
+            };
+
+            let insert_text = if has_collision {
+                Some(qualified_name.clone())
+            } else {
+                None // Let LSP client use the label
+            };
 
             items.push(CompletionItem {
-                label,
+                label: base_name.clone(),
+                insert_text,
+                filter_text: Some(qualified_name.clone()),
                 sort_text: Some(sort_text),
                 kind: Some(kind),
-                detail: Some(symbol.type_name().to_string()),
+                detail: Some(detail),
                 documentation: symbol.info.documentation.as_ref().map(|doc| {
                     Documentation::MarkupContent(MarkupContent {
                         kind: MarkupKind::Markdown,
@@ -210,56 +252,95 @@ fn handle_field_type_completion(backend: &Backend, line: &str) -> Option<Complet
     // Built-in symbols
     for item in backend.workspace.builtin_symbols.iter() {
         let (name, symbol) = (item.key(), item.value());
-        if !include_completion(partial_type_name, name.as_str()) {
-            continue;
-        }
-        let sort_text = field_sort_text(field_name, partial_type_name, name.as_str());
+        let (is_match, sort_text) =
+            field_sort_text(field_name, partial_text, &symbol.info.name, &vec![], true);
 
-        items.push(CompletionItem {
-            label: name.clone(),
-            sort_text: Some(sort_text),
-            kind: Some(CompletionItemKind::KEYWORD),
-            documentation: symbol.info.documentation.as_ref().map(|doc| {
-                Documentation::MarkupContent(MarkupContent {
-                    kind: MarkupKind::Markdown,
-                    value: doc.clone(),
-                })
-            }),
-            ..Default::default()
-        });
+        if is_match {
+            items.push(CompletionItem {
+                label: name.clone(),
+                sort_text: Some(sort_text),
+                kind: Some(CompletionItemKind::KEYWORD),
+                documentation: symbol.info.documentation.as_ref().map(|doc| {
+                    Documentation::MarkupContent(MarkupContent {
+                        kind: MarkupKind::Markdown,
+                        value: doc.clone(),
+                    })
+                }),
+                ..Default::default()
+            });
+        }
     }
 
     Some(CompletionResponse::Array(items))
 }
 
-fn include_completion(field_partial_type: &str, completion_type_name: &str) -> bool {
-    field_partial_type.is_empty()
-        || completion_type_name
-            .to_lowercase()
-            .contains(&field_partial_type.to_lowercase())
-}
-
+/// Determines if a symbol is a relevant completion and calculates its sort order.
+///
+/// The sorting logic prioritizes matches in the following order:
+/// 1.  **Exact Namespace and Type Prefix Match**: `my.thing: My.Th` -> `My.Thing`
+/// 2.  **Type Name in Field Name**: `my_widget: ` -> `Widget`
+/// 3.  **Type Prefix Match**: `my_field: Wi` -> `Widget`
+/// 4.  **Substring Match**: `my_field: dget` -> `Widget`
+/// 5.  **Namespace Prefix Match**: `my_field: My` -> `My.Thing`
+///
+/// ## Returns
+/// A tuple `(is_match, sort_text)` where:
+/// - `is_match`: A boolean indicating if the symbol is a candidate for completion.
+/// - `sort_text`: A string used for sorting the completion item.
 fn field_sort_text(
     field_name: &str,
-    field_partial_type: &str,
-    completion_type_name: &str,
-) -> String {
-    if !field_partial_type.is_empty()
-        && completion_type_name
-            .to_lowercase()
-            .starts_with(&field_partial_type.to_lowercase())
-    {
-        // myWidget: Gi => Gizmo type
-        format!("0_{}", completion_type_name)
-    } else if field_name
-        .to_lowercase()
-        .contains(&completion_type_name.to_lowercase())
-    {
-        // myWidget: => Widget type
-        format!("1_{}", completion_type_name)
+    partial_text: &str,
+    symbol_name: &str,
+    symbol_namespace: &[String],
+    is_builtin: bool,
+) -> (bool, String) {
+    let qualified_name = if symbol_namespace.is_empty() {
+        symbol_name.to_string()
     } else {
-        format!("2_{}", completion_type_name)
-    }
+        format!("{}.{}", symbol_namespace.join("."), symbol_name)
+    };
+
+    let (is_match, sort_prefix) = if let Some((ns_part, type_part)) = partial_text.rsplit_once('.')
+    {
+        // Case 1: User is typing a qualified name (e.g., "My.Api.")
+        let is_ns_match = symbol_namespace.join(".").starts_with(ns_part);
+        let is_type_match = symbol_name.starts_with(type_part);
+        let is_a_match = is_ns_match && is_type_match;
+        (is_a_match, if is_a_match { "0" } else { "4" })
+    } else {
+        // Case 2: User is typing a type name or namespace directly
+        let is_type_match = symbol_name
+            .to_lowercase()
+            .contains(&partial_text.to_lowercase());
+        let is_type_prefix_match = symbol_name
+            .to_lowercase()
+            .starts_with(&partial_text.to_lowercase());
+        let is_ns_match = symbol_namespace
+            .iter()
+            .any(|ns| ns.starts_with(partial_text));
+        let field_name_contains_type = field_name
+            .to_lowercase()
+            .contains(&symbol_name.to_lowercase());
+
+        if is_type_match {
+            if field_name_contains_type {
+                (true, "0") // Perfect match: `my_widget` -> `Widget`
+            } else if is_type_prefix_match {
+                (true, "1") // Good match: `my_field: Wi` -> `Widget`
+            } else {
+                (true, "2") // Ok match: `my_field: u` -> `double`
+            }
+        } else if is_ns_match {
+            (true, "3") // Namespace match
+        } else if !is_builtin {
+            (false, "4") // custom types before builtins
+        } else {
+            (false, "5")
+        }
+    };
+
+    let sort_text = format!("{}_{}", sort_prefix, qualified_name);
+    (is_match, sort_text)
 }
 
 fn handle_root_type_completion(backend: &Backend, line: &str) -> Option<CompletionResponse> {
@@ -268,19 +349,23 @@ fn handle_root_type_completion(backend: &Backend, line: &str) -> Option<Completi
         return None;
     }
 
-    let partial_type = trimmed_line.strip_prefix("root_type").unwrap_or("").trim();
+    let partial_text = trimmed_line.strip_prefix("root_type").unwrap_or("").trim();
 
     let mut items = Vec::new();
     for entry in backend.workspace.symbols.iter() {
         let symbol = entry.value();
-        let kind = (&symbol.kind).into();
+        if let SymbolKind::Table(_) = &symbol.kind {
+            let base_name = &symbol.info.name;
+            let qualified_name = if symbol.info.namespace.is_empty() {
+                base_name.clone()
+            } else {
+                format!("{}.{}", symbol.info.namespace.join("."), base_name)
+            };
 
-        if kind == CompletionItemKind::CLASS {
-            let label = symbol.info.name.clone();
-            if include_completion(partial_type, &label) {
+            if qualified_name.starts_with(partial_text) {
                 items.push(CompletionItem {
-                    label,
-                    kind: Some(kind),
+                    label: base_name.clone(),
+                    kind: Some(CompletionItemKind::CLASS),
                     detail: Some(symbol.type_name().to_string()),
                     documentation: symbol.info.documentation.as_ref().map(|doc| {
                         Documentation::MarkupContent(MarkupContent {

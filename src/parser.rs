@@ -4,7 +4,7 @@ use crate::symbol_table::{
     Enum, EnumVariant, Field, RootTypeInfo, Struct, Symbol, SymbolInfo, SymbolKind, SymbolTable,
     Table, Union, UnionVariant,
 };
-use crate::utils::type_utils::extract_base_type_name;
+use crate::utils::parsed_type::parse_type;
 use log::{debug, error};
 use std::collections::{HashMap, HashSet};
 use std::ffi::{CStr, CString};
@@ -88,6 +88,7 @@ unsafe fn parse_success_case(
     let mut diagnostics = HashMap::new();
 
     let included_files = extract_all_included_files(parser_ptr);
+
     extract_structs_and_tables(parser_ptr, &mut st, &mut diagnostics);
     extract_enums_and_unions(parser_ptr, &mut st, &mut diagnostics);
     let root_type_info = extract_root_type(parser_ptr);
@@ -169,13 +170,37 @@ unsafe fn extract_structs_and_tables(
             continue;
         }
         let name = CStr::from_ptr(def_info.name).to_string_lossy().into_owned();
+
+        let mut namespace_buffer = vec![0u8; 256];
+        ffi::get_struct_namespace(
+            parser_ptr,
+            i,
+            namespace_buffer.as_mut_ptr() as *mut i8,
+            namespace_buffer.len() as i32,
+        );
+        let namespace_name = CStr::from_ptr(namespace_buffer.as_ptr() as *const i8)
+            .to_string_lossy()
+            .into_owned();
+
+        let namespace: Vec<String> = if namespace_name.is_empty() {
+            vec![]
+        } else {
+            namespace_name.split('.').map(|s| s.to_string()).collect()
+        };
+
+        let qualified_name = if namespace.is_empty() {
+            name.clone()
+        } else {
+            format!("{}.{}", namespace.join("."), name)
+        };
+
         let file = CStr::from_ptr(def_info.file).to_string_lossy().into_owned();
         let Ok(file_uri) = Url::from_file_path(&file) else {
             error!("failed to parse file into url: {}", file);
             continue;
         };
 
-        if st.contains_key(&name) {
+        if st.contains_key(&qualified_name) {
             diagnostics
                 .entry(file_uri.clone())
                 .or_default()
@@ -203,24 +228,19 @@ unsafe fn extract_structs_and_tables(
                 .to_string_lossy()
                 .into_owned();
 
-            let mut type_name_buffer = vec![0u8; 256];
-            ffi::get_field_type_name(
-                parser_ptr,
-                i,
-                j,
-                type_name_buffer.as_mut_ptr() as *mut i8,
-                type_name_buffer.len() as i32,
-            );
-            let type_name = CStr::from_ptr(type_name_buffer.as_ptr() as *const i8)
+            let type_name = ffi_get_string(|buf, len| {
+                ffi::get_field_base_type_name(parser_ptr, i, j, buf, len);
+            });
+            let type_display_name = ffi_get_string(|buf, len| {
+                ffi::get_field_type_name(parser_ptr, i, j, buf, len);
+            });
+
+            let type_source = CStr::from_ptr(field_info.type_source)
                 .to_string_lossy()
                 .into_owned();
-            let type_range = Range::new(
-                Position::new(
-                    field_info.type_line,
-                    field_info.type_col - (type_name.chars().count() as u32),
-                ),
-                Position::new(field_info.type_line, field_info.type_col),
-            );
+
+            let type_range = field_info.type_range.into();
+            let parsed_type = parse_type(&type_source, type_range);
 
             let doc = ffi_get_string(|buf, len| {
                 ffi::get_field_documentation(parser_ptr, i, j, buf, len);
@@ -229,12 +249,15 @@ unsafe fn extract_structs_and_tables(
 
             let (field_symbol, _) = create_symbol(
                 &file_uri,
-                field_name,
+                field_name.clone(),
+                vec![], // Fields do not have namespaces themselves
                 field_info.line,
                 field_info.col,
                 SymbolKind::Field(Field {
                     type_name,
+                    type_display_name,
                     type_range,
+                    parsed_type,
                     deprecated: field_info.deprecated,
                     has_id: field_info.has_id,
                     id: field_info.id,
@@ -262,12 +285,13 @@ unsafe fn extract_structs_and_tables(
         let (symbol, _) = create_symbol(
             &file_uri,
             name,
+            namespace,
             def_info.line,
             def_info.col,
             symbol_kind,
             documentation,
         );
-        st.insert(symbol);
+        st.insert(qualified_name, symbol);
     }
 }
 
@@ -284,13 +308,37 @@ unsafe fn extract_enums_and_unions(
             continue;
         }
         let name = CStr::from_ptr(def_info.name).to_string_lossy().into_owned();
+
+        let mut namespace_buffer = vec![0u8; 256];
+        ffi::get_enum_namespace(
+            parser_ptr,
+            i,
+            namespace_buffer.as_mut_ptr() as *mut i8,
+            namespace_buffer.len() as i32,
+        );
+        let namespace_name = CStr::from_ptr(namespace_buffer.as_ptr() as *const i8)
+            .to_string_lossy()
+            .into_owned();
+
+        let namespace: Vec<String> = if namespace_name.is_empty() {
+            vec![]
+        } else {
+            namespace_name.split('.').map(|s| s.to_string()).collect()
+        };
+
+        let qualified_name = if namespace.is_empty() {
+            name.clone()
+        } else {
+            format!("{}.{}", namespace.join("."), name)
+        };
+
         let file = CStr::from_ptr(def_info.file).to_string_lossy().into_owned();
         let Ok(file_uri) = Url::from_file_path(&file) else {
             error!("failed to parse file into url: {}", file);
             continue;
         };
 
-        if st.contains_key(&name) {
+        if st.contains_key(&qualified_name) {
             diagnostics
                 .entry(file_uri.clone())
                 .or_default()
@@ -315,7 +363,7 @@ unsafe fn extract_enums_and_unions(
             }
             let val_name = CStr::from_ptr(val_info.name).to_string_lossy().into_owned();
 
-            if def_info.is_union && val_name == "NONE" {
+            if def_info.is_union && (val_name == "NONE" || val_name == "") {
                 continue;
             }
             variants.push((val_name, val_info));
@@ -325,18 +373,21 @@ unsafe fn extract_enums_and_unions(
             SymbolKind::Union(Union {
                 variants: variants
                     .into_iter()
-                    .map(|(name, val_info)| UnionVariant {
-                        location: Location {
+                    .map(|(name, val_info)| {
+                        let type_source = CStr::from_ptr(val_info.type_source)
+                            .to_string_lossy()
+                            .into_owned();
+                        let type_range = val_info.type_range.into();
+                        let parsed_type = parse_type(&type_source, type_range);
+                        let location = Location {
                             uri: file_uri.clone(),
-                            range: Range::new(
-                                Position::new(
-                                    val_info.line,
-                                    val_info.col - (name.chars().count() as u32),
-                                ),
-                                Position::new(val_info.line, val_info.col),
-                            ),
-                        },
-                        name,
+                            range: type_range,
+                        };
+                        UnionVariant {
+                            name,
+                            location,
+                            parsed_type,
+                        }
                     })
                     .collect(),
             })
@@ -366,12 +417,13 @@ unsafe fn extract_enums_and_unions(
         let (symbol, _) = create_symbol(
             &file_uri,
             name,
+            namespace,
             def_info.line,
             def_info.col,
             symbol_kind,
             documentation,
         );
-        st.insert(symbol);
+        st.insert(qualified_name, symbol);
     }
 }
 
@@ -379,19 +431,24 @@ unsafe fn extract_enums_and_unions(
 unsafe fn extract_root_type(parser_ptr: *mut ffi::FlatbuffersParser) -> Option<RootTypeInfo> {
     if ffi::has_root_type(parser_ptr) {
         let root_def = ffi::get_root_type_info(parser_ptr);
-        let name = CStr::from_ptr(root_def.name).to_string_lossy().into_owned();
+        let qualified_name = CStr::from_ptr(root_def.name).to_string_lossy().into_owned();
         let file = CStr::from_ptr(root_def.file).to_string_lossy().into_owned();
+
         if let Ok(file_uri) = Url::from_file_path(&file) {
+            let type_source = CStr::from_ptr(root_def.type_source)
+                .to_string_lossy()
+                .into_owned();
+            let type_range = root_def.type_range.into();
+            let parsed_type = parse_type(&type_source, type_range);
+
             let location = Location {
                 uri: file_uri,
-                range: Range::new(
-                    Position::new(root_def.line, root_def.col - (name.chars().count() as u32)),
-                    Position::new(root_def.line, root_def.col),
-                ),
+                range: type_range,
             };
             return Some(RootTypeInfo {
                 location,
-                type_name: name,
+                type_name: qualified_name,
+                parsed_type,
             });
         }
     }
@@ -424,14 +481,14 @@ fn perform_semantic_analysis(
             SymbolKind::Table(t) => {
                 for field in &t.fields {
                     if let SymbolKind::Field(f) = &field.kind {
-                        used_types.insert(extract_base_type_name(&f.type_name).to_string());
+                        used_types.insert(f.type_name.clone());
                     }
                 }
             }
             SymbolKind::Struct(s) => {
                 for field in &s.fields {
                     if let SymbolKind::Field(f) = &field.kind {
-                        used_types.insert(extract_base_type_name(&f.type_name).to_string());
+                        used_types.insert(f.type_name.clone());
                     }
                 }
             }
@@ -614,6 +671,7 @@ fn is_known_type(type_name: &str, st: &SymbolTable, scalar_types: &HashSet<&str>
 fn create_symbol(
     uri: &Url,
     name: String,
+    namespace: Vec<String>,
     line: u32,
     col: u32,
     kind: SymbolKind,
@@ -628,6 +686,7 @@ fn create_symbol(
     };
     let symbol_info = SymbolInfo {
         name,
+        namespace,
         location: location.clone(),
         documentation,
     };

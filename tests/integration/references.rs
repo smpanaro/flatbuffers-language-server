@@ -166,7 +166,6 @@ table MyTable {
 }
 
 #[tokio::test]
-#[ignore = "Type namespaces are not supported."]
 async fn find_references_respects_namespaces() {
     let coffee_fixture = r#"
 namespace coffee;
@@ -279,7 +278,6 @@ table Beans {
 }
 
 #[tokio::test]
-#[ignore = "Nested namespaces are not supported."]
 async fn find_references_respects_nested_namespaces() {
     let included_fixture = r#"
 namespace One.Two;
@@ -345,7 +343,6 @@ table Y {
 }
 
 #[tokio::test]
-#[ignore = "Namespaced vectors are not supported."]
 async fn find_references_respects_namespaced_vector() {
     let included_fixture = r#"
 namespace One.Two;
@@ -413,7 +410,6 @@ struct Y {
 }
 
 #[tokio::test]
-#[ignore = "Namespaced root types not supported."]
 async fn find_references_respects_root_type_namespaces() {
     let included_fixture = r#"
 namespace One.Two;
@@ -477,7 +473,6 @@ root_type Two.Numbe$0r;
 }
 
 #[tokio::test]
-#[ignore = "Namespaced union variants not supported."]
 async fn find_references_respects_union_namespaces() {
     let included_fixture = r#"
 namespace One.Two;

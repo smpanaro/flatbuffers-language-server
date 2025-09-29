@@ -1,11 +1,11 @@
 ---
 source: tests/integration/hover.rs
-expression: "serde_json::to_string_pretty(&res).unwrap()"
+expression: "serde_json::to_string_pretty(&response).unwrap()"
 ---
 {
   "contents": {
     "kind": "markdown",
-    "value": "```flatbuffers\ntable MyTable {\n  b: bool\n}\n```"
+    "value": "```flatbuffers\nnamespace MyNS;\n\ntable MyTable {\n  b: bool\n}\n```"
   },
   "range": {
     "start": {

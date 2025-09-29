@@ -1,7 +1,6 @@
 use crate::analysis::resolve_symbol_at;
 use crate::server::Backend;
 use crate::symbol_table;
-use crate::utils;
 use log::info;
 use std::time::Instant;
 use tower_lsp::jsonrpc::Result;
@@ -31,50 +30,29 @@ pub async fn handle_references(
         let symbol = entry.value();
         let file_uri = &symbol.info.location.uri;
 
-        // Check nested fields in tables and structs
-        if let symbol_table::SymbolKind::Table(t) = &symbol.kind {
-            for field in &t.fields {
-                if let symbol_table::SymbolKind::Field(f) = &field.kind {
-                    let base_type_name = utils::type_utils::extract_base_type_name(&f.type_name);
-                    if base_type_name == target_name {
-                        let inner_type_range = utils::type_utils::calculate_inner_type_range(
-                            f.type_range,
-                            &f.type_name,
-                        );
-                        references.push(Location {
-                            uri: file_uri.clone(),
-                            range: inner_type_range,
-                        });
-                    }
-                }
-            }
-        }
-
-        if let symbol_table::SymbolKind::Struct(s) = &symbol.kind {
-            for field in &s.fields {
-                if let symbol_table::SymbolKind::Field(f) = &field.kind {
-                    let base_type_name = utils::type_utils::extract_base_type_name(&f.type_name);
-                    if base_type_name == target_name {
-                        let inner_type_range = utils::type_utils::calculate_inner_type_range(
-                            f.type_range,
-                            &f.type_name,
-                        );
-                        references.push(Location {
-                            uri: file_uri.clone(),
-                            range: inner_type_range,
-                        });
-                    }
-                }
-            }
-        }
-
         if let symbol_table::SymbolKind::Union(u) = &symbol.kind {
             for variant in &u.variants {
-                let base_name = utils::type_utils::extract_base_type_name(&variant.name);
-                if base_name == target_name {
+                if variant.name == target_name {
                     references.push(Location {
                         uri: file_uri.clone(),
-                        range: variant.location.range,
+                        range: variant.parsed_type.type_name.range,
+                    });
+                }
+            }
+        }
+
+        let fields = match &symbol.kind {
+            symbol_table::SymbolKind::Table(t) => &t.fields,
+            symbol_table::SymbolKind::Struct(s) => &s.fields,
+            _ => continue,
+        };
+
+        for field in fields {
+            if let symbol_table::SymbolKind::Field(f) = &field.kind {
+                if f.type_name == target_name {
+                    references.push(Location {
+                        uri: file_uri.clone(),
+                        range: f.parsed_type.type_name.range,
                     });
                 }
             }
@@ -85,7 +63,10 @@ pub async fn handle_references(
     for entry in backend.workspace.root_types.iter() {
         let root_type_info = entry.value();
         if root_type_info.type_name == target_name {
-            references.push(root_type_info.location.clone());
+            references.push(Location {
+                uri: entry.key().clone(),
+                range: root_type_info.parsed_type.type_name.range,
+            });
         }
     }
 
