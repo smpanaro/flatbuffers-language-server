@@ -2954,7 +2954,9 @@ bool Parser::SetRootType(const char *name, RootTypeLoc *loc) {
   if (!root_struct_def_) {
     root_struct_def_ =
         LookupStruct(current_namespace_->GetFullyQualifiedName(name));
-    root_type_loc_ = loc;
+  }
+  if (root_struct_def_) {
+      root_type_loc_ = loc;
   }
   return root_struct_def_ != nullptr;
 }
