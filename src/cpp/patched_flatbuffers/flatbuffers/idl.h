@@ -189,6 +189,31 @@ struct StructDef;
 struct EnumDef;
 class Parser;
 
+/// @struct SourcePosition
+/// @brief Represents a single point in a source file using line and column numbers.
+/// Lines are 1-based and columns are 0-based.
+struct SourcePosition {
+  // The line number in the source file (1-based).
+  int32_t line = 0;
+
+  // The column number on the line (0-based).
+  int32_t col = 0;
+
+  SourcePosition(int32_t l = 0, int32_t c = 0) : line(l), col(c) {}
+};
+
+/// @struct SourceRange
+/// @brief Represents a range of text in a source file.
+/// The range is defined by a starting position (inclusive) and an ending
+/// position (exclusive).
+struct SourceRange {
+  // The inclusive starting position of the range.
+  SourcePosition start;
+
+  // The exclusive ending position of the range.
+  SourcePosition end;
+};
+
 // Represents any type in the IDL, which is a combination of the BaseType
 // and additional information for vectors/structs_.
 struct Type {
@@ -198,7 +223,9 @@ struct Type {
         element(BASE_TYPE_NONE),
         struct_def(_sd),
         enum_def(_ed),
-        fixed_length(_fixed_length) {}
+        fixed_length(_fixed_length),
+        decl_range(),
+        decl_text() {}
 
   bool operator==(const Type &o) const {
     return base_type == o.base_type && element == o.element &&
@@ -220,6 +247,8 @@ struct Type {
   EnumDef *enum_def;      // set if t == BASE_TYPE_UNION / BASE_TYPE_UTYPE,
                           // or for an integral type derived from an enum.
   uint16_t fixed_length;  // only set if t == BASE_TYPE_ARRAY
+  SourceRange decl_range; // source range that this declaration spans
+  std::string decl_text;  // text of this declaration
 };
 
 // Represents a parsed scalar value, it's type, and field offset.
@@ -393,8 +422,6 @@ struct FieldDef : public Definition {
   // sibling_union_field on a union field points to the union type field
   // and vice-versa.
   FieldDef *sibling_union_field;
-  int type_decl_line;
-  int type_decl_col; // NOTE: This is end col for all except vectors and arrays
 };
 
 struct StructDef : public Definition {
@@ -457,14 +484,16 @@ struct EnumVal {
   SymbolTable<Value> attributes;
   int decl_line;
   int decl_col;
+  SourceRange decl_range; // source range that this declaration spans
+  std::string decl_text;  // text of this declaration
 
  private:
   friend EnumDef;
   friend EnumValBuilder;
   friend bool operator==(const EnumVal &lhs, const EnumVal &rhs);
 
-  EnumVal(const std::string &_name, int64_t _val) : name(_name), decl_line(0), decl_col(0), value(_val) {}
-  EnumVal() : decl_line(0), decl_col(0), value(0) {}
+  EnumVal(const std::string &_name, int64_t _val) : name(_name), decl_line(0), decl_col(0), decl_range(), decl_text(), value(_val) {}
+  EnumVal() : decl_line(0), decl_col(0), decl_range(), decl_text(), value(0) {}
 
   int64_t value;
 };
@@ -605,8 +634,8 @@ inline bool EqualByName(const Type &a, const Type &b) {
 // Location of a root_type statement;
 struct RootTypeLoc {
     std::string filename_;
-    int line_;
-    int col_;
+    SourceRange decl_range; // source range of the type name, including namespace components
+    std::string decl_text; // text of the type name, including namespace components
 };
 
 struct RPCCall : public Definition {
@@ -888,7 +917,9 @@ struct ParserState {
   ParserState()
       : prev_cursor_(nullptr),
         cursor_(nullptr),
+        prev_cursor_line_start_(nullptr),
         line_start_(nullptr),
+        prev_cursor_line_(0),
         line_(0),
         token_(-1),
         error_line_(-1),
@@ -897,8 +928,10 @@ struct ParserState {
 
  protected:
   void ResetState(const char *source) {
+    prev_cursor_line_start_ = source;
     prev_cursor_ = source;
     cursor_ = source;
+    prev_cursor_line_ = 0;
     line_ = 0;
     MarkNewLine();
   }
@@ -913,9 +946,25 @@ struct ParserState {
     return static_cast<int64_t>(cursor_ - line_start_);
   }
 
+  // CursorPosition before last call to Next().
+  int64_t PrevCursorPosition() const {
+    FLATBUFFERS_ASSERT(prev_cursor_ && prev_cursor_line_start_ && prev_cursor_ >= prev_cursor_line_start_);
+    return static_cast<int64_t>(prev_cursor_ - prev_cursor_line_start_);
+  }
+
+  SourcePosition CurrentSourcePosition(int64_t col_offset = 0) const {
+      return SourcePosition{static_cast<int32_t>(line_), static_cast<int32_t>(CursorPosition() + col_offset)};
+  }
+
+  SourcePosition PrevSourcePosition() const {
+      return SourcePosition{static_cast<int32_t>(prev_cursor_line_), static_cast<int32_t>(PrevCursorPosition())};
+  }
+
   const char *prev_cursor_;
   const char *cursor_;
+  const char *prev_cursor_line_start_; // line_start of prev_cursor (not prior value of line_start_)
   const char *line_start_;
+  int prev_cursor_line_; // line of prev_cursor
   int line_;  // the current line being parsed
   int token_;
   // overrides for reporting error location

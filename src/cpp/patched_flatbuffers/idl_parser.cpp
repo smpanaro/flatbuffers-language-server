@@ -16,7 +16,6 @@
 
 #include <algorithm>
 #include <cmath>
-#include <iostream>
 #include <list>
 #include <string>
 #include <utility>
@@ -487,6 +486,8 @@ CheckedError Parser::SkipByteOrderMark() {
 CheckedError Parser::Next() {
   doc_comment_.clear();
   prev_cursor_ = cursor_;
+  prev_cursor_line_ = line_;
+  prev_cursor_line_start_ = line_start_;
   bool seen_newline = cursor_ == source_;
   attribute_.clear();
   attr_is_trivial_ascii_string_ = true;
@@ -810,6 +811,8 @@ CheckedError Parser::ParseTypeIdent(Type &type) {
 // Parse any IDL type.
 CheckedError Parser::ParseType(Type &type) {
   if (token_ == kTokenIdentifier) {
+    SourcePosition start_pos = CurrentSourcePosition(-attribute_.length());
+    const char *start_cursor = cursor_ - attribute_.length();
     if (IsIdent("bool")) {
       type.base_type = BASE_TYPE_BOOL;
       NEXT();
@@ -849,7 +852,11 @@ CheckedError Parser::ParseType(Type &type) {
     } else {
       ECHECK(ParseTypeIdent(type));
     }
+    type.decl_range = {start_pos, PrevSourcePosition()};
+    type.decl_text = std::string(start_cursor, prev_cursor_);
   } else if (token_ == '[') {
+    SourcePosition start_pos = CurrentSourcePosition(-1);
+    const char *start_cursor = cursor_ - 1;
     ParseDepthGuard depth_guard(this);
     ECHECK(depth_guard.Check());
     NEXT();
@@ -879,6 +886,8 @@ CheckedError Parser::ParseType(Type &type) {
       type = Type(BASE_TYPE_VECTOR, subtype.struct_def, subtype.enum_def);
     }
     type.element = subtype.base_type;
+    type.decl_range = {start_pos, CurrentSourcePosition()};
+    type.decl_text = std::string(start_cursor, cursor_);
     EXPECT(']');
   } else {
     return Error("illegal type syntax");
@@ -931,8 +940,6 @@ CheckedError Parser::ParseField(StructDef &struct_def) {
   EXPECT(kTokenIdentifier);
   EXPECT(':');
   Type type;
-  const int type_decl_line = line_;
-  const int type_decl_col = static_cast<int>(CursorPosition());
   ECHECK(ParseType(type));
 
   if (struct_def.fixed) {
@@ -997,8 +1004,6 @@ CheckedError Parser::ParseField(StructDef &struct_def) {
 
   field->decl_line = field_decl_line;
   field->decl_col = field_decl_col;
-  field->type_decl_line = type_decl_line;
-  field->type_decl_col = type_decl_col;
 
   if (typefield) {
     // We preserve the relation between the typefield
@@ -2584,10 +2589,14 @@ CheckedError Parser::ParseEnum(const bool is_union, EnumDef **dest,
       auto full_name = ev.name;
       ev.decl_line = line_;
       ev.decl_col = static_cast<int>(CursorPosition());
+      SourcePosition start_pos = CurrentSourcePosition(-attribute_.length());
+      const char *start_cursor = cursor_ - attribute_.length();
       ev.doc_comment = doc_comment_;
       EXPECT(kTokenIdentifier);
       if (is_union) {
         ECHECK(ParseNamespacing(&full_name, &ev.name));
+        ev.decl_range = {start_pos, PrevSourcePosition()};
+        ev.decl_text = std::string(start_cursor, prev_cursor_);
         if (opts.union_value_namespacing) {
           // Since we can't namespace the actual enum identifiers, turn
           // namespace parts into part of the identifier.
@@ -3822,7 +3831,9 @@ CheckedError Parser::DoParse(const char *source, const char **include_paths,
     } else if (IsIdent("root_type")) {
       NEXT();
       auto root_type = attribute_;
-      auto root_loc = new RootTypeLoc{source_filename, line_, static_cast<int>(CursorPosition())};
+      SourcePosition start = CurrentSourcePosition(-attribute_.length());
+      const char *start_cursor = cursor_ - attribute_.length();
+      auto root_loc = new RootTypeLoc{source_filename, {}, {}};
       EXPECT(kTokenIdentifier);
       ECHECK(ParseNamespacing(&root_type, nullptr));
       if (opts.root_type.empty()) {
@@ -3830,6 +3841,8 @@ CheckedError Parser::DoParse(const char *source, const char **include_paths,
           return Error("unknown root type: " + root_type);
         if (root_struct_def_->fixed) return Error("root type must be a table");
       }
+      root_loc->decl_range = SourceRange{start, PrevSourcePosition()};
+      root_loc->decl_text = std::string(start_cursor, prev_cursor_);
       EXPECT(';');
     } else if (IsIdent("file_identifier")) {
       NEXT();
