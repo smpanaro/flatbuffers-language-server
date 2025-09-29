@@ -164,3 +164,385 @@ table MyTable {
         Range::new(Position::new(4, 7), Position::new(4, 20))
     );
 }
+
+#[tokio::test]
+#[ignore = "Type namespaces are not supported."]
+async fn find_references_respects_namespaces() {
+    let coffee_fixture = r#"
+namespace coffee;
+
+table Be$0an {}
+"#;
+
+    let pastry_fixture = r#"
+namespace pastry;
+
+table Bean {}
+"#;
+
+    let main_fixture = r#"
+include "coffee.fbs";
+include "pastry.fbs";
+
+table Beans {
+    coffee: coffee.Bean;
+    vanilla: pastry.B$0ean;
+}
+"#;
+    let mut harness = TestHarness::new();
+    let (coffee_content, coffee_position) = parse_fixture(coffee_fixture);
+    let (main_content, pastry_position) = parse_fixture(main_fixture);
+
+    harness
+        .initialize_and_open(&[
+            ("main.fbs", &main_content),
+            ("coffee.fbs", &coffee_content),
+            ("pastry.fbs", &pastry_fixture),
+        ])
+        .await;
+
+    let coffee_uri = harness.root_uri.join("coffee.fbs").unwrap();
+    let pastry_uri = harness.root_uri.join("pastry.fbs").unwrap();
+    let main_uri = harness.root_uri.join("main.fbs").unwrap();
+
+    // Starting from Declaration.
+    let mut coffee_locations = harness
+        .call::<request::References>(ReferenceParams {
+            text_document_position: TextDocumentPositionParams {
+                text_document: TextDocumentIdentifier {
+                    uri: coffee_uri.clone(),
+                },
+                position: coffee_position,
+            },
+            work_done_progress_params: Default::default(),
+            partial_result_params: Default::default(),
+            context: ReferenceContext {
+                include_declaration: true,
+            },
+        })
+        .await
+        .unwrap();
+
+    coffee_locations.sort_by_key(|loc| loc.uri.to_string());
+
+    assert_eq!(coffee_locations.len(), 2);
+
+    // Definition in coffee.fbs
+    assert_eq!(coffee_locations[0].uri, coffee_uri);
+    assert_eq!(
+        coffee_locations[0].range,
+        Range::new(Position::new(3, 6), Position::new(3, 10))
+    );
+
+    // Usage in main.fbs
+    assert_eq!(coffee_locations[1].uri, main_uri);
+    assert_eq!(
+        coffee_locations[1].range,
+        Range::new(Position::new(5, 19), Position::new(5, 23))
+    );
+
+    // Starting from Usage.
+    let mut pastry_locations = harness
+        .call::<request::References>(ReferenceParams {
+            text_document_position: TextDocumentPositionParams {
+                text_document: TextDocumentIdentifier {
+                    uri: main_uri.clone(),
+                },
+                position: pastry_position,
+            },
+            work_done_progress_params: Default::default(),
+            partial_result_params: Default::default(),
+            context: ReferenceContext {
+                include_declaration: true,
+            },
+        })
+        .await
+        .unwrap();
+
+    pastry_locations.sort_by_key(|loc| loc.uri.to_string());
+
+    assert_eq!(pastry_locations.len(), 2);
+
+    // Usage in main.fbs
+    assert_eq!(pastry_locations[0].uri, main_uri);
+    assert_eq!(
+        pastry_locations[0].range,
+        Range::new(Position::new(6, 20), Position::new(6, 24))
+    );
+
+    // Definition in pastry.fbs
+    assert_eq!(pastry_locations[1].uri, pastry_uri);
+    assert_eq!(
+        pastry_locations[1].range,
+        Range::new(Position::new(3, 6), Position::new(3, 10))
+    );
+}
+
+#[tokio::test]
+#[ignore = "Nested namespaces are not supported."]
+async fn find_references_respects_nested_namespaces() {
+    let included_fixture = r#"
+namespace One.Two;
+
+table X {}
+"#;
+
+    let main_fixture = r#"
+include "included.fbs";
+namespace One;
+
+table Y {
+    a: Two.$0X;
+}
+"#;
+    let mut harness = TestHarness::new();
+    let (main_content, position) = parse_fixture(main_fixture);
+
+    harness
+        .initialize_and_open(&[
+            ("main.fbs", &main_content),
+            ("included.fbs", &included_fixture),
+        ])
+        .await;
+
+    let included_uri = harness.root_uri.join("included.fbs").unwrap();
+    let main_uri = harness.root_uri.join("main.fbs").unwrap();
+
+    let mut locations = harness
+        .call::<request::References>(ReferenceParams {
+            text_document_position: TextDocumentPositionParams {
+                text_document: TextDocumentIdentifier {
+                    uri: main_uri.clone(),
+                },
+                position,
+            },
+            work_done_progress_params: Default::default(),
+            partial_result_params: Default::default(),
+            context: ReferenceContext {
+                include_declaration: true,
+            },
+        })
+        .await
+        .unwrap();
+
+    locations.sort_by_key(|loc| loc.uri.to_string());
+
+    assert_eq!(locations.len(), 2);
+
+    // Definition in included.fbs
+    assert_eq!(locations[0].uri, included_uri);
+    assert_eq!(
+        locations[0].range,
+        Range::new(Position::new(3, 6), Position::new(3, 7))
+    );
+
+    // Usage in main.fbs
+    assert_eq!(locations[1].uri, main_uri);
+    assert_eq!(
+        locations[1].range,
+        Range::new(Position::new(5, 11), Position::new(5, 12))
+    );
+}
+
+#[tokio::test]
+#[ignore = "Namespaced vectors are not supported."]
+async fn find_references_respects_namespaced_vector() {
+    let included_fixture = r#"
+namespace One.Two;
+
+struct X {
+    i: int;
+}
+"#;
+
+    let main_fixture = r#"
+include "included.fbs";
+namespace One;
+
+struct Y {
+    a: [Two.$0X:3];
+}
+"#;
+    let mut harness = TestHarness::new();
+    let (main_content, position) = parse_fixture(main_fixture);
+
+    harness
+        .initialize_and_open(&[
+            ("main.fbs", &main_content),
+            ("included.fbs", &included_fixture),
+        ])
+        .await;
+
+    let included_uri = harness.root_uri.join("included.fbs").unwrap();
+    let main_uri = harness.root_uri.join("main.fbs").unwrap();
+
+    let mut locations = harness
+        .call::<request::References>(ReferenceParams {
+            text_document_position: TextDocumentPositionParams {
+                text_document: TextDocumentIdentifier {
+                    uri: main_uri.clone(),
+                },
+                position,
+            },
+            work_done_progress_params: Default::default(),
+            partial_result_params: Default::default(),
+            context: ReferenceContext {
+                include_declaration: true,
+            },
+        })
+        .await
+        .unwrap();
+
+    locations.sort_by_key(|loc| loc.uri.to_string());
+
+    assert_eq!(locations.len(), 2);
+
+    // Definition in included.fbs
+    assert_eq!(locations[0].uri, included_uri);
+    assert_eq!(
+        locations[0].range,
+        Range::new(Position::new(3, 7), Position::new(3, 8))
+    );
+
+    // Usage in main.fbs
+    assert_eq!(locations[1].uri, main_uri);
+    assert_eq!(
+        locations[1].range,
+        Range::new(Position::new(5, 12), Position::new(5, 13))
+    );
+}
+
+#[tokio::test]
+#[ignore = "Namespaced root types not supported."]
+async fn find_references_respects_root_type_namespaces() {
+    let included_fixture = r#"
+namespace One.Two;
+
+table Number {}
+"#;
+
+    let main_fixture = r#"
+include "included.fbs";
+namespace One;
+
+root_type Two.Numbe$0r;
+"#;
+    let mut harness = TestHarness::new();
+    let (main_content, position) = parse_fixture(main_fixture);
+
+    harness
+        .initialize_and_open(&[
+            ("main.fbs", &main_content),
+            ("included.fbs", &included_fixture),
+        ])
+        .await;
+
+    let included_uri = harness.root_uri.join("included.fbs").unwrap();
+    let main_uri = harness.root_uri.join("main.fbs").unwrap();
+
+    let mut locations = harness
+        .call::<request::References>(ReferenceParams {
+            text_document_position: TextDocumentPositionParams {
+                text_document: TextDocumentIdentifier {
+                    uri: main_uri.clone(),
+                },
+                position,
+            },
+            work_done_progress_params: Default::default(),
+            partial_result_params: Default::default(),
+            context: ReferenceContext {
+                include_declaration: true,
+            },
+        })
+        .await
+        .unwrap();
+
+    locations.sort_by_key(|loc| loc.uri.to_string());
+
+    assert_eq!(locations.len(), 2);
+
+    // Definition in included.fbs
+    assert_eq!(locations[0].uri, included_uri);
+    assert_eq!(
+        locations[0].range,
+        Range::new(Position::new(3, 6), Position::new(3, 12))
+    );
+
+    // Usage in main.fbs
+    assert_eq!(locations[1].uri, main_uri);
+    assert_eq!(
+        locations[1].range,
+        Range::new(Position::new(4, 14), Position::new(4, 20))
+    );
+}
+
+#[tokio::test]
+#[ignore = "Namespaced union variants not supported."]
+async fn find_references_respects_union_namespaces() {
+    let included_fixture = r#"
+namespace One.Two;
+
+table Number {}
+table String {}
+"#;
+
+    let main_fixture = r#"
+include "included.fbs";
+namespace One;
+
+table Bool {}
+
+union Types {
+    Bool,
+    One.Two.Number,
+    Two.$0String,
+}
+"#;
+    let mut harness = TestHarness::new();
+    let (main_content, position) = parse_fixture(main_fixture);
+
+    harness
+        .initialize_and_open(&[
+            ("main.fbs", &main_content),
+            ("included.fbs", &included_fixture),
+        ])
+        .await;
+
+    let included_uri = harness.root_uri.join("included.fbs").unwrap();
+    let main_uri = harness.root_uri.join("main.fbs").unwrap();
+
+    let mut locations = harness
+        .call::<request::References>(ReferenceParams {
+            text_document_position: TextDocumentPositionParams {
+                text_document: TextDocumentIdentifier {
+                    uri: main_uri.clone(),
+                },
+                position,
+            },
+            work_done_progress_params: Default::default(),
+            partial_result_params: Default::default(),
+            context: ReferenceContext {
+                include_declaration: true,
+            },
+        })
+        .await
+        .unwrap();
+
+    locations.sort_by_key(|loc| loc.uri.to_string());
+
+    assert_eq!(locations.len(), 2);
+
+    // Definition in included.fbs
+    assert_eq!(locations[0].uri, included_uri);
+    assert_eq!(
+        locations[0].range,
+        Range::new(Position::new(4, 6), Position::new(4, 12))
+    );
+
+    // Usage in main.fbs
+    assert_eq!(locations[1].uri, main_uri);
+    assert_eq!(
+        locations[1].range,
+        Range::new(Position::new(9, 8), Position::new(9, 14))
+    );
+}
