@@ -89,8 +89,8 @@ unsafe fn parse_success_case(
 
     let included_files = extract_all_included_files(parser_ptr);
 
-    extract_structs_and_tables(parser_ptr, &mut st, &mut diagnostics);
-    extract_enums_and_unions(parser_ptr, &mut st, &mut diagnostics);
+    extract_structs_and_tables(parser_ptr, &mut st);
+    extract_enums_and_unions(parser_ptr, &mut st);
     let root_type_info = extract_root_type(parser_ptr);
 
     perform_semantic_analysis(&st, &mut diagnostics, &included_files, content, parser_ptr);
@@ -149,7 +149,6 @@ unsafe fn extract_all_included_files(parser_ptr: *mut ffi::FlatbuffersParser) ->
 unsafe fn extract_structs_and_tables(
     parser_ptr: *mut ffi::FlatbuffersParser,
     st: &mut SymbolTable,
-    diagnostics: &mut HashMap<Url, Vec<Diagnostic>>,
 ) {
     let num_structs = ffi::get_num_structs(parser_ptr);
     for i in 0..num_structs {
@@ -175,18 +174,11 @@ unsafe fn extract_structs_and_tables(
         };
 
         if st.contains_key(&qualified_name) {
-            diagnostics
-                .entry(file_uri.clone())
-                .or_default()
-                .push(Diagnostic {
-                    range: Range::new(
-                        Position::new(def_info.line, def_info.col),
-                        Position::new(def_info.line, def_info.col),
-                    ),
-                    severity: Some(DiagnosticSeverity::ERROR),
-                    message: format!("Duplicate definition: {}", name),
-                    ..Default::default()
-                });
+            // This should not happen. The flatbuffers parser returns rich errors for duplicate definitions.
+            error!(
+                "found duplicate symbol while extracting structs: {}",
+                qualified_name
+            );
             continue;
         }
 
@@ -254,11 +246,7 @@ unsafe fn extract_structs_and_tables(
 }
 
 /// Extracts all enum and union definitions from the parser.
-unsafe fn extract_enums_and_unions(
-    parser_ptr: *mut ffi::FlatbuffersParser,
-    st: &mut SymbolTable,
-    diagnostics: &mut HashMap<Url, Vec<Diagnostic>>,
-) {
+unsafe fn extract_enums_and_unions(parser_ptr: *mut ffi::FlatbuffersParser, st: &mut SymbolTable) {
     let num_enums = ffi::get_num_enums(parser_ptr);
     for i in 0..num_enums {
         let def_info = ffi::get_enum_info(parser_ptr, i);
@@ -283,18 +271,11 @@ unsafe fn extract_enums_and_unions(
         };
 
         if st.contains_key(&qualified_name) {
-            diagnostics
-                .entry(file_uri.clone())
-                .or_default()
-                .push(Diagnostic {
-                    range: Range::new(
-                        Position::new(def_info.line, def_info.col),
-                        Position::new(def_info.line, def_info.col),
-                    ),
-                    severity: Some(DiagnosticSeverity::ERROR),
-                    message: format!("Duplicate definition: {}", name),
-                    ..Default::default()
-                });
+            // This should not happen. The flatbuffers parser returns rich errors for duplicate definitions.
+            error!(
+                "found duplicate symbol while extracting enums: {}",
+                qualified_name
+            );
             continue;
         }
 
@@ -397,15 +378,6 @@ fn perform_semantic_analysis(
     file_contents: &str,
     parser_ptr: *mut ffi::FlatbuffersParser,
 ) {
-    let scalar_types: HashSet<_> = [
-        "bool", "byte", "ubyte", "int8", "uint8", "short", "ushort", "int16", "uint16", "int",
-        "uint", "int32", "uint32", "float", "float32", "long", "ulong", "int64", "uint64",
-        "double", "float64", "string",
-    ]
-    .iter()
-    .cloned()
-    .collect();
-
     let mut used_types = HashSet::new();
     for symbol in st.values() {
         if symbol.info.location.uri != st.uri {
@@ -509,17 +481,6 @@ fn perform_semantic_analysis(
 
         for field in fields {
             if let SymbolKind::Field(field_def) = &field.kind {
-                if !is_known_type(&field_def.type_name, st, &scalar_types) {
-                    diagnostics
-                        .entry(field.info.location.uri.clone())
-                        .or_default()
-                        .push(Diagnostic {
-                            range: field.info.location.range,
-                            severity: DiagnosticSeverity::ERROR.into(),
-                            message: format!("Undefined type: {}", field_def.type_name),
-                            ..Default::default()
-                        });
-                }
                 if field_def.deprecated {
                     diagnostics
                         .entry(field.info.location.uri.clone())
@@ -572,25 +533,6 @@ unsafe fn build_include_graph(
         include_graph.insert(file_path, includes);
     }
     include_graph
-}
-
-/// Helper to check if a type is a builtin scalar or defined in the symbol table.
-fn is_known_type(type_name: &str, st: &SymbolTable, scalar_types: &HashSet<&str>) -> bool {
-    let base_type_name = if let Some(stripped) = type_name.strip_prefix('[') {
-        if let Some(end_bracket) = stripped.rfind(']') {
-            let inner = &stripped[..end_bracket];
-            if let Some(colon_pos) = inner.find(':') {
-                &inner[..colon_pos]
-            } else {
-                inner
-            }
-        } else {
-            type_name
-        }
-    } else {
-        type_name
-    };
-    scalar_types.contains(base_type_name) || st.contains_key(base_type_name)
 }
 
 /// Helper to convert a C string to a Rust String.
