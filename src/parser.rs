@@ -107,27 +107,24 @@ unsafe fn parse_error_case(
     let mut diagnostics_map: HashMap<Url, Vec<Diagnostic>> = HashMap::new();
     let error_str_ptr = ffi::get_parser_error(parser_ptr);
 
-    if !error_str_ptr.is_null() {
-        let error_c_str = CStr::from_ptr(error_str_ptr);
-        if let Ok(error_str) = error_c_str.to_str() {
-            debug!("flatc FFI error parsing {}: {}", file_name, error_str);
+    if let Some(error_str) = c_str_to_optional_string(error_str_ptr) {
+        debug!("flatc FFI error parsing {}: {}", file_name, error_str);
 
-            let handlers: Vec<Box<dyn DiagnosticHandler>> = vec![
-                Box::new(diagnostics::duplicate_definition::DuplicateDefinitionHandler),
-                Box::new(diagnostics::expecting_token::ExpectingTokenHandler),
-                Box::new(diagnostics::undefined_type::UndefinedTypeHandler),
-                Box::new(diagnostics::generic::GenericDiagnosticHandler),
-            ];
+        let handlers: Vec<Box<dyn DiagnosticHandler>> = vec![
+            Box::new(diagnostics::duplicate_definition::DuplicateDefinitionHandler),
+            Box::new(diagnostics::expecting_token::ExpectingTokenHandler),
+            Box::new(diagnostics::undefined_type::UndefinedTypeHandler),
+            Box::new(diagnostics::generic::GenericDiagnosticHandler),
+        ];
 
-            for line in error_str.lines() {
-                for handler in &handlers {
-                    if let Some((file_uri, diagnostic)) = handler.handle(line, content) {
-                        diagnostics_map
-                            .entry(file_uri)
-                            .or_default()
-                            .push(diagnostic);
-                        break;
-                    }
+        for line in error_str.lines() {
+            for handler in &handlers {
+                if let Some((file_uri, diagnostic)) = handler.handle(line, content) {
+                    diagnostics_map
+                        .entry(file_uri)
+                        .or_default()
+                        .push(diagnostic);
+                    break;
                 }
             }
         }
@@ -140,17 +137,8 @@ unsafe fn extract_all_included_files(parser_ptr: *mut ffi::FlatbuffersParser) ->
     let mut included_files = Vec::new();
     let num_included = ffi::get_num_all_included_files(parser_ptr);
     for i in 0..num_included {
-        let mut path_buffer = vec![0u8; 1024];
-        ffi::get_all_included_file_path(
-            parser_ptr,
-            i,
-            path_buffer.as_mut_ptr() as *mut i8,
-            path_buffer.len() as i32,
-        );
-        let path = CStr::from_ptr(path_buffer.as_ptr() as *const i8)
-            .to_string_lossy()
-            .into_owned();
-        if !path.is_empty() {
+        if let Some(path) = c_str_to_optional_string(ffi::get_all_included_file_path(parser_ptr, i))
+        {
             included_files.push(path);
         }
     }
@@ -166,27 +154,13 @@ unsafe fn extract_structs_and_tables(
     let num_structs = ffi::get_num_structs(parser_ptr);
     for i in 0..num_structs {
         let def_info = ffi::get_struct_info(parser_ptr, i);
-        if def_info.name.is_null() {
+        let Some(name) = c_str_to_optional_string(def_info.name) else {
             continue;
-        }
-        let name = CStr::from_ptr(def_info.name).to_string_lossy().into_owned();
-
-        let mut namespace_buffer = vec![0u8; 256];
-        ffi::get_struct_namespace(
-            parser_ptr,
-            i,
-            namespace_buffer.as_mut_ptr() as *mut i8,
-            namespace_buffer.len() as i32,
-        );
-        let namespace_name = CStr::from_ptr(namespace_buffer.as_ptr() as *const i8)
-            .to_string_lossy()
-            .into_owned();
-
-        let namespace: Vec<String> = if namespace_name.is_empty() {
-            vec![]
-        } else {
-            namespace_name.split('.').map(|s| s.to_string()).collect()
         };
+
+        let namespace: Vec<String> = c_str_to_optional_string(def_info.namespace_)
+            .map(|s| s.split('.').map(|p| p.to_string()).collect())
+            .unwrap_or_default();
 
         let qualified_name = if namespace.is_empty() {
             name.clone()
@@ -194,7 +168,7 @@ unsafe fn extract_structs_and_tables(
             format!("{}.{}", namespace.join("."), name)
         };
 
-        let file = CStr::from_ptr(def_info.file).to_string_lossy().into_owned();
+        let file = c_str_to_string(def_info.file);
         let Ok(file_uri) = Url::from_file_path(&file) else {
             error!("failed to parse file into url: {}", file);
             continue;
@@ -220,34 +194,21 @@ unsafe fn extract_structs_and_tables(
         let num_fields = ffi::get_num_fields(parser_ptr, i);
         for j in 0..num_fields {
             let field_info = ffi::get_field_info(parser_ptr, i, j);
-            if field_info.name.is_null() {
+            let Some(field_name) = c_str_to_optional_string(field_info.name) else {
                 continue;
-            }
+            };
 
-            let field_name = CStr::from_ptr(field_info.name)
-                .to_string_lossy()
-                .into_owned();
+            let type_name = c_str_to_string(field_info.base_type_name);
+            let type_display_name = c_str_to_string(field_info.type_name);
 
-            let type_name = ffi_get_string(|buf, len| {
-                ffi::get_field_base_type_name(parser_ptr, i, j, buf, len);
-            });
-            let type_display_name = ffi_get_string(|buf, len| {
-                ffi::get_field_type_name(parser_ptr, i, j, buf, len);
-            });
-
-            let type_source = CStr::from_ptr(field_info.type_source)
-                .to_string_lossy()
-                .into_owned();
+            let type_source = c_str_to_string(field_info.type_source);
 
             let type_range = field_info.type_range.into();
             let parsed_type = parse_type(&type_source, type_range);
 
-            let doc = ffi_get_string(|buf, len| {
-                ffi::get_field_documentation(parser_ptr, i, j, buf, len);
-            });
-            let documentation = if doc.is_empty() { None } else { Some(doc) };
+            let documentation = c_str_to_optional_string(field_info.documentation);
 
-            let (field_symbol, _) = create_symbol(
+            let field_symbol = create_symbol(
                 &file_uri,
                 field_name.clone(),
                 vec![], // Fields do not have namespaces themselves
@@ -277,12 +238,9 @@ unsafe fn extract_structs_and_tables(
             })
         };
 
-        let doc = ffi_get_string(|buf, len| {
-            ffi::get_struct_documentation(parser_ptr, i, buf, len);
-        });
-        let documentation = if doc.is_empty() { None } else { Some(doc) };
+        let documentation = c_str_to_optional_string(def_info.documentation);
 
-        let (symbol, _) = create_symbol(
+        let symbol = create_symbol(
             &file_uri,
             name,
             namespace,
@@ -304,27 +262,13 @@ unsafe fn extract_enums_and_unions(
     let num_enums = ffi::get_num_enums(parser_ptr);
     for i in 0..num_enums {
         let def_info = ffi::get_enum_info(parser_ptr, i);
-        if def_info.name.is_null() {
+        let Some(name) = c_str_to_optional_string(def_info.name) else {
             continue;
-        }
-        let name = CStr::from_ptr(def_info.name).to_string_lossy().into_owned();
-
-        let mut namespace_buffer = vec![0u8; 256];
-        ffi::get_enum_namespace(
-            parser_ptr,
-            i,
-            namespace_buffer.as_mut_ptr() as *mut i8,
-            namespace_buffer.len() as i32,
-        );
-        let namespace_name = CStr::from_ptr(namespace_buffer.as_ptr() as *const i8)
-            .to_string_lossy()
-            .into_owned();
-
-        let namespace: Vec<String> = if namespace_name.is_empty() {
-            vec![]
-        } else {
-            namespace_name.split('.').map(|s| s.to_string()).collect()
         };
+
+        let namespace: Vec<String> = c_str_to_optional_string(def_info.namespace_)
+            .map(|s| s.split('.').map(|p| p.to_string()).collect())
+            .unwrap_or_default();
 
         let qualified_name = if namespace.is_empty() {
             name.clone()
@@ -332,7 +276,7 @@ unsafe fn extract_enums_and_unions(
             format!("{}.{}", namespace.join("."), name)
         };
 
-        let file = CStr::from_ptr(def_info.file).to_string_lossy().into_owned();
+        let file = c_str_to_string(def_info.file);
         let Ok(file_uri) = Url::from_file_path(&file) else {
             error!("failed to parse file into url: {}", file);
             continue;
@@ -358,10 +302,9 @@ unsafe fn extract_enums_and_unions(
         let num_vals = ffi::get_num_enum_vals(parser_ptr, i);
         for j in 0..num_vals {
             let val_info = ffi::get_enum_val_info(parser_ptr, i, j);
-            if val_info.name.is_null() {
+            let Some(val_name) = c_str_to_optional_string(val_info.name) else {
                 continue;
-            }
-            let val_name = CStr::from_ptr(val_info.name).to_string_lossy().into_owned();
+            };
 
             if def_info.is_union && (val_name == "NONE" || val_name == "") {
                 continue;
@@ -374,9 +317,7 @@ unsafe fn extract_enums_and_unions(
                 variants: variants
                     .into_iter()
                     .map(|(name, val_info)| {
-                        let type_source = CStr::from_ptr(val_info.type_source)
-                            .to_string_lossy()
-                            .into_owned();
+                        let type_source = c_str_to_string(val_info.type_source);
                         let type_range = val_info.type_range.into();
                         let parsed_type = parse_type(&type_source, type_range);
                         let location = Location {
@@ -395,12 +336,8 @@ unsafe fn extract_enums_and_unions(
             SymbolKind::Enum(Enum {
                 variants: variants
                     .into_iter()
-                    .enumerate()
-                    .map(|(j, (name, val_info))| {
-                        let doc = ffi_get_string(|buf, len| {
-                            ffi::get_enum_val_documentation(parser_ptr, i, j as i32, buf, len);
-                        });
-                        let documentation = if doc.is_empty() { None } else { Some(doc) };
+                    .map(|(name, val_info)| {
+                        let documentation = c_str_to_optional_string(val_info.documentation);
                         EnumVariant {
                             name,
                             value: val_info.value,
@@ -411,10 +348,9 @@ unsafe fn extract_enums_and_unions(
             })
         };
 
-        let doc = ffi_get_string(|buf, len| ffi::get_enum_documentation(parser_ptr, i, buf, len));
-        let documentation = if doc.is_empty() { None } else { Some(doc) };
+        let documentation = c_str_to_optional_string(def_info.documentation);
 
-        let (symbol, _) = create_symbol(
+        let symbol = create_symbol(
             &file_uri,
             name,
             namespace,
@@ -431,13 +367,11 @@ unsafe fn extract_enums_and_unions(
 unsafe fn extract_root_type(parser_ptr: *mut ffi::FlatbuffersParser) -> Option<RootTypeInfo> {
     if ffi::has_root_type(parser_ptr) {
         let root_def = ffi::get_root_type_info(parser_ptr);
-        let qualified_name = CStr::from_ptr(root_def.name).to_string_lossy().into_owned();
-        let file = CStr::from_ptr(root_def.file).to_string_lossy().into_owned();
+        let qualified_name = c_str_to_string(root_def.name);
+        let file = c_str_to_string(root_def.file);
 
         if let Ok(file_uri) = Url::from_file_path(&file) {
-            let type_source = CStr::from_ptr(root_def.type_source)
-                .to_string_lossy()
-                .into_owned();
+            let type_source = c_str_to_string(root_def.type_source);
             let type_range = root_def.type_range.into();
             let parsed_type = parse_type(&type_source, type_range);
 
@@ -615,33 +549,25 @@ unsafe fn build_include_graph(
     let mut include_graph = HashMap::new();
     let num_files = ffi::get_num_files_with_includes(parser_ptr);
     for i in 0..num_files {
-        let mut path_buffer = vec![0u8; 1024];
-        ffi::get_file_with_includes_path(
-            parser_ptr,
-            i,
-            path_buffer.as_mut_ptr() as *mut i8,
-            path_buffer.len() as i32,
-        );
-        let file_path = CStr::from_ptr(path_buffer.as_ptr() as *const i8)
-            .to_string_lossy()
-            .into_owned();
+        let file_path = if let Some(path) =
+            c_str_to_optional_string(ffi::get_file_with_includes_path(parser_ptr, i))
+        {
+            path
+        } else {
+            continue;
+        };
 
         let c_file_path = CString::new(file_path.clone()).unwrap();
         let num_includes = ffi::get_num_includes_for_file(parser_ptr, c_file_path.as_ptr());
         let mut includes = Vec::new();
         for j in 0..num_includes {
-            let mut include_path_buffer = vec![0u8; 1024];
-            ffi::get_included_file_path(
+            if let Some(include_path) = c_str_to_optional_string(ffi::get_included_file_path(
                 parser_ptr,
                 c_file_path.as_ptr(),
                 j,
-                include_path_buffer.as_mut_ptr() as *mut i8,
-                include_path_buffer.len() as i32,
-            );
-            let include_path = CStr::from_ptr(include_path_buffer.as_ptr() as *const i8)
-                .to_string_lossy()
-                .into_owned();
-            includes.push(include_path);
+            )) {
+                includes.push(include_path);
+            }
         }
         include_graph.insert(file_path, includes);
     }
@@ -667,6 +593,22 @@ fn is_known_type(type_name: &str, st: &SymbolTable, scalar_types: &HashSet<&str>
     scalar_types.contains(base_type_name) || st.contains_key(base_type_name)
 }
 
+/// Helper to convert a C string to a Rust String.
+unsafe fn c_str_to_string(ptr: *const std::os::raw::c_char) -> String {
+    if ptr.is_null() {
+        String::new()
+    } else {
+        CStr::from_ptr(ptr).to_string_lossy().into_owned()
+    }
+}
+
+/// Helper to convert a C string to an optional Rust String.
+unsafe fn c_str_to_optional_string(ptr: *const std::os::raw::c_char) -> Option<String> {
+    (!ptr.is_null())
+        .then(|| CStr::from_ptr(ptr).to_string_lossy().into_owned())
+        .filter(|s| !s.is_empty())
+}
+
 /// Helper to create a symbol and its location.
 fn create_symbol(
     uri: &Url,
@@ -676,7 +618,7 @@ fn create_symbol(
     col: u32,
     kind: SymbolKind,
     documentation: Option<String>,
-) -> (Symbol, Location) {
+) -> Symbol {
     let location = Location {
         uri: uri.clone(),
         range: Range::new(
@@ -684,26 +626,11 @@ fn create_symbol(
             Position::new(line, col),
         ),
     };
-    let symbol_info = SymbolInfo {
+    let info = SymbolInfo {
         name,
         namespace,
-        location: location.clone(),
+        location,
         documentation,
     };
-    (
-        Symbol {
-            info: symbol_info,
-            kind,
-        },
-        location,
-    )
-}
-
-/// Helper to safely get a string from an FFI function that uses a character buffer.
-unsafe fn ffi_get_string(getter: impl Fn(*mut i8, i32)) -> String {
-    let mut buffer = vec![0u8; 2048];
-    getter(buffer.as_mut_ptr() as *mut i8, buffer.len() as i32);
-    CStr::from_ptr(buffer.as_ptr() as *const i8)
-        .to_string_lossy()
-        .into_owned()
+    Symbol { info, kind }
 }

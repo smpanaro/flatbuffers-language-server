@@ -21,6 +21,8 @@ struct Range {
 struct StructDefinitionInfo {
     const char* name;
     const char* file;
+    const char* namespace_;
+    const char* documentation;
     bool is_table;
     unsigned line;
     unsigned col;
@@ -32,6 +34,8 @@ struct StructDefinitionInfo {
 struct EnumDefinitionInfo {
     const char* name;
     const char* file;
+    const char* namespace_;
+    const char* documentation;
     bool is_union;
     unsigned line;
     unsigned col;
@@ -40,6 +44,7 @@ struct EnumDefinitionInfo {
 // A struct to pass enum value information
 struct EnumValDefinitionInfo {
     const char* name;
+    const char* documentation;
     long long value;
     unsigned line;
     unsigned col;
@@ -50,6 +55,9 @@ struct EnumValDefinitionInfo {
 // A struct to pass field information
 struct FieldDefinitionInfo {
     const char* name;
+    const char* type_name;      // fully qualified display name, including vectory/array symbols
+    const char* base_type_name; // fully qualified name of the type or the vector/array's element type
+    const char* documentation;
     unsigned line;
     unsigned col;
     struct Range type_range;
@@ -81,12 +89,10 @@ bool is_parser_success(struct FlatbuffersParser* parser);
 // Functions for structs and tables
 int get_num_structs(struct FlatbuffersParser* parser);
 struct StructDefinitionInfo get_struct_info(struct FlatbuffersParser* parser, int index);
-void get_struct_namespace(struct FlatbuffersParser* parser, int index, char* buf, int buf_len);
 
 // Functions for enums and unions
 int get_num_enums(struct FlatbuffersParser* parser);
 struct EnumDefinitionInfo get_enum_info(struct FlatbuffersParser* parser, int index);
-void get_enum_namespace(struct FlatbuffersParser* parser, int index, char* buf, int buf_len);
 
 // Functions for enum values
 int get_num_enum_vals(struct FlatbuffersParser* parser, int enum_index);
@@ -99,24 +105,16 @@ struct RootTypeDefinitionInfo get_root_type_info(struct FlatbuffersParser* parse
 // Functions for fields
 int get_num_fields(struct FlatbuffersParser* parser, int struct_index);
 struct FieldDefinitionInfo get_field_info(struct FlatbuffersParser* parser, int struct_index, int field_index);
-void get_field_type_name(struct FlatbuffersParser* parser, int struct_index, int field_index, char* buf, int buf_len); // fully qualified display name, including vectory/array symbols
-void get_field_base_type_name(struct FlatbuffersParser* parser, int struct_index, int field_index, char* buf, int buf_len); // fully qualified name of the type or the vector/array's element type
 
 // Functions for all included files
 int get_num_all_included_files(struct FlatbuffersParser* parser);
-void get_all_included_file_path(struct FlatbuffersParser* parser, int index, char* buf, int buf_len);
+const char* get_all_included_file_path(struct FlatbuffersParser* parser, int index);
 
 // Functions for include graph
 int get_num_files_with_includes(struct FlatbuffersParser* parser);
-void get_file_with_includes_path(struct FlatbuffersParser* parser, int index, char* buf, int buf_len);
+const char* get_file_with_includes_path(struct FlatbuffersParser* parser, int index);
 int get_num_includes_for_file(struct FlatbuffersParser* parser, const char* file_path);
-void get_included_file_path(struct FlatbuffersParser* parser, const char* file_path, int index, char* buf, int buf_len);
-
-// Functions for documentation
-void get_struct_documentation(struct FlatbuffersParser* parser, int index, char* buf, int buf_len);
-void get_enum_documentation(struct FlatbuffersParser* parser, int index, char* buf, int buf_len);
-void get_field_documentation(struct FlatbuffersParser* parser, int struct_index, int field_index, char* buf, int buf_len);
-void get_enum_val_documentation(struct FlatbuffersParser* parser, int enum_index, int val_index, char* buf, int buf_len);
+const char* get_included_file_path(struct FlatbuffersParser* parser, const char* file_path, int index);
 
 
 #ifdef __cplusplus

@@ -4,10 +4,12 @@
 #include <string>
 #include <unistd.h>
 #include <vector>
+#include <unordered_set>
 
 // We use a C-style struct to hide the C++ Parser implementation from Rust.
 struct FlatbuffersParser {
     flatbuffers::Parser impl;
+    std::unordered_set<std::string> string_cache;
 };
 
 // Helper function to recursively build a type name
@@ -62,6 +64,24 @@ std::string GetTypeName(const flatbuffers::Type& type) {
     return flatbuffers::TypeName(type.base_type);
 }
 
+const char* join_doc_comments(const std::vector<std::string>& doc_comment, std::unordered_set<std::string>& string_cache) {
+    if (doc_comment.empty()) return "";
+
+    std::string full_doc;
+    for (size_t i = 0; i < doc_comment.size(); ++i) {
+        full_doc += doc_comment[i];
+        if (i < doc_comment.size() - 1) {
+            full_doc += "\n";
+        }
+    }
+
+    if (!full_doc.empty()) {
+        auto result = string_cache.insert(full_doc);
+        return result.first->c_str();
+    }
+    return "";
+}
+
 struct FlatbuffersParser* parse_schema(const char* schema_content, const char* filename) {
     auto parser = new FlatbuffersParser();
 
@@ -114,28 +134,14 @@ int get_num_structs(struct FlatbuffersParser* parser) {
 }
 
 struct StructDefinitionInfo get_struct_info(struct FlatbuffersParser* parser, int index) {
-    struct StructDefinitionInfo info = { nullptr, nullptr, false, 0, 0, 0, 0 };
+    struct StructDefinitionInfo info = { nullptr, nullptr, nullptr, nullptr, false, 0, 0, 0, 0 };
     if (!parser || index < 0 || static_cast<size_t>(index) >= parser->impl.structs_.vec.size()) {
         return info;
     }
     auto struct_def = parser->impl.structs_.vec[static_cast<size_t>(index)];
     info.name = struct_def->name.c_str();
     info.file = struct_def->file.c_str();
-    info.is_table = !struct_def->fixed;
-    info.line = struct_def->decl_line - 1;
-    info.col = struct_def->decl_col;
-    info.bytesize = struct_def->bytesize;
-    info.minalign = struct_def->minalign;
-    return info;
-}
 
-void get_struct_namespace(struct FlatbuffersParser* parser, int index, char* buf, int buf_len) {
-    if (!parser || buf == nullptr || buf_len <= 0) return;
-    buf[0] = '\0';
-    if (index < 0 || static_cast<size_t>(index) >= parser->impl.structs_.vec.size()) {
-        return;
-    }
-    auto struct_def = parser->impl.structs_.vec[static_cast<size_t>(index)];
     if (struct_def->defined_namespace) {
         std::string ns;
         for (size_t i = 0; i < struct_def->defined_namespace->components.size(); ++i) {
@@ -144,9 +150,17 @@ void get_struct_namespace(struct FlatbuffersParser* parser, int index, char* buf
             }
             ns += struct_def->defined_namespace->components[i];
         }
-        strncpy(buf, ns.c_str(), buf_len - 1);
-        buf[buf_len - 1] = '\0';
+        auto result = parser->string_cache.insert(ns);
+        info.namespace_ = result.first->c_str();
     }
+
+    info.documentation = join_doc_comments(struct_def->doc_comment, parser->string_cache);
+    info.is_table = !struct_def->fixed;
+    info.line = struct_def->decl_line - 1;
+    info.col = struct_def->decl_col;
+    info.bytesize = struct_def->bytesize;
+    info.minalign = struct_def->minalign;
+    return info;
 }
 
 // Functions for enums and unions
@@ -156,26 +170,14 @@ int get_num_enums(struct FlatbuffersParser* parser) {
 }
 
 struct EnumDefinitionInfo get_enum_info(struct FlatbuffersParser* parser, int index) {
-    struct EnumDefinitionInfo info = { nullptr, nullptr, false, 0, 0 };
+    struct EnumDefinitionInfo info = { nullptr, nullptr, nullptr, nullptr, false, 0, 0 };
     if (!parser || index < 0 || static_cast<size_t>(index) >= parser->impl.enums_.vec.size()) {
         return info;
     }
     auto enum_def = parser->impl.enums_.vec[static_cast<size_t>(index)];
     info.name = enum_def->name.c_str();
     info.file = enum_def->file.c_str();
-    info.is_union = enum_def->is_union;
-    info.line = enum_def->decl_line - 1;
-    info.col = enum_def->decl_col;
-    return info;
-}
 
-void get_enum_namespace(struct FlatbuffersParser* parser, int index, char* buf, int buf_len) {
-    if (!parser || buf == nullptr || buf_len <= 0) return;
-    buf[0] = '\0';
-    if (index < 0 || static_cast<size_t>(index) >= parser->impl.enums_.vec.size()) {
-        return;
-    }
-    auto enum_def = parser->impl.enums_.vec[static_cast<size_t>(index)];
     if (enum_def->defined_namespace) {
         std::string ns;
         for (size_t i = 0; i < enum_def->defined_namespace->components.size(); ++i) {
@@ -184,9 +186,15 @@ void get_enum_namespace(struct FlatbuffersParser* parser, int index, char* buf, 
             }
             ns += enum_def->defined_namespace->components[i];
         }
-        strncpy(buf, ns.c_str(), buf_len - 1);
-        buf[buf_len - 1] = '\0';
+        auto result = parser->string_cache.insert(ns);
+        info.namespace_ = result.first->c_str();
     }
+
+    info.documentation = join_doc_comments(enum_def->doc_comment, parser->string_cache);
+    info.is_union = enum_def->is_union;
+    info.line = enum_def->decl_line - 1;
+    info.col = enum_def->decl_col;
+    return info;
 }
 
 int get_num_enum_vals(struct FlatbuffersParser* parser, int enum_index) {
@@ -198,7 +206,7 @@ int get_num_enum_vals(struct FlatbuffersParser* parser, int enum_index) {
 }
 
 struct EnumValDefinitionInfo get_enum_val_info(struct FlatbuffersParser* parser, int enum_index, int val_index) {
-    struct EnumValDefinitionInfo info = { nullptr, 0, 0, 0, {}, {}};
+    struct EnumValDefinitionInfo info = { nullptr, nullptr, 0, 0, 0, {}, {}};
     if (!parser || enum_index < 0 || static_cast<size_t>(enum_index) >= parser->impl.enums_.vec.size()) {
         return info;
     }
@@ -209,9 +217,12 @@ struct EnumValDefinitionInfo get_enum_val_info(struct FlatbuffersParser* parser,
     auto enum_val = enum_def->Vals()[static_cast<size_t>(val_index)];
     info.name = enum_val->name.c_str();
     if (enum_def->is_union) {
-        // TODO: This leaks, fix it.
-        info.name = strdup(GetTypeName(enum_val->union_type).c_str()); // fully-qualified name
+        std::string name = GetTypeName(enum_val->union_type);
+        auto result = parser->string_cache.insert(name);
+        info.name = result.first->c_str(); // fully-qualified name
     }
+
+    info.documentation = join_doc_comments(enum_val->doc_comment, parser->string_cache);
     info.value = enum_val->GetAsInt64();
     info.line = enum_val->decl_line - 1;
     info.col = enum_val->decl_col;
@@ -239,8 +250,9 @@ struct RootTypeDefinitionInfo get_root_type_info(struct FlatbuffersParser* parse
 
     info.name = root_def->name.c_str();
     if (root_def->defined_namespace) {
-        // TODO: This leaks, fix it.
-        info.name = strdup(root_def->defined_namespace->GetFullyQualifiedName(root_def->name).c_str());
+        std::string fqn = root_def->defined_namespace->GetFullyQualifiedName(root_def->name);
+        auto result = parser->string_cache.insert(fqn);
+        info.name = result.first->c_str();
     }
     info.file = parser->impl.root_type_loc_->filename_.c_str();
 
@@ -255,24 +267,6 @@ struct RootTypeDefinitionInfo get_root_type_info(struct FlatbuffersParser* parse
     return info;
 }
 
-void join_doc_comments(const std::vector<std::string>& doc_comment, char* buf, int buf_len) {
-    if (buf == nullptr || buf_len <= 0) return;
-    buf[0] = '\0';
-
-    std::string full_doc;
-    for (size_t i = 0; i < doc_comment.size(); ++i) {
-        full_doc += doc_comment[i];
-        if (i < doc_comment.size() - 1) {
-            full_doc += "\n";
-        }
-    }
-
-    if (!full_doc.empty()) {
-        strncpy(buf, full_doc.c_str(), buf_len - 1);
-        buf[buf_len - 1] = '\0';
-    }
-}
-
 int get_num_all_included_files(struct FlatbuffersParser* parser) {
     if (!parser) return 0;
     int count = 0;
@@ -282,25 +276,21 @@ int get_num_all_included_files(struct FlatbuffersParser* parser) {
     return count;
 }
 
-void get_all_included_file_path(struct FlatbuffersParser* parser, int index, char* buf, int buf_len) {
+const char* get_all_included_file_path(struct FlatbuffersParser* parser, int index) {
 
-    if (!parser || buf == nullptr || buf_len <= 0) {
-        if (buf) buf[0] = '\0';
-        return;
-    }
-    buf[0] = '\0';
+    if (!parser) return "";
 
     int current_index = 0;
     for (const auto& pair : parser->impl.files_included_per_file_) {
         for (const auto& included_file : pair.second) {
             if (current_index == index) {
-                strncpy(buf, included_file.filename.c_str(), buf_len - 1);
-                buf[buf_len - 1] = '\0'; // Ensure null termination
-                return;
+                auto result = parser->string_cache.insert(included_file.filename);
+                return result.first->c_str();
             }
             current_index++;
         }
     }
+    return "";
 }
 
 // Functions for fields
@@ -313,7 +303,7 @@ int get_num_fields(struct FlatbuffersParser* parser, int struct_index) {
 }
 
 struct FieldDefinitionInfo get_field_info(struct FlatbuffersParser* parser, int struct_index, int field_index) {
-    struct FieldDefinitionInfo info = { nullptr, 0, 0, {}, nullptr, false, false, 0 };
+    struct FieldDefinitionInfo info = { nullptr, nullptr, nullptr, nullptr, 0, 0, {}, nullptr, false, false, 0 };
     if (!parser || struct_index < 0 || static_cast<size_t>(struct_index) >= parser->impl.structs_.vec.size()) {
         return info;
     }
@@ -331,6 +321,30 @@ struct FieldDefinitionInfo get_field_info(struct FlatbuffersParser* parser, int 
     }
 
     info.name = field_def->name.c_str();
+
+    {
+        std::string type_name = GetTypeName(field_def->value.type);
+        auto result = parser->string_cache.insert(type_name);
+        info.type_name = result.first->c_str();
+    }
+
+    {
+        flatbuffers::Type type  = field_def->value.type;
+        switch (type.base_type) {
+            case flatbuffers::BASE_TYPE_VECTOR:
+            case flatbuffers::BASE_TYPE_ARRAY: {
+                type = type.VectorType();
+            }
+            default:
+                break;
+        }
+        std::string type_name = GetTypeName(type);
+        auto result = parser->string_cache.insert(type_name);
+        info.base_type_name = result.first->c_str();
+    }
+
+    info.documentation = join_doc_comments(field_def->doc_comment, parser->string_cache);
+
     info.line = field_def->decl_line - 1;
     info.col = field_def->decl_col;
     info.deprecated = field_def->deprecated;
@@ -365,114 +379,24 @@ flatbuffers::FieldDef* get_field_def(struct FlatbuffersParser* parser, int struc
     return struct_def->fields.vec[static_cast<size_t>(field_index)];
 }
 
-void get_field_type_name(struct FlatbuffersParser* parser, int struct_index, int field_index, char* buf, int buf_len) {
-    if (!parser || buf == nullptr || buf_len <= 0) return;
-
-    auto field_def = get_field_def(parser, struct_index, field_index);
-    if (!field_def) {
-        buf[0] = '\0';
-        return;
-    }
-
-    std::string type_name = GetTypeName(field_def->value.type);
-    strncpy(buf, type_name.c_str(), buf_len - 1);
-    buf[buf_len - 1] = '\0'; // Ensure null termination
-}
-
-void get_field_base_type_name(struct FlatbuffersParser* parser, int struct_index, int field_index, char* buf, int buf_len) {
-    if (!parser || buf == nullptr || buf_len <= 0) return;
-
-    auto field_def = get_field_def(parser, struct_index, field_index);
-    if (!field_def) {
-        buf[0] = '\0';
-        return;
-    }
-
-    // VectorType returns the element type.
-    flatbuffers::Type type  = field_def->value.type;
-    switch (type.base_type) {
-        case flatbuffers::BASE_TYPE_VECTOR:
-        case flatbuffers::BASE_TYPE_ARRAY: {
-            type = type.VectorType();
-        }
-        default:
-            break;
-    }
-
-    std::string type_name = GetTypeName(type);
-    strncpy(buf, type_name.c_str(), buf_len - 1);
-    buf[buf_len - 1] = '\0'; // Ensure null termination
-}
-
-// Functions for documentation
-void get_struct_documentation(struct FlatbuffersParser* parser, int index, char* buf, int buf_len) {
-    if (!parser || index < 0 || static_cast<size_t>(index) >= parser->impl.structs_.vec.size()) {
-        if (buf && buf_len > 0) buf[0] = '\0';
-        return;
-    }
-    auto struct_def = parser->impl.structs_.vec[static_cast<size_t>(index)];
-    join_doc_comments(struct_def->doc_comment, buf, buf_len);
-}
-
-void get_enum_documentation(struct FlatbuffersParser* parser, int index, char* buf, int buf_len) {
-    if (!parser || index < 0 || static_cast<size_t>(index) >= parser->impl.enums_.vec.size()) {
-        if (buf && buf_len > 0) buf[0] = '\0';
-        return;
-    }
-    auto enum_def = parser->impl.enums_.vec[static_cast<size_t>(index)];
-    join_doc_comments(enum_def->doc_comment, buf, buf_len);
-}
-
-void get_field_documentation(struct FlatbuffersParser* parser, int struct_index, int field_index, char* buf, int buf_len) {
-    if (!parser || struct_index < 0 || static_cast<size_t>(struct_index) >= parser->impl.structs_.vec.size()) {
-        if (buf && buf_len > 0) buf[0] = '\0';
-        return;
-    }
-    auto struct_def = parser->impl.structs_.vec[static_cast<size_t>(struct_index)];
-    if (field_index < 0 || static_cast<size_t>(field_index) >= struct_def->fields.vec.size()) {
-        if (buf && buf_len > 0) buf[0] = '\0';
-        return;
-    }
-    auto field_def = struct_def->fields.vec[static_cast<size_t>(field_index)];
-    join_doc_comments(field_def->doc_comment, buf, buf_len);
-}
-
-void get_enum_val_documentation(struct FlatbuffersParser* parser, int enum_index, int val_index, char* buf, int buf_len) {
-    if (!parser || enum_index < 0 || static_cast<size_t>(enum_index) >= parser->impl.enums_.vec.size()) {
-        if (buf && buf_len > 0) buf[0] = '\0';
-        return;
-    }
-    auto enum_def = parser->impl.enums_.vec[static_cast<size_t>(enum_index)];
-    if (val_index < 0 || static_cast<size_t>(val_index) >= enum_def->Vals().size()) {
-        if (buf && buf_len > 0) buf[0] = '\0';
-        return;
-    }
-    auto enum_val = enum_def->Vals()[static_cast<size_t>(val_index)];
-    join_doc_comments(enum_val->doc_comment, buf, buf_len);
-}
-
 // Functions for include graph
 int get_num_files_with_includes(struct FlatbuffersParser* parser) {
     if (!parser) return 0;
     return static_cast<int>(parser->impl.files_included_per_file_.size());
 }
 
-void get_file_with_includes_path(struct FlatbuffersParser* parser, int index, char* buf, int buf_len) {
-    if (!parser || buf == nullptr || buf_len <= 0) {
-        if (buf) buf[0] = '\0';
-        return;
-    }
-    buf[0] = '\0';
+const char* get_file_with_includes_path(struct FlatbuffersParser* parser, int index) {
+    if (!parser) return "";
 
     int current_index = 0;
     for (const auto& pair : parser->impl.files_included_per_file_) {
         if (current_index == index) {
-            strncpy(buf, pair.first.c_str(), buf_len - 1);
-            buf[buf_len - 1] = '\0'; // Ensure null termination
-            return;
+            auto result = parser->string_cache.insert(pair.first);
+            return result.first->c_str();
         }
         current_index++;
     }
+    return "";
 }
 
 int get_num_includes_for_file(struct FlatbuffersParser* parser, const char* file_path) {
@@ -484,20 +408,17 @@ int get_num_includes_for_file(struct FlatbuffersParser* parser, const char* file
     return 0;
 }
 
-void get_included_file_path(struct FlatbuffersParser* parser, const char* file_path, int index, char* buf, int buf_len) {
-    if (!parser || !file_path || buf == nullptr || buf_len <= 0) {
-        if (buf) buf[0] = '\0';
-        return;
-    }
-    buf[0] = '\0';
+const char* get_included_file_path(struct FlatbuffersParser* parser, const char* file_path, int index) {
+    if (!parser || !file_path) return "";
 
     auto it = parser->impl.files_included_per_file_.find(file_path);
     if (it != parser->impl.files_included_per_file_.end()) {
         if (index >= 0 && static_cast<size_t>(index) < it->second.size()) {
             auto set_it = it->second.begin();
             std::advance(set_it, index);
-            strncpy(buf, set_it->filename.c_str(), buf_len - 1);
-            buf[buf_len - 1] = '\0'; // Ensure null termination
+            auto result = parser->string_cache.insert(set_it->filename);
+            return result.first->c_str();
         }
     }
+    return "";
 }
