@@ -7,6 +7,7 @@ mod harness;
 mod helpers;
 mod hover;
 mod references;
+mod rename;
 mod scenarios;
 mod test_logger;
 

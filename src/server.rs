@@ -1,4 +1,6 @@
-use crate::handlers::{code_action, completion, goto_definition, hover, lifecycle, references};
+use crate::handlers::{
+    code_action, completion, goto_definition, hover, lifecycle, references, rename,
+};
 use crate::parser::{FlatcFFIParser, Parser};
 use crate::workspace::Workspace;
 use dashmap::DashMap;
@@ -14,8 +16,9 @@ use tower_lsp::lsp_types::{
     DidChangeTextDocumentParams, DidCloseTextDocumentParams, DidOpenTextDocumentParams,
     DidSaveTextDocumentParams, GotoDefinitionParams, GotoDefinitionResponse, Hover, HoverParams,
     HoverProviderCapability, InitializeParams, InitializeResult, InitializedParams, Location,
-    OneOf, ReferenceParams, ServerCapabilities, ServerInfo, TextDocumentSyncCapability,
-    TextDocumentSyncKind, TextDocumentSyncOptions, Url,
+    OneOf, PrepareRenameResponse, ReferenceParams, RenameOptions, RenameParams, ServerCapabilities,
+    ServerInfo, TextDocumentPositionParams, TextDocumentSyncCapability, TextDocumentSyncKind,
+    TextDocumentSyncOptions, Url, WorkspaceEdit,
 };
 use tower_lsp::{Client, LanguageServer};
 
@@ -166,6 +169,10 @@ impl LanguageServer for Backend {
                         ..CodeActionOptions::default()
                     },
                 )),
+                rename_provider: Some(OneOf::Right(RenameOptions {
+                    prepare_provider: Some(true),
+                    work_done_progress_options: Default::default(),
+                })),
                 ..ServerCapabilities::default()
             },
         })
@@ -217,5 +224,16 @@ impl LanguageServer for Backend {
 
     async fn code_action(&self, params: CodeActionParams) -> Result<Option<CodeActionResponse>> {
         code_action::handle_code_action(self, params).await
+    }
+
+    async fn prepare_rename(
+        &self,
+        params: TextDocumentPositionParams,
+    ) -> Result<Option<PrepareRenameResponse>> {
+        rename::prepare_rename(self, params).await
+    }
+
+    async fn rename(&self, params: RenameParams) -> Result<Option<WorkspaceEdit>> {
+        rename::rename(self, params).await
     }
 }
