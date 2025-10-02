@@ -1,4 +1,4 @@
-use crate::diagnostics::DiagnosticHandler;
+use crate::diagnostics::ErrorDiagnosticHandler;
 use log::error;
 use once_cell::sync::Lazy;
 use regex::Regex;
@@ -15,7 +15,7 @@ static DUPLICATE_RE: Lazy<Regex> = Lazy::new(|| {
 
 pub struct DuplicateDefinitionHandler;
 
-impl DiagnosticHandler for DuplicateDefinitionHandler {
+impl ErrorDiagnosticHandler for DuplicateDefinitionHandler {
     fn handle(&self, line: &str, _content: &str) -> Option<(Url, Diagnostic)> {
         if let Some(captures) = DUPLICATE_RE.captures(line) {
             let file_path = captures[1].trim();

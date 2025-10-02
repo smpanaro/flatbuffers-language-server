@@ -1,4 +1,4 @@
-use crate::diagnostics::DiagnosticHandler;
+use crate::diagnostics::ErrorDiagnosticHandler;
 use log::error;
 use once_cell::sync::Lazy;
 use regex::Regex;
@@ -11,7 +11,7 @@ static RE: Lazy<Regex> = Lazy::new(|| {
 
 pub struct GenericDiagnosticHandler;
 
-impl DiagnosticHandler for GenericDiagnosticHandler {
+impl ErrorDiagnosticHandler for GenericDiagnosticHandler {
     fn handle(&self, line: &str, _content: &str) -> Option<(Url, Diagnostic)> {
         if let Some(captures) = RE.captures(line) {
             let file_path = captures.get(0).unwrap().as_str().split(':').next().unwrap();

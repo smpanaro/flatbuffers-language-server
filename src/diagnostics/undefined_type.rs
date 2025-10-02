@@ -1,4 +1,4 @@
-use crate::diagnostics::DiagnosticHandler;
+use crate::diagnostics::ErrorDiagnosticHandler;
 use log::error;
 use once_cell::sync::Lazy;
 use regex::Regex;
@@ -15,7 +15,7 @@ static UNDEFINED_TYPE_RE: Lazy<Regex> = Lazy::new(|| {
 
 pub struct UndefinedTypeHandler;
 
-impl DiagnosticHandler for UndefinedTypeHandler {
+impl ErrorDiagnosticHandler for UndefinedTypeHandler {
     fn handle(&self, line: &str, content: &str) -> Option<(Url, Diagnostic)> {
         if let Some(captures) = RE.captures(line) {
             let message = captures[4].trim().to_string();

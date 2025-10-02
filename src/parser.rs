@@ -1,4 +1,4 @@
-use crate::diagnostics::{self, DiagnosticHandler};
+use crate::diagnostics;
 use crate::ffi;
 use crate::symbol_table::{
     Enum, EnumVariant, Field, RootTypeInfo, Struct, Symbol, SymbolInfo, SymbolKind, SymbolTable,
@@ -6,11 +6,9 @@ use crate::symbol_table::{
 };
 use crate::utils::parsed_type::parse_type;
 use log::{debug, error};
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 use std::ffi::{CStr, CString};
-use tower_lsp::lsp_types::{
-    Diagnostic, DiagnosticSeverity, DiagnosticTag, Location, Position, Range, Url,
-};
+use tower_lsp::lsp_types::{Diagnostic, Location, Position, Range, Url};
 
 /// A trait for parsing FlatBuffers schema files.
 pub trait Parser {
@@ -93,7 +91,9 @@ unsafe fn parse_success_case(
     extract_enums_and_unions(parser_ptr, &mut st);
     let root_type_info = extract_root_type(parser_ptr);
 
-    perform_semantic_analysis(&st, &mut diagnostics, &included_files, content, parser_ptr);
+    let include_graph = unsafe { build_include_graph(parser_ptr) };
+    diagnostics::semantic::analyze_unused_includes(&st, &mut diagnostics, content, &include_graph);
+    diagnostics::semantic::analyze_deprecated_fields(&st, &mut diagnostics);
 
     (st, included_files, root_type_info, diagnostics)
 }
@@ -104,32 +104,13 @@ unsafe fn parse_error_case(
     file_name: &str,
     content: &str,
 ) -> HashMap<Url, Vec<Diagnostic>> {
-    let mut diagnostics_map: HashMap<Url, Vec<Diagnostic>> = HashMap::new();
     let error_str_ptr = ffi::get_parser_error(parser_ptr);
-
     if let Some(error_str) = c_str_to_optional_string(error_str_ptr) {
         debug!("flatc FFI error parsing {}: {}", file_name, error_str);
-
-        let handlers: Vec<Box<dyn DiagnosticHandler>> = vec![
-            Box::new(diagnostics::duplicate_definition::DuplicateDefinitionHandler),
-            Box::new(diagnostics::expecting_token::ExpectingTokenHandler),
-            Box::new(diagnostics::undefined_type::UndefinedTypeHandler),
-            Box::new(diagnostics::generic::GenericDiagnosticHandler),
-        ];
-
-        for line in error_str.lines() {
-            for handler in &handlers {
-                if let Some((file_uri, diagnostic)) = handler.handle(line, content) {
-                    diagnostics_map
-                        .entry(file_uri)
-                        .or_default()
-                        .push(diagnostic);
-                    break;
-                }
-            }
-        }
+        diagnostics::generate_diagnostics_from_error_string(&error_str, content)
+    } else {
+        HashMap::new()
     }
-    diagnostics_map
 }
 
 /// Extracts all included file paths from the parser.
@@ -370,151 +351,15 @@ unsafe fn extract_root_type(parser_ptr: *mut ffi::FlatbuffersParser) -> Option<R
     None
 }
 
-/// Performs second-pass semantic analysis on the symbol table.
-fn perform_semantic_analysis(
-    st: &SymbolTable,
-    diagnostics: &mut HashMap<Url, Vec<Diagnostic>>,
-    _included_files: &Vec<String>,
-    file_contents: &str,
-    parser_ptr: *mut ffi::FlatbuffersParser,
-) {
-    let mut used_types = HashSet::new();
-    for symbol in st.values() {
-        if symbol.info.location.uri != st.uri {
-            continue;
-        }
-        match &symbol.kind {
-            SymbolKind::Table(t) => {
-                for field in &t.fields {
-                    if let SymbolKind::Field(f) = &field.kind {
-                        used_types.insert(f.type_name.clone());
-                    }
-                }
-            }
-            SymbolKind::Struct(s) => {
-                for field in &s.fields {
-                    if let SymbolKind::Field(f) = &field.kind {
-                        used_types.insert(f.type_name.clone());
-                    }
-                }
-            }
-            SymbolKind::Union(u) => {
-                for variant in &u.variants {
-                    used_types.insert(variant.name.clone());
-                }
-            }
-            _ => continue,
-        }
-    }
-
-    let include_graph = unsafe { build_include_graph(parser_ptr) };
-
-    let mut directly_required_files = HashSet::new();
-    for used_type in &used_types {
-        if let Some(symbol) = st.get(used_type) {
-            directly_required_files.insert(symbol.info.location.uri.to_file_path().unwrap());
-        }
-    }
-
-    let mut required_files = HashSet::new();
-    let mut queue: Vec<_> = directly_required_files.into_iter().collect();
-    let mut visited = HashSet::new();
-
-    while let Some(file) = queue.pop() {
-        if visited.contains(&file) {
-            continue;
-        }
-        visited.insert(file.clone());
-        required_files.insert(file.clone());
-
-        if let Some(includes) = include_graph.get(file.to_str().unwrap()) {
-            for include in includes {
-                let mut path = std::path::PathBuf::new();
-                path.push(include);
-                queue.push(path);
-            }
-        }
-    }
-
-    for (line_num, line) in file_contents.lines().enumerate() {
-        if line.starts_with("include") {
-            if let Some(start) = line.find('"') {
-                if let Some(end) = line.rfind('"') {
-                    let include_path = &line[start + 1..end];
-                    let mut absolute_path = st.uri.to_file_path().unwrap();
-                    absolute_path.pop();
-                    absolute_path.push(include_path);
-
-                    if !required_files.contains(&absolute_path) {
-                        let range = Range {
-                            start: Position {
-                                line: line_num as u32,
-                                character: 0,
-                            },
-                            end: Position {
-                                line: line_num as u32,
-                                character: line.len() as u32,
-                            },
-                        };
-                        diagnostics
-                            .entry(st.uri.clone())
-                            .or_default()
-                            .push(Diagnostic {
-                                range,
-                                severity: Some(DiagnosticSeverity::HINT),
-                                message: format!("unused include: {}", include_path),
-                                tags: Some(vec![DiagnosticTag::UNNECESSARY]),
-                                ..Default::default()
-                            });
-                    }
-                }
-            }
-        }
-    }
-
-    for symbol in st.values() {
-        let fields = match &symbol.kind {
-            SymbolKind::Table(t) => &t.fields,
-            SymbolKind::Struct(s) => &s.fields,
-            _ => continue,
-        };
-
-        for field in fields {
-            if let SymbolKind::Field(field_def) = &field.kind {
-                if field_def.deprecated {
-                    diagnostics
-                        .entry(field.info.location.uri.clone())
-                        .or_default()
-                        .push(Diagnostic {
-                            range: Range {
-                                start: field.info.location.range.start,
-                                end: Position {
-                                    line: field.info.location.range.end.line,
-                                    character: u32::MAX,
-                                },
-                            },
-                            severity: DiagnosticSeverity::HINT.into(),
-                            tags: vec![DiagnosticTag::UNNECESSARY].into(),
-                            message: "Deprecated. Excluded from generated code.".to_string(),
-                            ..Default::default()
-                        });
-                }
-            }
-        }
-    }
-}
-
 unsafe fn build_include_graph(
     parser_ptr: *mut ffi::FlatbuffersParser,
 ) -> HashMap<String, Vec<String>> {
     let mut include_graph = HashMap::new();
     let num_files = ffi::get_num_files_with_includes(parser_ptr);
     for i in 0..num_files {
-        let file_path = if let Some(path) =
+        let Some(file_path) =
             c_str_to_optional_string(ffi::get_file_with_includes_path(parser_ptr, i))
-        {
-            path
-        } else {
+        else {
             continue;
         };
 
