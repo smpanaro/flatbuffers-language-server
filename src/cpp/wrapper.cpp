@@ -9,6 +9,7 @@
 // We use a C-style struct to hide the C++ Parser implementation from Rust.
 struct FlatbuffersParser {
     flatbuffers::Parser impl;
+    bool error;
     std::unordered_set<std::string> string_cache;
 };
 
@@ -100,11 +101,8 @@ struct FlatbuffersParser* parse_schema(const char* schema_content, const char* f
 
     const char** paths = include_paths.empty() ? nullptr : include_paths.data();
 
-    if (parser->impl.Parse(schema_content, paths, filename ? filename : "")) {
-        return parser;
-    } else {
-        return parser;
-    }
+    parser->error = !parser->impl.Parse(schema_content, paths, filename ? filename : "");
+    return parser;
 }
 
 void delete_parser(struct FlatbuffersParser* parser) {
@@ -124,7 +122,7 @@ bool is_parser_success(struct FlatbuffersParser* parser) {
     if (!parser) {
         return false;
     }
-    return parser->impl.error_.empty();
+    return !parser->error;
 }
 
 // Functions for structs and tables

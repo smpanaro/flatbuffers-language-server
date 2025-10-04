@@ -222,3 +222,15 @@ union Any { Glo$0bal.Foo, Bar, Baz }
     let response = get_hover_response(&mut harness, fixture, &[]).await;
     assert_snapshot!(serde_json::to_string_pretty(&response).unwrap());
 }
+
+#[tokio::test]
+async fn hover_despite_warnings() {
+    let fixture = r#"
+table Tab {
+    shouldBeSnakeCase: i$0nt; // flatc will warn that this should be snake_case
+}
+"#;
+    let mut harness = TestHarness::new();
+    let response = get_hover_response(&mut harness, fixture, &[]).await;
+    assert!(response.is_some())
+}

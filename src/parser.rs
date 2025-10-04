@@ -57,7 +57,7 @@ impl Parser for FlatcFFIParser {
                     (diags, Some(st), included, root_info)
                 } else {
                     (
-                        parse_error_case(parser_ptr, &uri.to_string(), content),
+                        parse_error_messages(parser_ptr, &uri, content),
                         None,
                         extract_all_included_files(parser_ptr),
                         None,
@@ -83,14 +83,13 @@ unsafe fn parse_success_case(
     HashMap<Url, Vec<Diagnostic>>,
 ) {
     let mut st = SymbolTable::new(uri.clone());
-    let mut diagnostics = HashMap::new();
-
-    let included_files = extract_all_included_files(parser_ptr);
-
     extract_structs_and_tables(parser_ptr, &mut st);
     extract_enums_and_unions(parser_ptr, &mut st);
+
+    let included_files = extract_all_included_files(parser_ptr);
     let root_type_info = extract_root_type(parser_ptr);
 
+    let mut diagnostics = parse_error_messages(parser_ptr, uri, content); // warnings
     let include_graph = unsafe { build_include_graph(parser_ptr) };
     diagnostics::semantic::analyze_unused_includes(&st, &mut diagnostics, content, &include_graph);
     diagnostics::semantic::analyze_deprecated_fields(&st, &mut diagnostics);
@@ -98,15 +97,15 @@ unsafe fn parse_success_case(
     (st, included_files, root_type_info, diagnostics)
 }
 
-/// Handles the error case by parsing flatc's error message.
-unsafe fn parse_error_case(
+/// Parse flatc's error messages (in the error case) or warnings (in the success case).
+unsafe fn parse_error_messages(
     parser_ptr: *mut ffi::FlatbuffersParser,
-    file_name: &str,
+    uri: &Url,
     content: &str,
 ) -> HashMap<Url, Vec<Diagnostic>> {
     let error_str_ptr = ffi::get_parser_error(parser_ptr);
-    if let Some(error_str) = c_str_to_optional_string(error_str_ptr) {
-        debug!("flatc FFI error parsing {}: {}", file_name, error_str);
+    if let Some(error_str) = c_str_to_optional_string(error_str_ptr).take_if(|s| !s.is_empty()) {
+        debug!("flatc FFI error parsing {}: {}", uri.to_string(), error_str);
         diagnostics::generate_diagnostics_from_error_string(&error_str, content)
     } else {
         HashMap::new()
