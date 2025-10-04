@@ -2,7 +2,11 @@
 #include "flatbuffers/idl.h"
 #include "flatbuffers/util.h"
 #include <string>
+#ifdef _WIN32
+#include <direct.h>
+#else
 #include <unistd.h>
+#endif
 #include <vector>
 #include <unordered_set>
 
@@ -94,9 +98,15 @@ struct FlatbuffersParser* parse_schema(const char* schema_content, const char* f
     }
     // Add CWD to include paths
     char cwd[1024];
+#ifdef _WIN32
+    if (_getcwd(cwd, sizeof(cwd)) != NULL) {
+        include_paths.push_back(cwd);
+    }
+#else
     if (getcwd(cwd, sizeof(cwd)) != NULL) {
         include_paths.push_back(cwd);
     }
+#endif
     include_paths.push_back(nullptr);
 
     const char** paths = include_paths.empty() ? nullptr : include_paths.data();
