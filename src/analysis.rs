@@ -45,6 +45,10 @@ pub fn resolve_symbol_at(
 
     if let symbol_table::SymbolKind::Union(u) = &symbol_at_cursor.kind {
         for variant in &u.variants {
+            if !variant.location.range.contains(position) {
+                continue;
+            }
+
             if variant.parsed_type.type_name.range.contains(position) {
                 if let Some(target_symbol) = workspace.symbols.get(&variant.name) {
                     return Some(ResolvedSymbol {
@@ -60,8 +64,8 @@ pub fn resolve_symbol_at(
                         ref_name: variant.name.clone(),
                     });
                 }
-                return None;
             }
+            return None;
         }
     }
 

@@ -208,3 +208,17 @@ table ProductionLine {
     let response = get_hover_response(&mut harness, fixture, &[]).await;
     assert_snapshot!(serde_json::to_string_pretty(&response).unwrap());
 }
+
+#[tokio::test]
+async fn hover_union_namespace() {
+    let fixture = r#"
+namespace Global;
+table Foo {}
+table Bar {}
+table Baz {}
+union Any { Glo$0bal.Foo, Bar, Baz }
+"#;
+    let mut harness = TestHarness::new();
+    let response = get_hover_response(&mut harness, fixture, &[]).await;
+    assert_snapshot!(serde_json::to_string_pretty(&response).unwrap());
+}
