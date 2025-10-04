@@ -1,8 +1,13 @@
+use std::str::FromStr;
+
 use crate::diagnostics::ErrorDiagnosticHandler;
+use heck::ToSnakeCase;
 use log::error;
 use once_cell::sync::Lazy;
 use regex::Regex;
-use tower_lsp::lsp_types::{Diagnostic, DiagnosticSeverity, Position, Range, Url};
+use tower_lsp::lsp_types::{
+    CodeDescription, Diagnostic, DiagnosticSeverity, NumberOrString, Position, Range, Url,
+};
 
 // Regex to capture snake_case warnings:
 // <1file>:<2line>: <3col>: warning: field names should be lowercase snake_case, got: <4name>
@@ -31,7 +36,11 @@ impl ErrorDiagnosticHandler for SnakeCaseWarningHandler {
         let name = captures[4].trim();
         let name_length = name.chars().count() as u32;
 
-        let message = format!("field `{}` should be in snake_case", name);
+        let replacement = name.to_snake_case();
+        let message = format!(
+            "field `{}` should be in snake_case e.g. `{}`",
+            name, replacement
+        );
 
         let range = Range {
             start: Position {
@@ -49,7 +58,15 @@ impl ErrorDiagnosticHandler for SnakeCaseWarningHandler {
             Diagnostic {
                 range,
                 severity: Some(DiagnosticSeverity::WARNING),
+                code: Some(NumberOrString::String("non_snake_case".to_string())),
+                code_description: Url::from_str("https://flatbuffers.dev/schema/#style-guide")
+                    .map(|u| CodeDescription { href: u })
+                    .ok(),
+
                 message,
+                data: Some(
+                    serde_json::json!({ "original_name": name, "replacement_name": replacement }),
+                ),
                 ..Default::default()
             },
         ))

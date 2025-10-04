@@ -540,7 +540,7 @@ table MyTable { furryWombat:string; }"#;
     );
     assert_eq!(
         diagnostic.message,
-        "field `furryWombat` should be in snake_case"
+        "field `furryWombat` should be in snake_case e.g. `furry_wombat`"
     );
     assert_eq!(diagnostic.severity, Some(DiagnosticSeverity::WARNING));
 }

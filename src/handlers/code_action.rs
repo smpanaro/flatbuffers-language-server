@@ -1,5 +1,6 @@
 use crate::server::Backend;
 use regex::Regex;
+use serde_json::Value;
 use std::collections::HashMap;
 use tower_lsp::jsonrpc::Result;
 use tower_lsp::lsp_types::{
@@ -51,6 +52,39 @@ pub async fn handle_code_action(
                             }),
                             ..Default::default()
                         };
+                        code_actions.push(CodeActionOrCommand::CodeAction(code_action));
+                    }
+                }
+            }
+        }
+
+        if diagnostic.code == Some(NumberOrString::String("non_snake_case".to_string())) {
+            if let Some(data) = &diagnostic.data {
+                if let Some(Value::String(original_name)) = data.get("original_name") {
+                    if let Some(Value::String(replacement_name)) = data.get("replacement_name") {
+                        // Create a TextEdit to replace the incorrect name with the snake_case version.
+                        let text_edit = TextEdit {
+                            range: diagnostic.range,
+                            new_text: replacement_name.clone(),
+                        };
+
+                        // Create a WorkspaceEdit to apply the change.
+                        let mut changes = std::collections::HashMap::new();
+                        changes.insert(uri.clone(), vec![text_edit]);
+                        let edit = WorkspaceEdit {
+                            changes: Some(changes),
+                            ..Default::default()
+                        };
+
+                        let code_action = CodeAction {
+                            title: format!("Rename `{}` to `{}`", original_name, replacement_name),
+                            kind: Some(CodeActionKind::QUICKFIX),
+                            diagnostics: Some(vec![diagnostic.clone()]),
+                            edit: Some(edit),
+                            is_preferred: Some(true),
+                            ..Default::default()
+                        };
+
                         code_actions.push(CodeActionOrCommand::CodeAction(code_action));
                     }
                 }
