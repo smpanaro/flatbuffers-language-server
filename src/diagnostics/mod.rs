@@ -5,6 +5,7 @@ pub mod duplicate_definition;
 pub mod expecting_token;
 pub mod generic;
 pub mod semantic;
+pub mod snake_case_warning;
 pub mod undefined_type;
 
 pub trait ErrorDiagnosticHandler {
@@ -20,6 +21,7 @@ pub fn generate_diagnostics_from_error_string(
         Box::new(duplicate_definition::DuplicateDefinitionHandler),
         Box::new(expecting_token::ExpectingTokenHandler),
         Box::new(undefined_type::UndefinedTypeHandler),
+        Box::new(snake_case_warning::SnakeCaseWarningHandler),
         Box::new(generic::GenericDiagnosticHandler),
     ];
 

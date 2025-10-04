@@ -45,7 +45,7 @@ impl ErrorDiagnosticHandler for DuplicateDefinitionHandler {
                 },
             };
 
-            let prev_line = captures[7].parse().unwrap_or(0) - 1;
+            let prev_line = captures[7].parse().unwrap_or(1u32).saturating_sub(1);
             let prev_char = captures[8]
                 .parse()
                 .unwrap_or(0u32)

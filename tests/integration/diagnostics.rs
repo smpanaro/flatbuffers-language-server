@@ -519,3 +519,28 @@ table Foo
     );
     assert_eq!(related_information[1].message, "add `{` here");
 }
+
+#[tokio::test]
+async fn field_case_warning() {
+    let content = r#"
+table MyTable { furryWombat:string; }"#;
+
+    let mut harness = TestHarness::new();
+    harness
+        .initialize_and_open(&[("schema.fbs", content)])
+        .await;
+
+    let params = harness
+        .notification::<notification::PublishDiagnostics>()
+        .await;
+    let diagnostic = &params.diagnostics[0];
+    assert_eq!(
+        diagnostic.range,
+        Range::new(Position::new(1, 16), Position::new(1, 27))
+    );
+    assert_eq!(
+        diagnostic.message,
+        "field `furryWombat` should be in snake_case"
+    );
+    assert_eq!(diagnostic.severity, Some(DiagnosticSeverity::WARNING));
+}

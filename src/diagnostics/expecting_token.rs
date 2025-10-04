@@ -23,7 +23,7 @@ impl ErrorDiagnosticHandler for ExpectingTokenHandler {
                 return None;
             };
 
-            let error_line_num: u32 = captures[2].parse().unwrap_or(1) - 1;
+            let error_line_num: u32 = captures[2].parse().unwrap_or(1u32).saturating_sub(1);
             let error_col_num: u32 = captures[3].parse().unwrap_or(1u32).saturating_sub(1);
             let expected_token = captures[4].trim().to_string();
             let unexpected_token = captures[5].trim().to_string();
