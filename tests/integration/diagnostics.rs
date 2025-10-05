@@ -544,3 +544,41 @@ table MyTable { furryWombat:string; }"#;
     );
     assert_eq!(diagnostic.severity, Some(DiagnosticSeverity::WARNING));
 }
+
+#[tokio::test]
+#[ignore = "Known bug."]
+async fn undefined_type_in_included_file() {
+    let included = r#"
+table Pen {}
+
+table Ink {
+    brand: Brand; // undefined
+}
+"#;
+    let main = r#"
+include "included.fbs";
+root_type Pen;
+"#;
+
+    let mut harness = TestHarness::new();
+    harness
+        .initialize_and_open(&[("schema.fbs", main), ("included.fbs", included)])
+        .await;
+
+    // 3 calls: 2 for opening schema.fbs (itself + included); 1 for opening included.fbs
+    let included_uri = harness.root_uri.join("included.fbs").unwrap();
+    let mut diagnostics = vec![];
+    for _ in 0..4 {
+        let param = harness
+            .notification::<notification::PublishDiagnostics>()
+            .await;
+        if param.uri == included_uri {
+            diagnostics.push(param.diagnostics);
+        } else {
+            // schema.fbs itself has no errors.
+            assert!(param.diagnostics.is_empty());
+        }
+    }
+    // include.fbs is parsed twice and should emit the same diagnostic twice.
+    assert_eq!(diagnostics.len(), 2);
+}
