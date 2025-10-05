@@ -28,7 +28,6 @@ pub struct Backend {
     pub client: Client,
     pub document_map: DashMap<String, Rope>,
     pub workspace: Workspace,
-    pub parser: FlatcFFIParser,
 }
 
 impl Backend {
@@ -37,7 +36,6 @@ impl Backend {
             client,
             document_map: DashMap::new(),
             workspace: Workspace::new(),
-            parser: FlatcFFIParser,
         }
     }
 
@@ -80,8 +78,9 @@ impl Backend {
             };
 
             let start_time = Instant::now();
+            // FlatcFFIParser is stateless.
             let (diagnostics_map, symbol_table, included_files, root_type_info) =
-                self.parser.parse(&uri, &content);
+                FlatcFFIParser.parse(&uri, &content);
             let elapsed_time = start_time.elapsed();
             debug!("parsed in {}: {}", elapsed_time.log_str(), uri.path());
 

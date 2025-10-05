@@ -149,3 +149,43 @@ table MyTable {
     );
     assert_eq!(initial_response, post_close_response);
 }
+
+#[tokio::test]
+async fn deleted_symbol_causes_diagnostic() {
+    let version_one = r#"
+table T {}
+root_type T;
+"#;
+
+    let version_two = r#"
+root_type T;
+"#;
+
+    let mut harness = TestHarness::new();
+    harness
+        .initialize_and_open(&[("schema.fbs", version_one)])
+        .await;
+
+    {
+        let params = harness
+            .notification::<notification::PublishDiagnostics>()
+            .await;
+        assert_eq!(params.diagnostics.len(), 0);
+    }
+
+    let uri = harness.root_uri.join("schema.fbs").unwrap();
+    harness
+        .change_file(
+            VersionedTextDocumentIdentifier { uri, version: 2 },
+            version_two,
+        )
+        .await;
+
+    {
+        let params = harness
+            .notification::<notification::PublishDiagnostics>()
+            .await;
+        // This should fail if information about T is incorrectly cached.
+        assert_eq!(params.diagnostics.len(), 1);
+    }
+}
