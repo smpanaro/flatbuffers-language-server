@@ -2,11 +2,15 @@ use crate::server::Backend;
 use log::debug;
 use tower_lsp::lsp_types::{
     DidChangeTextDocumentParams, DidCloseTextDocumentParams, DidOpenTextDocumentParams,
-    DidSaveTextDocumentParams,
+    DidSaveTextDocumentParams, Url,
 };
 
 pub async fn handle_did_open(backend: &Backend, params: DidOpenTextDocumentParams) {
     debug!("opened: {}", params.text_document.uri.path());
+    if !is_flatbuffer_schema(&params.text_document.uri) {
+        return;
+    }
+
     backend
         .parse_and_discover(params.text_document.uri, Some(params.text_document.text))
         .await;
@@ -14,6 +18,10 @@ pub async fn handle_did_open(backend: &Backend, params: DidOpenTextDocumentParam
 
 pub async fn handle_did_change(backend: &Backend, mut params: DidChangeTextDocumentParams) {
     debug!("changed: {}", params.text_document.uri.path());
+    if !is_flatbuffer_schema(&params.text_document.uri) {
+        return;
+    }
+
     let content = params.content_changes.remove(0).text;
     backend.document_map.insert(
         params.text_document.uri.to_string(),
@@ -26,6 +34,10 @@ pub async fn handle_did_change(backend: &Backend, mut params: DidChangeTextDocum
 
 pub async fn handle_did_save(backend: &Backend, params: DidSaveTextDocumentParams) {
     debug!("saved: {}", params.text_document.uri.path());
+    if !is_flatbuffer_schema(&params.text_document.uri) {
+        return;
+    }
+
     let mut files_to_reparse = vec![params.text_document.uri.clone()];
     if let Some(includers) = backend
         .workspace
@@ -42,6 +54,10 @@ pub async fn handle_did_save(backend: &Backend, params: DidSaveTextDocumentParam
 
 pub async fn handle_did_close(backend: &Backend, params: DidCloseTextDocumentParams) {
     debug!("closed: {}", params.text_document.uri.path());
+    if !is_flatbuffer_schema(&params.text_document.uri) {
+        return;
+    }
+
     backend
         .document_map
         .remove(&params.text_document.uri.to_string());
@@ -77,4 +93,13 @@ pub async fn handle_did_close(backend: &Backend, params: DidCloseTextDocumentPar
         .client
         .publish_diagnostics(params.text_document.uri, vec![], None)
         .await;
+}
+
+// Not sure why, but we occasionally get non .fbs files.
+fn is_flatbuffer_schema(uri: &Url) -> bool {
+    uri.to_file_path().ok().map_or(false, |p| {
+        p.extension()
+            .and_then(|ext| ext.to_str())
+            .map_or(false, |ext| ext.eq_ignore_ascii_case("fbs"))
+    })
 }
