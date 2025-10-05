@@ -1,4 +1,5 @@
 use std::collections::{HashMap, HashSet};
+use std::path::{Path, PathBuf};
 
 use tower_lsp::lsp_types::{Diagnostic, DiagnosticSeverity, DiagnosticTag, Position, Range, Url};
 
@@ -45,8 +46,16 @@ pub fn analyze_unused_includes(
     diagnostics: &mut HashMap<Url, Vec<Diagnostic>>,
     file_contents: &str,
     include_graph: &HashMap<String, Vec<String>>,
+    search_paths: &[Url],
+    root_type_info: &Option<crate::symbol_table::RootTypeInfo>,
 ) {
     let mut used_types = HashSet::new();
+    if let Some(root_type) = root_type_info {
+        if root_type.location.uri == st.uri {
+            used_types.insert(root_type.type_name.clone());
+        }
+    }
+
     for symbol in st.values() {
         if symbol.info.location.uri != st.uri {
             continue;
@@ -78,7 +87,9 @@ pub fn analyze_unused_includes(
     let mut directly_required_files = HashSet::new();
     for used_type in &used_types {
         if let Some(symbol) = st.get(used_type) {
-            directly_required_files.insert(symbol.info.location.uri.to_file_path().unwrap());
+            if let Ok(path) = symbol.info.location.uri.to_file_path() {
+                directly_required_files.insert(path);
+            }
         }
     }
 
@@ -102,39 +113,74 @@ pub fn analyze_unused_includes(
         }
     }
 
+    let current_dir = st
+        .uri
+        .to_file_path()
+        .unwrap()
+        .parent()
+        .unwrap()
+        .to_path_buf();
+
     for (line_num, line) in file_contents.lines().enumerate() {
         if line.starts_with("include") {
             if let Some(start) = line.find('"') {
                 if let Some(end) = line.rfind('"') {
-                    let include_path = &line[start + 1..end];
-                    let mut absolute_path = st.uri.to_file_path().unwrap();
-                    absolute_path.pop();
-                    absolute_path.push(include_path);
+                    let include_path_str = &line[start + 1..end];
 
-                    if !required_files.contains(&absolute_path) {
-                        let range = Range {
-                            start: Position {
-                                line: line_num as u32,
-                                character: 0,
-                            },
-                            end: Position {
-                                line: line_num as u32,
-                                character: line.len() as u32,
-                            },
-                        };
-                        diagnostics
-                            .entry(st.uri.clone())
-                            .or_default()
-                            .push(Diagnostic {
-                                range,
-                                severity: Some(DiagnosticSeverity::HINT),
-                                message: format!("unused include: {}", include_path),
-                                tags: Some(vec![DiagnosticTag::UNNECESSARY]),
-                                ..Default::default()
-                            });
+                    if let Some(absolute_path) =
+                        resolve_include(&current_dir, include_path_str, search_paths)
+                    {
+                        if !required_files.contains(&absolute_path) {
+                            let range = Range {
+                                start: Position {
+                                    line: line_num as u32,
+                                    character: 0,
+                                },
+                                end: Position {
+                                    line: line_num as u32,
+                                    character: line.len() as u32,
+                                },
+                            };
+                            diagnostics
+                                .entry(st.uri.clone())
+                                .or_default()
+                                .push(Diagnostic {
+                                    range,
+                                    severity: Some(DiagnosticSeverity::HINT),
+                                    message: format!("unused include: {}", include_path_str),
+                                    tags: Some(vec![DiagnosticTag::UNNECESSARY]),
+                                    ..Default::default()
+                                });
+                        }
                     }
                 }
             }
         }
     }
+}
+
+fn resolve_include(
+    current_dir: &Path,
+    include_path: &str,
+    search_paths: &[Url],
+) -> Option<PathBuf> {
+    // 1. Check against search paths
+    for search_path_url in search_paths {
+        if let Ok(search_path) = search_path_url.to_file_path() {
+            let mut candidate = search_path;
+            candidate.push(include_path);
+            if candidate.exists() {
+                return Some(candidate);
+            }
+        }
+    }
+
+    // 2. Check relative to current file's directory
+    let mut candidate = current_dir.to_path_buf();
+    candidate.push(include_path);
+    if candidate.exists() {
+        return Some(candidate);
+    }
+
+    None
 }

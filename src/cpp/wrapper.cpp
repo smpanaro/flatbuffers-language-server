@@ -87,31 +87,9 @@ const char* join_doc_comments(const std::vector<std::string>& doc_comment, std::
     return "";
 }
 
-struct FlatbuffersParser* parse_schema(const char* schema_content, const char* filename) {
+struct FlatbuffersParser* parse_schema(const char* schema_content, const char* filename, const char **include_paths) {
     auto parser = new FlatbuffersParser();
-
-    std::vector<const char*> include_paths;
-    std::string path_str;
-    if (filename && strlen(filename) > 0) {
-        path_str = flatbuffers::StripFileName(filename);
-        include_paths.push_back(path_str.c_str());
-    }
-    // Add CWD to include paths
-    char cwd[1024];
-#ifdef _WIN32
-    if (_getcwd(cwd, sizeof(cwd)) != NULL) {
-        include_paths.push_back(cwd);
-    }
-#else
-    if (getcwd(cwd, sizeof(cwd)) != NULL) {
-        include_paths.push_back(cwd);
-    }
-#endif
-    include_paths.push_back(nullptr);
-
-    const char** paths = include_paths.empty() ? nullptr : include_paths.data();
-
-    parser->error = !parser->impl.Parse(schema_content, paths, filename ? filename : "");
+    parser->error = !parser->impl.Parse(schema_content, include_paths, filename ? filename : "");
     return parser;
 }
 

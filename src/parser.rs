@@ -7,6 +7,7 @@ use crate::symbol_table::{
 use crate::utils::parsed_type::parse_type;
 use log::{debug, error};
 use std::collections::HashMap;
+use std::ffi::c_char;
 use std::ffi::{CStr, CString};
 use tower_lsp::lsp_types::{Diagnostic, Location, Position, Range, Url};
 
@@ -16,6 +17,7 @@ pub trait Parser {
         &self,
         uri: &Url,
         content: &str,
+        search_paths: &[Url],
     ) -> (
         HashMap<Url, Vec<Diagnostic>>,
         Option<SymbolTable>,
@@ -32,6 +34,7 @@ impl Parser for FlatcFFIParser {
         &self,
         uri: &Url,
         content: &str,
+        search_paths: &[Url],
     ) -> (
         HashMap<Url, Vec<Diagnostic>>,
         Option<SymbolTable>,
@@ -44,8 +47,22 @@ impl Parser for FlatcFFIParser {
         };
         let c_filename = CString::new(uri.to_file_path().unwrap().to_str().unwrap()).unwrap();
 
+        let c_search_paths: Vec<CString> = search_paths
+            .iter()
+            .filter_map(|url| url.to_file_path().ok()) // Url -> PathBuf
+            .filter_map(|path| CString::new(path.to_str().unwrap_or("")).ok()) // PathBuf -> CString
+            .collect();
+
+        let mut c_path_ptrs: Vec<*const c_char> =
+            c_search_paths.iter().map(|s| s.as_ptr()).collect();
+        c_path_ptrs.push(std::ptr::null());
+
         unsafe {
-            let parser_ptr = ffi::parse_schema(c_content.as_ptr(), c_filename.as_ptr());
+            let parser_ptr = ffi::parse_schema(
+                c_content.as_ptr(),
+                c_filename.as_ptr(),
+                c_path_ptrs.as_mut_ptr(),
+            );
             if parser_ptr.is_null() {
                 return (HashMap::new(), None, vec![], None);
             }
@@ -53,7 +70,7 @@ impl Parser for FlatcFFIParser {
             let (diagnostics, symbol_table, included_files, root_type_info) =
                 if ffi::is_parser_success(parser_ptr) {
                     let (st, included, root_info, diags) =
-                        parse_success_case(parser_ptr, uri, content);
+                        parse_success_case(parser_ptr, uri, content, search_paths);
                     (diags, Some(st), included, root_info)
                 } else {
                     (
@@ -76,6 +93,7 @@ unsafe fn parse_success_case(
     parser_ptr: *mut ffi::FlatbuffersParser,
     uri: &Url,
     content: &str,
+    search_paths: &[Url],
 ) -> (
     SymbolTable,
     Vec<String>,
@@ -91,7 +109,14 @@ unsafe fn parse_success_case(
 
     let mut diagnostics = parse_error_messages(parser_ptr, uri, content); // warnings
     let include_graph = unsafe { build_include_graph(parser_ptr) };
-    diagnostics::semantic::analyze_unused_includes(&st, &mut diagnostics, content, &include_graph);
+    diagnostics::semantic::analyze_unused_includes(
+        &st,
+        &mut diagnostics,
+        content,
+        &include_graph,
+        search_paths,
+        &root_type_info,
+    );
     diagnostics::semantic::analyze_deprecated_fields(&st, &mut diagnostics);
 
     (st, included_files, root_type_info, diagnostics)

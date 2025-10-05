@@ -134,6 +134,17 @@ impl TestHarness {
     }
 
     pub async fn initialize_and_open(&mut self, workspace: &[(&str, &str)]) {
+        // 1. Write files to disk first so the server can see them during initialization.
+        for (name, content) in workspace {
+            let uri = self.root_uri.join(name).unwrap();
+            let path = uri.to_file_path().unwrap();
+            if let Some(parent) = path.parent() {
+                fs::create_dir_all(parent).unwrap();
+            }
+            fs::write(path, content).unwrap();
+        }
+
+        // 2. Send "initialize" request.
         let mut params = InitializeParams::default();
         params.root_uri = Some(self.root_uri.clone());
 
@@ -154,16 +165,16 @@ impl TestHarness {
         };
         assert!(res.is_ok());
 
+        // 3. Send "initialized" notification.
         let params = InitializedParams {};
         let req = Request::build("initialized")
             .params(serde_json::to_value(params).unwrap())
             .finish();
         self.send_request(req).await;
 
+        // 4. Send "didOpen" notifications for the files.
         for (name, content) in workspace {
             let uri = self.root_uri.join(name).unwrap();
-            fs::write(uri.path(), content).unwrap();
-
             let text_document = TextDocumentItem {
                 uri,
                 language_id: "flatbuffers".to_string(),

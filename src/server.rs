@@ -3,31 +3,40 @@ use crate::handlers::{
     code_action, completion, goto_definition, hover, lifecycle, references, rename,
 };
 use crate::parser::{FlatcFFIParser, Parser};
+use crate::utils::paths::{is_flatbuffer_schema, is_flatbuffer_schema_path};
 use crate::workspace::Workspace;
-use dashmap::DashMap;
+use dashmap::{DashMap, DashSet};
+use ignore::{WalkBuilder, WalkState};
 use log::{debug, error, info};
 use ropey::Rope;
 use std::collections::HashSet;
+use std::path::PathBuf;
 use std::time::Instant;
 use tokio::fs;
+use tokio::sync::RwLock;
 use tower_lsp::jsonrpc::Result;
 use tower_lsp::lsp_types::{
     CodeActionKind, CodeActionOptions, CodeActionParams, CodeActionProviderCapability,
     CodeActionResponse, CompletionOptions, CompletionParams, CompletionResponse,
-    DidChangeTextDocumentParams, DidCloseTextDocumentParams, DidOpenTextDocumentParams,
-    DidSaveTextDocumentParams, GotoDefinitionParams, GotoDefinitionResponse, Hover, HoverParams,
-    HoverProviderCapability, InitializeParams, InitializeResult, InitializedParams, Location,
-    OneOf, PrepareRenameResponse, ReferenceParams, RenameOptions, RenameParams, ServerCapabilities,
-    ServerInfo, TextDocumentPositionParams, TextDocumentSyncCapability, TextDocumentSyncKind,
-    TextDocumentSyncOptions, Url, WorkspaceEdit,
+    DidChangeTextDocumentParams, DidChangeWatchedFilesParams,
+    DidChangeWatchedFilesRegistrationOptions, DidChangeWorkspaceFoldersParams,
+    DidCloseTextDocumentParams, DidOpenTextDocumentParams, DidSaveTextDocumentParams,
+    FileSystemWatcher, GlobPattern, GotoDefinitionParams, GotoDefinitionResponse, Hover,
+    HoverParams, HoverProviderCapability, InitializeParams, InitializeResult, InitializedParams,
+    Location, OneOf, PrepareRenameResponse, ReferenceParams, Registration, RenameOptions,
+    RenameParams, ServerCapabilities, ServerInfo, TextDocumentPositionParams,
+    TextDocumentSyncCapability, TextDocumentSyncKind, TextDocumentSyncOptions, Url, WorkspaceEdit,
+    WorkspaceFoldersServerCapabilities, WorkspaceServerCapabilities,
 };
 use tower_lsp::{Client, LanguageServer};
 
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 pub struct Backend {
     pub client: Client,
     pub document_map: DashMap<String, Rope>,
     pub workspace: Workspace,
+    pub search_paths: RwLock<Vec<Url>>,
+    pub workspace_roots: DashSet<PathBuf>,
 }
 
 impl Backend {
@@ -36,7 +45,62 @@ impl Backend {
             client,
             document_map: DashMap::new(),
             workspace: Workspace::new(),
+            search_paths: RwLock::new(vec![]),
+            workspace_roots: DashSet::new(),
         }
+    }
+
+    pub async fn update_search_paths(&self) {
+        let start = Instant::now();
+        let roots: Vec<_> = self
+            .workspace_roots
+            .iter()
+            .map(|r| r.key().clone())
+            .collect();
+
+        if roots.is_empty() {
+            let mut search_paths_guard = self.search_paths.write().await;
+            *search_paths_guard = vec![];
+            return;
+        }
+
+        let search_paths = DashSet::new();
+        let mut builder = WalkBuilder::new(&roots[0]);
+        if roots.len() > 1 {
+            for root in &roots[1..] {
+                builder.add(root);
+            }
+        }
+
+        let roots_arc = std::sync::Arc::new(roots);
+        builder.build_parallel().run(|| {
+            let search_paths = &search_paths;
+            let roots = std::sync::Arc::clone(&roots_arc);
+            Box::new(move |result| {
+                if let Ok(entry) = result {
+                    if is_flatbuffer_schema_path(entry.path()) {
+                        let intermediate_paths =
+                            crate::utils::paths::get_intermediate_paths(entry.path(), &roots);
+                        for path in intermediate_paths {
+                            if let Ok(url) = Url::from_directory_path(&path) {
+                                search_paths.insert(url);
+                            }
+                        }
+                    }
+                }
+                WalkState::Continue
+            })
+        });
+
+        let search_paths: Vec<Url> = search_paths.into_iter().collect();
+        debug!(
+            "discovered include paths in {}: {:?}",
+            start.elapsed().log_str(),
+            search_paths.iter().map(|u| u.path()).collect::<Vec<_>>()
+        );
+
+        let mut search_paths_guard = self.search_paths.write().await;
+        *search_paths_guard = search_paths;
     }
 
     // TODO: Move this to workspace
@@ -78,9 +142,11 @@ impl Backend {
             };
 
             let start_time = Instant::now();
+            let search_paths_guard = self.search_paths.read().await;
+
             // FlatcFFIParser is stateless.
             let (diagnostics_map, symbol_table, included_files, root_type_info) =
-                FlatcFFIParser.parse(&uri, &content);
+                FlatcFFIParser.parse(&uri, &content, &search_paths_guard);
             let elapsed_time = start_time.elapsed();
             debug!("parsed in {}: {}", elapsed_time.log_str(), uri.path());
 
@@ -131,8 +197,9 @@ impl Backend {
 
 #[tower_lsp::async_trait]
 impl LanguageServer for Backend {
-    async fn initialize(&self, _: InitializeParams) -> Result<InitializeResult> {
+    async fn initialize(&self, params: InitializeParams) -> Result<InitializeResult> {
         info!("Initializing server...");
+        lifecycle::handle_initialize(&self, params).await;
 
         Ok(InitializeResult {
             server_info: Some(ServerInfo {
@@ -149,6 +216,17 @@ impl LanguageServer for Backend {
                         save: Some(true.into()),
                     },
                 )),
+                workspace: Some(WorkspaceServerCapabilities {
+                    workspace_folders: Some(WorkspaceFoldersServerCapabilities {
+                        supported: Some(true),
+                        change_notifications: Some(OneOf::Right(
+                            "flatbuffers-language-server-workspace-folders".to_string(),
+                        )),
+                    }),
+                    // workspace/didChangeWatchedFiles is more robust since
+                    // it handles changes outside of the IDE.
+                    file_operations: None,
+                }),
                 hover_provider: Some(HoverProviderCapability::Simple(true)),
                 definition_provider: Some(OneOf::Left(true)),
                 references_provider: Some(OneOf::Left(true)),
@@ -181,6 +259,23 @@ impl LanguageServer for Backend {
 
     async fn initialized(&self, _: InitializedParams) {
         info!("Server initialized!");
+
+        self.client
+            .register_capability(vec![Registration {
+                id: "fbs-watcher".to_string(),
+                method: "workspace/didChangeWatchedFiles".to_string(),
+                register_options: Some(
+                    serde_json::to_value(DidChangeWatchedFilesRegistrationOptions {
+                        watchers: vec![FileSystemWatcher {
+                            glob_pattern: GlobPattern::String("**/*.fbs".to_string()),
+                            kind: None, // None means all changes
+                        }],
+                    })
+                    .unwrap(),
+                ),
+            }])
+            .await
+            .unwrap();
     }
 
     async fn shutdown(&self) -> Result<()> {
@@ -202,6 +297,29 @@ impl LanguageServer for Backend {
 
     async fn did_save(&self, params: DidSaveTextDocumentParams) {
         lifecycle::handle_did_save(self, params).await;
+    }
+
+    async fn did_change_watched_files(&self, params: DidChangeWatchedFilesParams) {
+        // What about folders? Watching files is sufficient.
+        // New folder created     : empty so can't have .fbs files.
+        // Existing folder deleted: if it has .fbs they will show up as deleted.
+        // Existing folder renamed: if it has .fbs they will show up as deleted
+        //                          and created in the new location.
+        let should_update = params
+            .changes
+            .iter()
+            .any(|event| is_flatbuffer_schema(&event.uri));
+
+        if should_update {
+            info!("fbs file changed, updating search paths...");
+            // In theory we could avoid a full scan, but
+            // these events are rare enough that we can stay simple.
+            self.update_search_paths().await;
+        }
+    }
+
+    async fn did_change_workspace_folders(&self, params: DidChangeWorkspaceFoldersParams) {
+        lifecycle::handle_did_change_workspace_folders(self, params).await
     }
 
     async fn hover(&self, params: HoverParams) -> Result<Option<Hover>> {

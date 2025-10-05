@@ -1,12 +1,13 @@
-use crate::server::Backend;
-use log::debug;
+use crate::{server::Backend, utils::paths::is_flatbuffer_schema};
+use log::{debug, info};
 use tower_lsp::lsp_types::{
-    DidChangeTextDocumentParams, DidCloseTextDocumentParams, DidOpenTextDocumentParams,
-    DidSaveTextDocumentParams, Url,
+    DidChangeTextDocumentParams, DidChangeWorkspaceFoldersParams, DidCloseTextDocumentParams,
+    DidOpenTextDocumentParams, DidSaveTextDocumentParams, InitializeParams, Url,
 };
 
 pub async fn handle_did_open(backend: &Backend, params: DidOpenTextDocumentParams) {
     debug!("opened: {}", params.text_document.uri.path());
+    // Not sure why, but we occasionally get non .fbs files.
     if !is_flatbuffer_schema(&params.text_document.uri) {
         return;
     }
@@ -95,11 +96,58 @@ pub async fn handle_did_close(backend: &Backend, params: DidCloseTextDocumentPar
         .await;
 }
 
-// Not sure why, but we occasionally get non .fbs files.
-fn is_flatbuffer_schema(uri: &Url) -> bool {
-    uri.to_file_path().ok().map_or(false, |p| {
-        p.extension()
-            .and_then(|ext| ext.to_str())
-            .map_or(false, |ext| ext.eq_ignore_ascii_case("fbs"))
+pub async fn handle_initialize(backend: &Backend, params: InitializeParams) {
+    if let Some(folders) = &params.workspace_folders {
+        for folder in folders {
+            if let Ok(path) = folder.uri.to_file_path() {
+                backend.workspace_roots.insert(path);
+            }
+        }
+    }
+    if let Some(root_uri) = get_root_uri(&params) {
+        if let Ok(path) = root_uri.to_file_path() {
+            backend.workspace_roots.insert(path);
+        }
+    }
+
+    let roots: Vec<_> = backend
+        .workspace_roots
+        .iter()
+        .map(|r| r.key().clone())
+        .collect();
+    info!("initial workspace roots: {:?}", roots);
+
+    backend.update_search_paths().await;
+}
+
+pub async fn handle_did_change_workspace_folders(
+    backend: &Backend,
+    params: DidChangeWorkspaceFoldersParams,
+) {
+    for folder in params.event.removed {
+        if let Ok(path) = folder.uri.to_file_path() {
+            backend.workspace_roots.remove(&path);
+            info!("removed root folder: {}", path.to_string_lossy());
+        }
+    }
+
+    for folder in params.event.added {
+        if let Ok(path) = folder.uri.to_file_path() {
+            backend.workspace_roots.insert(path.clone());
+            info!("added root folder: {}", path.to_string_lossy());
+        }
+    }
+
+    backend.update_search_paths().await;
+}
+
+#[allow(deprecated)]
+fn get_root_uri(params: &InitializeParams) -> Option<Url> {
+    // root_path is deprecated in favor of root_uri
+    params.root_uri.clone().or_else(|| {
+        params
+            .root_path
+            .as_ref()
+            .and_then(|p| Url::from_file_path(p).ok())
     })
 }

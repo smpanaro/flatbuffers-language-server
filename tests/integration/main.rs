@@ -6,6 +6,7 @@ mod diagnostics;
 mod harness;
 mod helpers;
 mod hover;
+mod include_paths;
 mod references;
 mod rename;
 mod scenarios;

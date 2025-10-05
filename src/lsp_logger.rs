@@ -33,6 +33,11 @@ impl Log for LspLogger {
             let message_type = level_to_message_type(record.level());
             let message = format!("[{}] {}", record.target(), record.args());
 
+            // Silence noisy 3rd party crates.
+            if record.target().contains("ignore") || record.target().contains("glob") {
+                return;
+            }
+
             // Spawn a task to send the log message to the client
             tokio::spawn(async move {
                 client.log_message(message_type, message).await;

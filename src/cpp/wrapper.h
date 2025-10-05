@@ -75,7 +75,7 @@ struct RootTypeDefinitionInfo {
 };
 
 // Parses a schema and returns a pointer to the Parser object.
-struct FlatbuffersParser* parse_schema(const char* schema_content, const char* filename);
+struct FlatbuffersParser* parse_schema(const char* schema_content, const char* filename, const char **include_paths);
 
 // Deletes a parser object.
 void delete_parser(struct FlatbuffersParser* parser);
