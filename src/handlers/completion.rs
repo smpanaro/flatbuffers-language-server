@@ -1,7 +1,8 @@
 use crate::analysis::find_enclosing_table;
+use crate::ext::duration::DurationFormat;
 use crate::server::Backend;
 use crate::symbol_table::SymbolKind;
-use log::info;
+use log::debug;
 use once_cell::sync::Lazy;
 use regex::Regex;
 use ropey::Rope;
@@ -476,9 +477,9 @@ pub async fn handle_completion(
         };
 
     let elapsed = start.elapsed();
-    info!(
-        "completion in {}ms: {} L{}C{} -> {} items",
-        elapsed.as_millis(),
+    debug!(
+        "completion in {}: {} L{}C{} -> {} items",
+        elapsed.log_str(),
         &uri.path(),
         position.line + 1,
         position.character + 1,

@@ -1,10 +1,11 @@
+use crate::ext::duration::DurationFormat;
 use crate::handlers::{
     code_action, completion, goto_definition, hover, lifecycle, references, rename,
 };
 use crate::parser::{FlatcFFIParser, Parser};
 use crate::workspace::Workspace;
 use dashmap::DashMap;
-use log::{error, info};
+use log::{debug, error, info};
 use ropey::Rope;
 use std::collections::HashSet;
 use std::time::Instant;
@@ -72,7 +73,7 @@ impl Backend {
                         text
                     }
                     Err(e) => {
-                        error!("Failed to read file {}: {}", uri, e);
+                        error!("failed to read file {}: {}", uri.path(), e);
                         continue;
                     }
                 }
@@ -82,7 +83,7 @@ impl Backend {
             let (diagnostics_map, symbol_table, included_files, root_type_info) =
                 self.parser.parse(&uri, &content);
             let elapsed_time = start_time.elapsed();
-            error!("Parsed in {}ms: {}", elapsed_time.as_millis(), uri);
+            debug!("parsed in {}: {}", elapsed_time.log_str(), uri.path());
 
             if let Some(st) = symbol_table {
                 self.workspace
@@ -103,7 +104,7 @@ impl Backend {
                         }
                     }
                     Err(_) => {
-                        error!("Invalid include path: {}", included_path_str);
+                        error!("invalid include path: {}", included_path_str);
                     }
                 }
             }
@@ -133,10 +134,11 @@ impl Backend {
 impl LanguageServer for Backend {
     async fn initialize(&self, _: InitializeParams) -> Result<InitializeResult> {
         info!("Initializing server...");
+
         Ok(InitializeResult {
             server_info: Some(ServerInfo {
                 name: "flatbuffers-language-server".to_string(),
-                version: Some("0.1.0".to_string()),
+                version: Some(env!("CARGO_PKG_VERSION").to_string()),
             }),
             capabilities: ServerCapabilities {
                 text_document_sync: Some(TextDocumentSyncCapability::Options(

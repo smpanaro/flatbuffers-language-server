@@ -1,6 +1,7 @@
 use crate::analysis::resolve_symbol_at;
+use crate::ext::duration::DurationFormat;
 use crate::server::Backend;
-use log::info;
+use log::debug;
 use std::collections::HashMap;
 use std::time::Instant;
 use tower_lsp::jsonrpc::Result;
@@ -28,7 +29,6 @@ pub async fn prepare_rename(
 }
 
 pub async fn rename(backend: &Backend, params: RenameParams) -> Result<Option<WorkspaceEdit>> {
-    info!("rename");
     let start = Instant::now();
     let uri = &params.text_document_position.text_document.uri;
     let position = params.text_document_position.position;
@@ -57,9 +57,9 @@ pub async fn rename(backend: &Backend, params: RenameParams) -> Result<Option<Wo
     }
 
     let elapsed = start.elapsed();
-    info!(
-        "rename in {}ms: {} L{}C{} -> {} refs",
-        elapsed.as_millis(),
+    debug!(
+        "rename in {}: {} L{}C{} -> {} refs",
+        elapsed.log_str(),
         &uri.path(),
         position.line + 1,
         position.character + 1,

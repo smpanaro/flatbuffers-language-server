@@ -1,7 +1,8 @@
 use crate::analysis::resolve_symbol_at;
+use crate::ext::duration::DurationFormat;
 use crate::server::Backend;
 use crate::symbol_table;
-use log::info;
+use log::debug;
 use std::time::Instant;
 use tower_lsp::jsonrpc::Result;
 use tower_lsp::lsp_types::{Location, ReferenceParams};
@@ -80,9 +81,9 @@ pub async fn handle_references(
     }
 
     let elapsed = start.elapsed();
-    info!(
-        "references in {}ms: {} L{}C{} -> {} refs",
-        elapsed.as_millis(),
+    debug!(
+        "references in {}: {} L{}C{} -> {} refs",
+        elapsed.log_str(),
         &uri.path(),
         position.line + 1,
         position.character + 1,

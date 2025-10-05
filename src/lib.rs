@@ -29,6 +29,6 @@ pub async fn run() {
         Backend::new(client)
     });
 
-    info!("Starting server...");
+    info!("Starting server v{}...", env!("CARGO_PKG_VERSION"));
     Server::new(stdin, stdout, socket).serve(service).await;
 }

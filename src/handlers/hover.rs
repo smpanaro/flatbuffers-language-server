@@ -1,6 +1,7 @@
 use crate::analysis::resolve_symbol_at;
+use crate::ext::duration::DurationFormat;
 use crate::server::Backend;
-use log::info;
+use log::debug;
 use ropey::Rope;
 use std::time::Instant;
 use tower_lsp::jsonrpc::Result;
@@ -88,9 +89,9 @@ pub async fn handle_hover(backend: &Backend, params: HoverParams) -> Result<Opti
     }
 
     let elapsed = start.elapsed();
-    info!(
-        "hover in {}ms: {} L{}C{}",
-        elapsed.as_millis(),
+    debug!(
+        "hover in {}: {} L{}C{}",
+        elapsed.log_str(),
         &uri.path(),
         pos.line + 1,
         pos.character + 1

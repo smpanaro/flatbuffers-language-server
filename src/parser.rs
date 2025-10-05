@@ -105,7 +105,7 @@ unsafe fn parse_error_messages(
 ) -> HashMap<Url, Vec<Diagnostic>> {
     let error_str_ptr = ffi::get_parser_error(parser_ptr);
     if let Some(error_str) = c_str_to_optional_string(error_str_ptr).take_if(|s| !s.is_empty()) {
-        debug!("flatc FFI error parsing {}: {}", uri.to_string(), error_str);
+        debug!("flatc error parsing {}: {}", uri.path(), error_str);
         diagnostics::generate_diagnostics_from_error_string(&error_str, content)
     } else {
         HashMap::new()

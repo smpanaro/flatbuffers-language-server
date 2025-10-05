@@ -6,14 +6,14 @@ use tower_lsp::lsp_types::{
 };
 
 pub async fn handle_did_open(backend: &Backend, params: DidOpenTextDocumentParams) {
-    debug!("Opened: {}", params.text_document.uri);
+    debug!("opened: {}", params.text_document.uri.path());
     backend
         .parse_and_discover(params.text_document.uri, Some(params.text_document.text))
         .await;
 }
 
 pub async fn handle_did_change(backend: &Backend, mut params: DidChangeTextDocumentParams) {
-    debug!("Changed: {}", params.text_document.uri);
+    debug!("changed: {}", params.text_document.uri.path());
     let content = params.content_changes.remove(0).text;
     backend.document_map.insert(
         params.text_document.uri.to_string(),
@@ -25,7 +25,7 @@ pub async fn handle_did_change(backend: &Backend, mut params: DidChangeTextDocum
 }
 
 pub async fn handle_did_save(backend: &Backend, params: DidSaveTextDocumentParams) {
-    debug!("Saved: {}", params.text_document.uri);
+    debug!("saved: {}", params.text_document.uri.path());
     let mut files_to_reparse = vec![params.text_document.uri.clone()];
     if let Some(includers) = backend
         .workspace
@@ -41,7 +41,7 @@ pub async fn handle_did_save(backend: &Backend, params: DidSaveTextDocumentParam
 }
 
 pub async fn handle_did_close(backend: &Backend, params: DidCloseTextDocumentParams) {
-    debug!("closed: {}", params.text_document.uri);
+    debug!("closed: {}", params.text_document.uri.path());
     backend
         .document_map
         .remove(&params.text_document.uri.to_string());
