@@ -1,3 +1,4 @@
+use crate::diagnostics::codes::DiagnosticCode;
 use crate::diagnostics::ErrorDiagnosticHandler;
 use log::error;
 use once_cell::sync::Lazy;
@@ -137,7 +138,7 @@ impl ErrorDiagnosticHandler for ExpectingTokenHandler {
                     message,
                     related_information: Some(related_information),
                     code: Some(tower_lsp::lsp_types::NumberOrString::String(
-                        "expecting-token".to_string(),
+                        DiagnosticCode::ExpectingToken.as_str().to_string(),
                     )),
                     data: Some(serde_json::json!({ "expected": expected_token, "eol": is_eol })),
                     ..Default::default()

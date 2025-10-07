@@ -4,17 +4,17 @@ expression: redacted_response
 ---
 [
   {
-    "title": "Qualify type as `MyNamespace.MyTable` and import from `definitions.fbs`",
+    "title": "Qualify type as `MyNamespace.MyTable`",
     "kind": "quickfix",
     "diagnostics": [
       {
         "range": {
           "start": {
-            "line": 1,
+            "line": 3,
             "character": 7
           },
           "end": {
-            "line": 1,
+            "line": 3,
             "character": 14
           }
         },
@@ -32,24 +32,11 @@ expression: redacted_response
           {
             "range": {
               "start": {
-                "line": 0,
-                "character": 0
-              },
-              "end": {
-                "line": 0,
-                "character": 0
-              }
-            },
-            "newText": "include \"definitions.fbs\";\n\n"
-          },
-          {
-            "range": {
-              "start": {
-                "line": 1,
+                "line": 3,
                 "character": 7
               },
               "end": {
-                "line": 1,
+                "line": 3,
                 "character": 14
               }
             },
@@ -60,17 +47,17 @@ expression: redacted_response
     }
   },
   {
-    "title": "Set file namespace to `MyNamespace` and import from `definitions.fbs`",
+    "title": "Set file namespace to `MyNamespace`",
     "kind": "quickfix",
     "diagnostics": [
       {
         "range": {
           "start": {
-            "line": 1,
+            "line": 3,
             "character": 7
           },
           "end": {
-            "line": 1,
+            "line": 3,
             "character": 14
           }
         },
@@ -88,15 +75,15 @@ expression: redacted_response
           {
             "range": {
               "start": {
-                "line": 0,
+                "line": 1,
                 "character": 0
               },
               "end": {
-                "line": 0,
+                "line": 1,
                 "character": 0
               }
             },
-            "newText": "include \"definitions.fbs\";\n\nnamespace MyNamespace;\n\n"
+            "newText": "\nnamespace MyNamespace;\n"
           }
         ]
       }

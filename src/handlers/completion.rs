@@ -199,11 +199,7 @@ fn handle_field_type_completion(backend: &Backend, line: &str) -> Option<Complet
         }
 
         let base_name = &symbol.info.name;
-        let qualified_name = if symbol.info.namespace.is_empty() {
-            base_name.clone()
-        } else {
-            format!("{}.{}", symbol.info.namespace.join("."), base_name)
-        };
+        let qualified_name = symbol.info.qualified_name();
 
         let (is_match, sort_text) = field_sort_text(
             field_name,
@@ -357,11 +353,7 @@ fn handle_root_type_completion(backend: &Backend, line: &str) -> Option<Completi
         let symbol = entry.value();
         if let SymbolKind::Table(_) = &symbol.kind {
             let base_name = &symbol.info.name;
-            let qualified_name = if symbol.info.namespace.is_empty() {
-                base_name.clone()
-            } else {
-                format!("{}.{}", symbol.info.namespace.join("."), base_name)
-            };
+            let qualified_name = symbol.info.qualified_name();
 
             if qualified_name.starts_with(partial_text) {
                 items.push(CompletionItem {

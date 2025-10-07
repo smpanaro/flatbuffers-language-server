@@ -1,6 +1,7 @@
 use std::collections::HashMap;
 use tower_lsp::lsp_types::{Diagnostic, Url};
 
+pub mod codes;
 pub mod duplicate_definition;
 pub mod expecting_token;
 pub mod generic;

@@ -83,11 +83,119 @@ table MyTable {
 
 #[tokio::test]
 async fn import_undefined_type() {
-    let definition_fixture = r#"
-namespace MyNamespace;
+    let definition_fixture = r#"namespace MyNamespace;
 table MyTable {}
 "#;
-    let schema_fixture = r#"
+    let schema_fixture = r#"table T {
+    f: MyTable;
+}
+"#;
+    let mut harness = TestHarness::new();
+    let response = get_code_actions_for_workspace(
+        &mut harness,
+        &[
+            ("definitions.fbs", definition_fixture),
+            ("schema.fbs", schema_fixture),
+        ],
+        "schema.fbs",
+        "type referenced but not defined",
+    )
+    .await;
+
+    let redacted_response = response.replace(&harness.root_uri.to_string(), "[ROOT_URI]/");
+    assert_snapshot!(redacted_response);
+}
+
+#[tokio::test]
+async fn import_undefined_type_matching_namespace() {
+    let definition_fixture = r#"namespace MyNamespace;
+
+table MyTable {}
+"#;
+    let schema_fixture = r#"namespace MyNamespace;
+
+table T {
+    f: MyTable;
+}
+"#;
+    let mut harness = TestHarness::new();
+    let response = get_code_actions_for_workspace(
+        &mut harness,
+        &[
+            ("definitions.fbs", definition_fixture),
+            ("schema.fbs", schema_fixture),
+        ],
+        "schema.fbs",
+        "type referenced but not defined",
+    )
+    .await;
+
+    let redacted_response = response.replace(&harness.root_uri.to_string(), "[ROOT_URI]/");
+    assert_snapshot!(redacted_response);
+}
+
+#[tokio::test]
+async fn import_qualified_undefined_type() {
+    let definition_fixture = r#"namespace MyNamespace;
+
+table MyTable {}
+"#;
+    let schema_fixture = r#"table T {
+    f: MyNamespace.MyTable;
+}
+"#;
+    let mut harness = TestHarness::new();
+    let response = get_code_actions_for_workspace(
+        &mut harness,
+        &[
+            ("definitions.fbs", definition_fixture),
+            ("schema.fbs", schema_fixture),
+        ],
+        "schema.fbs",
+        "type referenced but not defined",
+    )
+    .await;
+
+    let redacted_response = response.replace(&harness.root_uri.to_string(), "[ROOT_URI]/");
+    assert_snapshot!(redacted_response);
+}
+
+#[tokio::test]
+async fn import_undefined_type_with_existing_namespace() {
+    let definition_fixture = r#"namespace MyNamespace;
+
+table MyTable {}
+"#;
+    let schema_fixture = r#"namespace OtherNamespace;
+
+table T {
+    f: MyTable;
+}
+"#;
+    let mut harness = TestHarness::new();
+    let response = get_code_actions_for_workspace(
+        &mut harness,
+        &[
+            ("definitions.fbs", definition_fixture),
+            ("schema.fbs", schema_fixture),
+        ],
+        "schema.fbs",
+        "type referenced but not defined",
+    )
+    .await;
+
+    let redacted_response = response.replace(&harness.root_uri.to_string(), "[ROOT_URI]/");
+    assert_snapshot!(redacted_response);
+}
+
+#[tokio::test]
+async fn import_undefined_type_already_included() {
+    let definition_fixture = r#"namespace MyNamespace;
+
+table MyTable {}
+"#;
+    let schema_fixture = r#"include "definitions.fbs";
+
 table T {
     f: MyTable;
 }

@@ -308,3 +308,13 @@ impl From<&SymbolKind> for CompletionItemKind {
         }
     }
 }
+
+impl SymbolInfo {
+    pub fn qualified_name(&self) -> String {
+        if self.namespace.is_empty() {
+            self.name.clone()
+        } else {
+            format!("{}.{}", self.namespace.join("."), self.name)
+        }
+    }
+}

@@ -109,7 +109,7 @@ impl Backend {
         let mut parsed_files = HashSet::new();
         let mut all_diagnostics = std::collections::HashMap::new();
 
-        let old_included_files = self
+        let old_included_files: Vec<Url> = self
             .workspace
             .file_includes
             .get(&initial_uri)
@@ -177,10 +177,8 @@ impl Backend {
 
         let mut files_to_update = HashSet::new();
         files_to_update.insert(initial_uri);
-        for path in old_included_files {
-            if let Ok(uri) = Url::from_file_path(&path) {
-                files_to_update.insert(uri);
-            }
+        for uri in old_included_files {
+            files_to_update.insert(uri);
         }
         for uri in parsed_files {
             files_to_update.insert(uri);

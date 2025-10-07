@@ -13,7 +13,7 @@ pub struct Workspace {
     /// Map from file URI to the list of symbol keys defined in that file.
     pub file_definitions: DashMap<Url, Vec<String>>,
     /// Map from file URI to the list of files it includes.
-    pub file_includes: DashMap<Url, Vec<String>>,
+    pub file_includes: DashMap<Url, Vec<Url>>,
     /// Map from file URI to the list of files that include it.
     pub file_included_by: DashMap<Url, Vec<Url>>,
     /// Map from file URI to the root type defined in that file.
@@ -254,26 +254,26 @@ impl Workspace {
 
     pub fn update_includes(&self, uri: &Url, included_files: Vec<String>) {
         if let Some((_, old_included_files)) = self.file_includes.remove(uri) {
-            for old_included_file in old_included_files {
-                if let Ok(old_included_uri) = Url::from_file_path(&old_included_file) {
-                    if let Some(mut included_by) = self.file_included_by.get_mut(&old_included_uri)
-                    {
-                        included_by.retain(|x| x != uri);
-                    }
+            for old_included_uri in old_included_files {
+                if let Some(mut included_by) = self.file_included_by.get_mut(&old_included_uri) {
+                    included_by.retain(|x| x != uri);
                 }
             }
         }
 
-        for included_file in &included_files {
-            if let Ok(included_uri) = Url::from_file_path(included_file) {
-                self.file_included_by
-                    .entry(included_uri)
-                    .or_default()
-                    .push(uri.clone());
-            }
+        let included_uris: Vec<Url> = included_files
+            .iter()
+            .filter_map(|path| Url::from_file_path(path).ok())
+            .collect();
+
+        for included_uri in &included_uris {
+            self.file_included_by
+                .entry(included_uri.clone())
+                .or_default()
+                .push(uri.clone());
         }
 
-        self.file_includes.insert(uri.clone(), included_files);
+        self.file_includes.insert(uri.clone(), included_uris);
     }
 }
 

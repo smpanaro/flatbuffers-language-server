@@ -1,3 +1,4 @@
+use crate::diagnostics::codes::DiagnosticCode;
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 
@@ -147,6 +148,9 @@ pub fn analyze_unused_includes(
                                 .push(Diagnostic {
                                     range,
                                     severity: Some(DiagnosticSeverity::HINT),
+                                    code: Some(tower_lsp::lsp_types::NumberOrString::String(
+                                        DiagnosticCode::UnusedInclude.as_str().to_string(),
+                                    )),
                                     message: format!("unused include: {}", include_path_str),
                                     tags: Some(vec![DiagnosticTag::UNNECESSARY]),
                                     ..Default::default()

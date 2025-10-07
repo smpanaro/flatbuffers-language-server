@@ -1,5 +1,6 @@
 use std::str::FromStr;
 
+use crate::diagnostics::codes::DiagnosticCode;
 use crate::diagnostics::ErrorDiagnosticHandler;
 use heck::ToSnakeCase;
 use log::error;
@@ -58,7 +59,9 @@ impl ErrorDiagnosticHandler for SnakeCaseWarningHandler {
             Diagnostic {
                 range,
                 severity: Some(DiagnosticSeverity::WARNING),
-                code: Some(NumberOrString::String("non_snake_case".to_string())),
+                code: Some(NumberOrString::String(
+                    DiagnosticCode::NonSnakeCase.as_str().to_string(),
+                )),
                 code_description: Url::from_str("https://flatbuffers.dev/schema/#style-guide")
                     .map(|u| CodeDescription { href: u })
                     .ok(),

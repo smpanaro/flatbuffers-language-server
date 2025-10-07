@@ -102,15 +102,7 @@ pub fn resolve_symbol_at(
 
     // Default case: the symbol at cursor is the target.
     let range = symbol_at_cursor.info.location.range;
-    let qualified_name = if symbol_at_cursor.info.namespace.is_empty() {
-        symbol_at_cursor.info.name.clone()
-    } else {
-        format!(
-            "{}.{}",
-            symbol_at_cursor.info.namespace.join("."),
-            symbol_at_cursor.info.name
-        )
-    };
+    let qualified_name = symbol_at_cursor.info.qualified_name();
     Some(ResolvedSymbol {
         target: symbol_at_cursor,
         range,

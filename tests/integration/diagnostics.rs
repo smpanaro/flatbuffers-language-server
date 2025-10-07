@@ -174,7 +174,7 @@ table Foo {
         .and_then(|c| c.get(&schema_uri).cloned())
         .unwrap();
     assert_eq!(changes.len(), 1);
-    assert_eq!(changes[0].new_text, "include \"included.fbs\";\n");
+    assert_eq!(changes[0].new_text, "include \"included.fbs\";\n\n");
     assert_eq!(
         changes[0].range,
         Range::new(Position::new(0, 0), Position::new(0, 0))

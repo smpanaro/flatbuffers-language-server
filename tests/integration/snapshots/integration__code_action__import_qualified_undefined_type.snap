@@ -4,26 +4,26 @@ expression: redacted_response
 ---
 [
   {
-    "title": "Remove unused include",
+    "title": "Import `MyTable` from `definitions.fbs`",
     "kind": "quickfix",
     "diagnostics": [
       {
         "range": {
           "start": {
             "line": 1,
-            "character": 0
+            "character": 7
           },
           "end": {
             "line": 1,
-            "character": 39
+            "character": 26
           }
         },
-        "severity": 4,
-        "code": "unused-include",
-        "message": "unused include: other.fbs",
-        "tags": [
-          1
-        ]
+        "severity": 1,
+        "code": "undefined-type",
+        "message": "type referenced but not defined (check namespace): MyNamespace.MyTable",
+        "data": {
+          "type_name": "MyNamespace.MyTable"
+        }
       }
     ],
     "edit": {
@@ -32,15 +32,15 @@ expression: redacted_response
           {
             "range": {
               "start": {
-                "line": 1,
+                "line": 0,
                 "character": 0
               },
               "end": {
-                "line": 2,
+                "line": 0,
                 "character": 0
               }
             },
-            "newText": ""
+            "newText": "include \"definitions.fbs\";\n\n"
           }
         ]
       }
