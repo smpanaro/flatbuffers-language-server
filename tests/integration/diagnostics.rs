@@ -546,7 +546,6 @@ table MyTable { furryWombat:string; }"#;
 }
 
 #[tokio::test]
-#[ignore = "Known bug."]
 async fn undefined_type_in_included_file() {
     let included = r#"
 table Pen {}
@@ -568,7 +567,8 @@ root_type Pen;
     // 3 calls: 2 for opening schema.fbs (itself + included); 1 for opening included.fbs
     let included_uri = harness.root_uri.join("included.fbs").unwrap();
     let mut diagnostics = vec![];
-    for _ in 0..4 {
+    let mut other_diagnostics_count = 0;
+    for _ in 0..3 {
         let param = harness
             .notification::<notification::PublishDiagnostics>()
             .await;
@@ -577,8 +577,62 @@ root_type Pen;
         } else {
             // schema.fbs itself has no errors.
             assert!(param.diagnostics.is_empty());
+            other_diagnostics_count += 1;
         }
     }
     // include.fbs is parsed twice and should emit the same diagnostic twice.
     assert_eq!(diagnostics.len(), 2);
+    assert_eq!(other_diagnostics_count, 1);
+
+    for d in diagnostics {
+        assert_eq!(d.len(), 1);
+        assert_eq!(d[0].range.start.character, 11);
+        assert_eq!(d[0].range.end.character, 16);
+    }
+}
+
+#[tokio::test]
+async fn undefined_vector_type_in_included_file() {
+    let included = r#"
+table Pen {}
+
+table Ink {
+    brand: [Brand]; // undefined
+}
+"#;
+    let main = r#"
+include "included.fbs";
+root_type Pen;
+"#;
+
+    let mut harness = TestHarness::new();
+    harness
+        .initialize_and_open(&[("schema.fbs", main), ("included.fbs", included)])
+        .await;
+
+    // 3 calls: 2 for opening schema.fbs (itself + included); 1 for opening included.fbs
+    let included_uri = harness.root_uri.join("included.fbs").unwrap();
+    let mut diagnostics = vec![];
+    let mut other_diagnostics_count = 0;
+    for _ in 0..3 {
+        let param = harness
+            .notification::<notification::PublishDiagnostics>()
+            .await;
+        if param.uri == included_uri {
+            diagnostics.push(param.diagnostics);
+        } else {
+            // schema.fbs itself has no errors.
+            assert!(param.diagnostics.is_empty());
+            other_diagnostics_count += 1;
+        }
+    }
+    // include.fbs is parsed twice and should emit the same diagnostic twice.
+    assert_eq!(diagnostics.len(), 2);
+    assert_eq!(other_diagnostics_count, 1);
+
+    for d in diagnostics {
+        assert_eq!(d.len(), 1);
+        assert_eq!(d[0].range.start.character, 12);
+        assert_eq!(d[0].range.end.character, 17);
+    }
 }

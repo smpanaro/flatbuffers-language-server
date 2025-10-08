@@ -2309,8 +2309,11 @@ StructDef *Parser::LookupCreateStruct(const std::string &name,
       structs_.Add(name, struct_def);
       struct_def->name = name;
       struct_def->defined_namespace = current_namespace_;
+      SourcePosition name_end = PrevSourcePosition();
+      SourcePosition name_start(name_end.line, name_end.col - name.length());
       struct_def->original_location.reset(
-          new std::string(file_being_parsed_ + ":" + NumToString(line_)));
+          new std::string(file_being_parsed_ + ":" + NumToString(name_start.line) + ":" +
+              NumToString(name_start.col) + "-" + NumToString(name_end.line) + ":" + NumToString(name_end.col)));
     }
   }
   return struct_def;
