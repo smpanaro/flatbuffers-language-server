@@ -1,5 +1,6 @@
 use crate::diagnostics::codes::DiagnosticCode;
 use std::collections::{HashMap, HashSet};
+use std::fs;
 use std::path::{Path, PathBuf};
 
 use tower_lsp::lsp_types::{Diagnostic, DiagnosticSeverity, DiagnosticTag, Position, Range, Url};
@@ -89,7 +90,9 @@ pub fn analyze_unused_includes(
     for used_type in &used_types {
         if let Some(symbol) = st.get(used_type) {
             if let Ok(path) = symbol.info.location.uri.to_file_path() {
-                directly_required_files.insert(path);
+                if let Some(canonical) = fs::canonicalize(path).ok() {
+                    directly_required_files.insert(canonical);
+                }
             }
         }
     }
@@ -107,9 +110,11 @@ pub fn analyze_unused_includes(
 
         if let Some(includes) = include_graph.get(file.to_str().unwrap()) {
             for include in includes {
-                let mut path = std::path::PathBuf::new();
-                path.push(include);
-                queue.push(path);
+                if let Some(canonical) = fs::canonicalize(include).ok() {
+                    let mut path = std::path::PathBuf::new();
+                    path.push(canonical);
+                    queue.push(path);
+                }
             }
         }
     }
@@ -123,41 +128,38 @@ pub fn analyze_unused_includes(
         .to_path_buf();
 
     for (line_num, line) in file_contents.lines().enumerate() {
-        if line.starts_with("include") {
-            if let Some(start) = line.find('"') {
-                if let Some(end) = line.rfind('"') {
-                    let include_path_str = &line[start + 1..end];
+        if !line.trim().starts_with("include") {
+            continue;
+        }
+        let Some(include_path) = line.split("\"").nth(1) else {
+            continue;
+        };
 
-                    if let Some(absolute_path) =
-                        resolve_include(&current_dir, include_path_str, search_paths)
-                    {
-                        if !required_files.contains(&absolute_path) {
-                            let range = Range {
-                                start: Position {
-                                    line: line_num as u32,
-                                    character: 0,
-                                },
-                                end: Position {
-                                    line: line_num as u32,
-                                    character: line.len() as u32,
-                                },
-                            };
-                            diagnostics
-                                .entry(st.uri.clone())
-                                .or_default()
-                                .push(Diagnostic {
-                                    range,
-                                    severity: Some(DiagnosticSeverity::HINT),
-                                    code: Some(tower_lsp::lsp_types::NumberOrString::String(
-                                        DiagnosticCode::UnusedInclude.as_str().to_string(),
-                                    )),
-                                    message: format!("unused include: {}", include_path_str),
-                                    tags: Some(vec![DiagnosticTag::UNNECESSARY]),
-                                    ..Default::default()
-                                });
-                        }
-                    }
-                }
+        if let Some(absolute_path) = resolve_include(&current_dir, include_path, search_paths) {
+            if !required_files.contains(&absolute_path) {
+                let range = Range {
+                    start: Position {
+                        line: line_num as u32,
+                        character: 0,
+                    },
+                    end: Position {
+                        line: line_num as u32,
+                        character: line.len() as u32,
+                    },
+                };
+                diagnostics
+                    .entry(st.uri.clone())
+                    .or_default()
+                    .push(Diagnostic {
+                        range,
+                        severity: Some(DiagnosticSeverity::HINT),
+                        code: Some(tower_lsp::lsp_types::NumberOrString::String(
+                            DiagnosticCode::UnusedInclude.as_str().to_string(),
+                        )),
+                        message: format!("unused include: {}", include_path),
+                        tags: Some(vec![DiagnosticTag::UNNECESSARY]),
+                        ..Default::default()
+                    });
             }
         }
     }
@@ -171,19 +173,19 @@ fn resolve_include(
     // 1. Check against search paths
     for search_path_url in search_paths {
         if let Ok(search_path) = search_path_url.to_file_path() {
-            let mut candidate = search_path;
-            candidate.push(include_path);
-            if candidate.exists() {
-                return Some(candidate);
+            if let Some(canon) = fs::canonicalize(search_path.join(include_path)).ok() {
+                if canon.exists() {
+                    return Some(canon);
+                }
             }
         }
     }
 
     // 2. Check relative to current file's directory
-    let mut candidate = current_dir.to_path_buf();
-    candidate.push(include_path);
-    if candidate.exists() {
-        return Some(candidate);
+    if let Some(canon) = fs::canonicalize(current_dir.join(include_path)).ok() {
+        if canon.exists() {
+            return Some(canon);
+        }
     }
 
     None

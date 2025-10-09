@@ -9,6 +9,7 @@ use log::{debug, error};
 use std::collections::HashMap;
 use std::ffi::c_char;
 use std::ffi::{CStr, CString};
+use std::fs;
 use tower_lsp::lsp_types::{Diagnostic, Location, Position, Range, Url};
 
 /// A trait for parsing FlatBuffers schema files.
@@ -173,7 +174,7 @@ unsafe fn extract_structs_and_tables(
         };
 
         let file = c_str_to_string(def_info.file);
-        let Ok(file_uri) = Url::from_file_path(&file) else {
+        let Some(file_uri) = file_path_to_canonical_url(&file) else {
             error!("failed to parse file into url: {}", file);
             continue;
         };
@@ -270,7 +271,7 @@ unsafe fn extract_enums_and_unions(parser_ptr: *mut ffi::FlatbuffersParser, st: 
         };
 
         let file = c_str_to_string(def_info.file);
-        let Ok(file_uri) = Url::from_file_path(&file) else {
+        let Some(file_uri) = file_path_to_canonical_url(&file) else {
             error!("failed to parse file into url: {}", file);
             continue;
         };
@@ -356,7 +357,7 @@ unsafe fn extract_root_type(parser_ptr: *mut ffi::FlatbuffersParser) -> Option<R
         let qualified_name = c_str_to_string(root_def.name);
         let file = c_str_to_string(root_def.file);
 
-        if let Ok(file_uri) = Url::from_file_path(&file) {
+        if let Some(file_uri) = file_path_to_canonical_url(&file) {
             let type_source = c_str_to_string(root_def.type_source);
             let type_range = root_def.type_range.into();
             let parsed_type = parse_type(&type_source, type_range);
@@ -383,6 +384,8 @@ unsafe fn build_include_graph(
     for i in 0..num_files {
         let Some(file_path) =
             c_str_to_optional_string(ffi::get_file_with_includes_path(parser_ptr, i))
+                .and_then(|p| fs::canonicalize(p).ok())
+                .map(|p| p.to_string_lossy().into_owned())
         else {
             continue;
         };
@@ -395,8 +398,11 @@ unsafe fn build_include_graph(
                 parser_ptr,
                 c_file_path.as_ptr(),
                 j,
-            )) {
-                includes.push(include_path);
+            ))
+            .and_then(|p| fs::canonicalize(p).ok())
+            .map(|p| p.to_string_lossy().into_owned())
+            {
+                includes.push(include_path.to_owned());
             }
         }
         include_graph.insert(file_path, includes);
@@ -431,7 +437,7 @@ fn create_symbol(
     documentation: Option<String>,
 ) -> Symbol {
     let location = Location {
-        uri: uri.clone(),
+        uri: canonical_file_url(uri),
         range: Range::new(
             Position::new(line, col - (name.chars().count() as u32)),
             Position::new(line, col),
@@ -444,4 +450,18 @@ fn create_symbol(
         documentation,
     };
     Symbol { info, kind }
+}
+
+fn canonical_file_url(url: &Url) -> Url {
+    url.to_file_path()
+        .ok()
+        .and_then(|p| fs::canonicalize(p).ok())
+        .and_then(|p| Url::from_file_path(p).ok())
+        .unwrap_or_else(|| url.clone())
+}
+
+fn file_path_to_canonical_url(path: &String) -> Option<Url> {
+    Url::from_file_path(path)
+        .ok()
+        .map(|u| canonical_file_url(&u))
 }

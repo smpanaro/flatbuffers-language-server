@@ -636,3 +636,30 @@ root_type Pen;
         assert_eq!(d[0].range.end.character, 17);
     }
 }
+
+#[tokio::test]
+async fn no_unused_include_namespace() {
+    let schema_fixture = r#"
+include "../related/other.fbs";
+
+table MyTable {
+    a: N.OtherTable;
+}
+"#;
+    let other_fixture = "namespace N; table OtherTable {}";
+
+    let mut harness = TestHarness::new();
+    harness
+        .initialize_and_open(&[
+            ("related/other.fbs", other_fixture),
+            ("core/schema.fbs", schema_fixture),
+        ])
+        .await;
+
+    for _ in 0..3 {
+        let param = harness
+            .notification::<notification::PublishDiagnostics>()
+            .await;
+        assert!(param.diagnostics.is_empty());
+    }
+}
