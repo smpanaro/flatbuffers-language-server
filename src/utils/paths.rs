@@ -1,4 +1,5 @@
 use std::collections::HashSet;
+use std::fs;
 use std::path::{Path, PathBuf};
 use tower_lsp::lsp_types::Url;
 
@@ -31,4 +32,18 @@ pub fn get_intermediate_paths(starting_path: &Path, roots: &[PathBuf]) -> HashSe
         }
     }
     paths
+}
+
+pub fn canonical_file_url(url: &Url) -> Url {
+    url.to_file_path()
+        .ok()
+        .and_then(|p| fs::canonicalize(p).ok())
+        .and_then(|p| Url::from_file_path(p).ok())
+        .unwrap_or_else(|| url.clone())
+}
+
+pub fn file_path_to_canonical_url(path: &String) -> Option<Url> {
+    Url::from_file_path(path)
+        .ok()
+        .map(|u| canonical_file_url(&u))
 }

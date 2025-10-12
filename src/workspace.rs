@@ -228,7 +228,7 @@ impl Workspace {
         &self,
         uri: &Url,
         st: crate::symbol_table::SymbolTable,
-        included_files: Vec<String>,
+        included_files: Vec<Url>,
         root_type_info: Option<crate::symbol_table::RootTypeInfo>,
     ) {
         if let Some((_, old_symbol_keys)) = self.file_definitions.remove(uri) {
@@ -252,7 +252,7 @@ impl Workspace {
         }
     }
 
-    pub fn update_includes(&self, uri: &Url, included_files: Vec<String>) {
+    pub fn update_includes(&self, uri: &Url, included_uris: Vec<Url>) {
         if let Some((_, old_included_files)) = self.file_includes.remove(uri) {
             for old_included_uri in old_included_files {
                 if let Some(mut included_by) = self.file_included_by.get_mut(&old_included_uri) {
@@ -260,11 +260,6 @@ impl Workspace {
                 }
             }
         }
-
-        let included_uris: Vec<Url> = included_files
-            .iter()
-            .filter_map(|path| Url::from_file_path(path).ok())
-            .collect();
 
         for included_uri in &included_uris {
             self.file_included_by

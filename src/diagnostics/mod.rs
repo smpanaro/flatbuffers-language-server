@@ -1,6 +1,8 @@
 use std::collections::HashMap;
 use tower_lsp::lsp_types::{Diagnostic, Url};
 
+use crate::utils::paths::canonical_file_url;
+
 pub mod codes;
 pub mod duplicate_definition;
 pub mod expecting_token;
@@ -30,7 +32,7 @@ pub fn generate_diagnostics_from_error_string(
         for handler in &handlers {
             if let Some((file_uri, diagnostic)) = handler.handle(line, content) {
                 diagnostics_map
-                    .entry(file_uri)
+                    .entry(canonical_file_url(&file_uri))
                     .or_default()
                     .push(diagnostic);
                 break;

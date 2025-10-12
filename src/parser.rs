@@ -5,6 +5,8 @@ use crate::symbol_table::{
     Table, Union, UnionVariant,
 };
 use crate::utils::parsed_type::parse_type;
+use crate::utils::paths::canonical_file_url;
+use crate::utils::paths::file_path_to_canonical_url;
 use log::{debug, error};
 use std::collections::HashMap;
 use std::ffi::c_char;
@@ -22,7 +24,7 @@ pub trait Parser {
     ) -> (
         HashMap<Url, Vec<Diagnostic>>,
         Option<SymbolTable>,
-        Vec<String>,
+        Vec<Url>,
         Option<RootTypeInfo>,
     );
 }
@@ -39,7 +41,7 @@ impl Parser for FlatcFFIParser {
     ) -> (
         HashMap<Url, Vec<Diagnostic>>,
         Option<SymbolTable>,
-        Vec<String>,
+        Vec<Url>,
         Option<RootTypeInfo>,
     ) {
         let c_content = match CString::new(content) {
@@ -97,7 +99,7 @@ unsafe fn parse_success_case(
     search_paths: &[Url],
 ) -> (
     SymbolTable,
-    Vec<String>,
+    Vec<Url>,
     Option<RootTypeInfo>,
     HashMap<Url, Vec<Diagnostic>>,
 ) {
@@ -139,13 +141,14 @@ unsafe fn parse_error_messages(
 }
 
 /// Extracts all included file paths from the parser.
-unsafe fn extract_all_included_files(parser_ptr: *mut ffi::FlatbuffersParser) -> Vec<String> {
+unsafe fn extract_all_included_files(parser_ptr: *mut ffi::FlatbuffersParser) -> Vec<Url> {
     let mut included_files = Vec::new();
     let num_included = ffi::get_num_all_included_files(parser_ptr);
     for i in 0..num_included {
-        if let Some(path) = c_str_to_optional_string(ffi::get_all_included_file_path(parser_ptr, i))
+        if let Some(uri) = c_str_to_optional_string(ffi::get_all_included_file_path(parser_ptr, i))
+            .and_then(|p| file_path_to_canonical_url(&p))
         {
-            included_files.push(path);
+            included_files.push(uri);
         }
     }
     included_files
@@ -450,18 +453,4 @@ fn create_symbol(
         documentation,
     };
     Symbol { info, kind }
-}
-
-fn canonical_file_url(url: &Url) -> Url {
-    url.to_file_path()
-        .ok()
-        .and_then(|p| fs::canonicalize(p).ok())
-        .and_then(|p| Url::from_file_path(p).ok())
-        .unwrap_or_else(|| url.clone())
-}
-
-fn file_path_to_canonical_url(path: &String) -> Option<Url> {
-    Url::from_file_path(path)
-        .ok()
-        .map(|u| canonical_file_url(&u))
 }

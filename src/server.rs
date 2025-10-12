@@ -161,16 +161,9 @@ impl Backend {
                 all_diagnostics.insert(file_uri, diagnostics);
             }
 
-            for included_path_str in included_files {
-                match Url::from_file_path(&included_path_str) {
-                    Ok(included_uri) => {
-                        if !parsed_files.contains(&included_uri) {
-                            files_to_parse.push((included_uri, None));
-                        }
-                    }
-                    Err(_) => {
-                        error!("invalid include path: {}", included_path_str);
-                    }
+            for included_uri in included_files {
+                if !parsed_files.contains(&included_uri) {
+                    files_to_parse.push((included_uri, None));
                 }
             }
         }
