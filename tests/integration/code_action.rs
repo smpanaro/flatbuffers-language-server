@@ -310,3 +310,41 @@ include "pastries.fbs";
     let redacted_response = response.replace(&harness.root_uri.to_string(), "[ROOT_URI]/");
     assert_snapshot!(redacted_response);
 }
+
+#[tokio::test]
+async fn code_action_for_undefined_type_in_unopened_file() {
+    let mut harness = TestHarness::new();
+    let fixture = &[
+        ("schemas/common.fbs", "struct CommonType { i: int; }"),
+        ("api.fbs", "table ApiRequest { data: CommonType; }"),
+    ];
+    harness
+        .initialize_and_open_some(fixture, &["api.fbs"])
+        .await;
+
+    let diagnostic = harness
+        .wait_for_diagnostic("type referenced but not defined")
+        .await
+        .unwrap();
+
+    let response = harness
+        .call::<request::CodeActionRequest>(CodeActionParams {
+            text_document: TextDocumentIdentifier {
+                uri: harness.root_uri.join("api.fbs").unwrap(),
+            },
+            range: diagnostic.range,
+            context: CodeActionContext {
+                diagnostics: vec![diagnostic],
+                only: Some(vec![tower_lsp::lsp_types::CodeActionKind::QUICKFIX]),
+                trigger_kind: None,
+            },
+            work_done_progress_params: Default::default(),
+            partial_result_params: Default::default(),
+        })
+        .await
+        .unwrap();
+
+    let response_str = serde_json::to_string_pretty(&response).unwrap();
+    let redacted_response = response_str.replace(&harness.root_uri.to_string(), "[ROOT_URI]/");
+    assert_snapshot!(redacted_response);
+}

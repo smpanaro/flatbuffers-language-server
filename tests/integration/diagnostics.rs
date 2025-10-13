@@ -43,24 +43,30 @@ union Whichever { One }
         .initialize_and_open(&[("a.fbs", content_a), ("b.fbs", content_b)])
         .await;
 
-    let params_a = harness
-        .notification::<notification::PublishDiagnostics>()
-        .await;
-
     let a_uri = harness.root_uri.join("a.fbs").unwrap();
-    assert_eq!(params_a.uri, a_uri);
+    let b_uri = harness.root_uri.join("b.fbs").unwrap();
+    let mut params_a = None;
+    let mut params_b = None;
+    for _ in 0..2 {
+        let params = harness
+            .notification::<notification::PublishDiagnostics>()
+            .await;
+        if params.uri == a_uri {
+            params_a = Some(params);
+        } else if params.uri == b_uri {
+            params_b = Some(params);
+        } else {
+            panic!("unexpected diagnostic: {:?}", params);
+        }
+    }
+
     assert_eq!(
-        params_a.diagnostics[0].range,
+        params_a.unwrap().diagnostics[0].range,
         Range::new(Position::new(1, 12), Position::new(1, 15))
     );
 
-    let params_b = harness
-        .notification::<notification::PublishDiagnostics>()
-        .await;
-    let b_uri = harness.root_uri.join("b.fbs").unwrap();
-    assert_eq!(params_b.uri, b_uri);
     assert_eq!(
-        params_b.diagnostics[0].range,
+        params_b.unwrap().diagnostics[0].range,
         Range::new(Position::new(2, 18), Position::new(2, 21))
     );
 }
@@ -129,21 +135,25 @@ table Foo {
         .initialize_and_open(&[("schema.fbs", content), ("included.fbs", included_content)])
         .await;
 
-    let params = harness
-        .notification::<notification::PublishDiagnostics>()
-        .await;
-    let diagnostic = &params.diagnostics[0];
+    let schema_uri = harness.root_uri.join("schema.fbs").unwrap();
+    let diagnostics = loop {
+        let params = harness
+            .notification::<notification::PublishDiagnostics>()
+            .await;
+        if params.uri == schema_uri {
+            break params.diagnostics;
+        } else {
+            assert_eq!(params.diagnostics.len(), 0)
+        }
+    };
+    assert_eq!(diagnostics.len(), 1);
+    let diagnostic = diagnostics[0].clone();
     assert_eq!(
         diagnostic.range,
         Range::new(Position::new(2, 7), Position::new(2, 13))
     );
-    // Consume included.fbs diagnostics.
-    let _ = harness
-        .notification::<notification::PublishDiagnostics>()
-        .await;
 
     // This is quickfix-able.
-    let schema_uri = harness.root_uri.join("schema.fbs").unwrap();
     let code_actions = harness
         .call::<request::CodeActionRequest>(CodeActionParams {
             text_document: TextDocumentIdentifier {
@@ -242,17 +252,16 @@ include "pastries.fbs";
         .await;
 
     let schema_uri = harness.root_uri.join("schema.fbs").unwrap();
-    let mut diagnostics = vec![];
-    for _ in 0..4 {
+    let diagnostics = loop {
         let param = harness
             .notification::<notification::PublishDiagnostics>()
             .await;
         if param.uri == schema_uri {
-            diagnostics = param.diagnostics;
+            break param.diagnostics;
         } else {
             assert!(param.diagnostics.is_empty());
         }
-    }
+    };
     assert_eq!(diagnostics.len(), 1);
 
     let diagnostic = &diagnostics[0];
@@ -564,11 +573,10 @@ root_type Pen;
         .initialize_and_open(&[("schema.fbs", main), ("included.fbs", included)])
         .await;
 
-    // 3 calls: 2 for opening schema.fbs (itself + included); 1 for opening included.fbs
     let included_uri = harness.root_uri.join("included.fbs").unwrap();
     let mut diagnostics = vec![];
     let mut other_diagnostics_count = 0;
-    for _ in 0..3 {
+    for _ in 0..2 {
         let param = harness
             .notification::<notification::PublishDiagnostics>()
             .await;
@@ -580,8 +588,7 @@ root_type Pen;
             other_diagnostics_count += 1;
         }
     }
-    // include.fbs is parsed twice and should emit the same diagnostic twice.
-    assert_eq!(diagnostics.len(), 2);
+    assert_eq!(diagnostics.len(), 1);
     assert_eq!(other_diagnostics_count, 1);
 
     for d in diagnostics {
@@ -610,11 +617,10 @@ root_type Pen;
         .initialize_and_open(&[("schema.fbs", main), ("included.fbs", included)])
         .await;
 
-    // 3 calls: 2 for opening schema.fbs (itself + included); 1 for opening included.fbs
     let included_uri = harness.root_uri.join("included.fbs").unwrap();
     let mut diagnostics = vec![];
     let mut other_diagnostics_count = 0;
-    for _ in 0..3 {
+    for _ in 0..2 {
         let param = harness
             .notification::<notification::PublishDiagnostics>()
             .await;
@@ -626,8 +632,7 @@ root_type Pen;
             other_diagnostics_count += 1;
         }
     }
-    // include.fbs is parsed twice and should emit the same diagnostic twice.
-    assert_eq!(diagnostics.len(), 2);
+    assert_eq!(diagnostics.len(), 1);
     assert_eq!(other_diagnostics_count, 1);
 
     for d in diagnostics {
@@ -656,7 +661,7 @@ table MyTable {
         ])
         .await;
 
-    for _ in 0..3 {
+    for _ in 0..2 {
         let param = harness
             .notification::<notification::PublishDiagnostics>()
             .await;

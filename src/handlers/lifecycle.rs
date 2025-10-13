@@ -1,5 +1,6 @@
-use crate::{server::Backend, utils::paths::is_flatbuffer_schema};
+use crate::{ext::duration::DurationFormat, server::Backend, utils::paths::is_flatbuffer_schema};
 use log::{debug, info};
+use tokio::time::Instant;
 use tower_lsp::lsp_types::{
     DidChangeTextDocumentParams, DidChangeWorkspaceFoldersParams, DidCloseTextDocumentParams,
     DidOpenTextDocumentParams, DidSaveTextDocumentParams, InitializeParams, Url,
@@ -13,7 +14,7 @@ pub async fn handle_did_open(backend: &Backend, params: DidOpenTextDocumentParam
     }
 
     backend
-        .parse_and_discover(params.text_document.uri, Some(params.text_document.text))
+        .parse_and_publish(params.text_document.uri, Some(params.text_document.text))
         .await;
 }
 
@@ -29,7 +30,7 @@ pub async fn handle_did_change(backend: &Backend, mut params: DidChangeTextDocum
         ropey::Rope::from_str(&content),
     );
     backend
-        .parse_and_discover(params.text_document.uri, None)
+        .parse_and_publish(params.text_document.uri, None)
         .await;
 }
 
@@ -49,7 +50,7 @@ pub async fn handle_did_save(backend: &Backend, params: DidSaveTextDocumentParam
     }
 
     for uri in files_to_reparse {
-        backend.parse_and_discover(uri, None).await;
+        backend.parse_and_publish(uri, None).await;
     }
 }
 
@@ -87,13 +88,8 @@ pub async fn handle_did_close(backend: &Backend, params: DidCloseTextDocumentPar
 
     // Re-parse files that included the closed file
     for uri in includers {
-        backend.parse_and_discover(uri.clone(), None).await;
+        backend.parse_and_publish(uri.clone(), None).await;
     }
-
-    backend
-        .client
-        .publish_diagnostics(params.text_document.uri, vec![], None)
-        .await;
 }
 
 pub async fn handle_initialize(backend: &Backend, params: InitializeParams) {
@@ -109,7 +105,10 @@ pub async fn handle_initialize(backend: &Backend, params: InitializeParams) {
             backend.workspace_roots.insert(path);
         }
     }
+}
 
+pub async fn handle_initialized(backend: &Backend) {
+    let start = Instant::now();
     let roots: Vec<_> = backend
         .workspace_roots
         .iter()
@@ -117,7 +116,13 @@ pub async fn handle_initialize(backend: &Backend, params: InitializeParams) {
         .collect();
     info!("initial workspace roots: {:?}", roots);
 
-    backend.update_search_paths().await;
+    backend.initialize_workspace().await;
+
+    debug!(
+        "initialized scan in {}: {} files",
+        start.elapsed().log_str(),
+        backend.workspace.file_definitions.len()
+    );
 }
 
 pub async fn handle_did_change_workspace_folders(
@@ -138,7 +143,7 @@ pub async fn handle_did_change_workspace_folders(
         }
     }
 
-    backend.update_search_paths().await;
+    backend.scan_workspace().await;
 }
 
 #[allow(deprecated)]

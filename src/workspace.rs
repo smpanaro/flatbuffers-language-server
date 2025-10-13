@@ -1,6 +1,8 @@
+use crate::parser::Parser;
 use crate::symbol_table::{RootTypeInfo, Symbol, SymbolInfo, SymbolKind};
 use dashmap::DashMap;
-use tower_lsp::lsp_types::{Location, Range, Url};
+use std::collections::{HashMap, HashSet};
+use tower_lsp::lsp_types::{Diagnostic, Location, Range, Url};
 
 #[derive(Debug, Clone)]
 pub struct Workspace {
@@ -18,6 +20,7 @@ pub struct Workspace {
     pub file_included_by: DashMap<Url, Vec<Url>>,
     /// Map from file URI to the root type defined in that file.
     pub root_types: DashMap<Url, RootTypeInfo>,
+    pub published_diagnostics: DashMap<Url, Vec<Diagnostic>>,
     pub builtin_attributes: DashMap<String, Attribute>,
 }
 
@@ -216,6 +219,7 @@ impl Workspace {
             file_includes: DashMap::new(),
             file_included_by: DashMap::new(),
             root_types: DashMap::new(),
+            published_diagnostics: DashMap::new(),
             builtin_attributes: DashMap::new(),
         };
         populate_builtins(&mut workspace);
@@ -269,6 +273,79 @@ impl Workspace {
         }
 
         self.file_includes.insert(uri.clone(), included_uris);
+    }
+
+    pub fn has_symbols_for(&self, uri: &Url) -> bool {
+        self.file_definitions.contains_key(uri)
+    }
+
+    pub async fn parse_and_update(
+        &self,
+        initial_uri: Url,
+        initial_content: Option<String>,
+        document_map: &DashMap<String, ropey::Rope>,
+        search_paths: &[Url],
+    ) -> (HashMap<Url, Vec<Diagnostic>>, HashSet<Url>) {
+        let mut files_to_parse = vec![(initial_uri.clone(), initial_content)];
+        let mut parsed_files = HashSet::new();
+        let mut all_diagnostics = std::collections::HashMap::new();
+
+        let old_included_files = self
+            .file_includes
+            .get(&initial_uri)
+            .map(|v| v.value().clone())
+            .unwrap_or_default();
+
+        while let Some((uri, content_opt)) = files_to_parse.pop() {
+            if !parsed_files.insert(uri.clone()) {
+                continue;
+            }
+
+            let content = if let Some(c) = content_opt {
+                document_map.insert(uri.to_string(), ropey::Rope::from_str(&c));
+                c
+            } else if let Some(doc) = document_map.get(&uri.to_string()) {
+                doc.value().to_string()
+            } else {
+                match tokio::fs::read_to_string(uri.to_file_path().unwrap()).await {
+                    Ok(text) => {
+                        document_map.insert(uri.to_string(), ropey::Rope::from_str(&text));
+                        text
+                    }
+                    Err(e) => {
+                        log::error!("failed to read file {}: {}", uri.path(), e);
+                        continue;
+                    }
+                }
+            };
+
+            log::info!("parsing: {}", uri.clone().path());
+            let (diagnostics_map, symbol_table, included_files, root_type_info) =
+                crate::parser::FlatcFFIParser.parse(&uri, &content, search_paths);
+
+            if let Some(st) = symbol_table {
+                self.update_symbols(&uri, st, included_files.clone(), root_type_info);
+            } else {
+                self.update_includes(&uri, included_files.clone());
+            }
+
+            for (file_uri, diagnostics) in diagnostics_map {
+                all_diagnostics.insert(file_uri, diagnostics);
+            }
+
+            for included_uri in included_files {
+                if !parsed_files.contains(&included_uri) {
+                    files_to_parse.push((included_uri, None));
+                }
+            }
+        }
+
+        let mut files_to_update = HashSet::new();
+        files_to_update.insert(initial_uri);
+        files_to_update.extend(old_included_files);
+        files_to_update.extend(parsed_files);
+
+        (all_diagnostics, files_to_update)
     }
 }
 

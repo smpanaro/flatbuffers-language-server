@@ -2,30 +2,31 @@ use crate::ext::duration::DurationFormat;
 use crate::handlers::{
     code_action, completion, goto_definition, hover, lifecycle, references, rename,
 };
-use crate::parser::{FlatcFFIParser, Parser};
 use crate::utils::paths::{is_flatbuffer_schema, is_flatbuffer_schema_path};
 use crate::workspace::Workspace;
 use dashmap::{DashMap, DashSet};
 use ignore::{WalkBuilder, WalkState};
 use log::{debug, error, info};
 use ropey::Rope;
-use std::collections::HashSet;
 use std::path::PathBuf;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Instant;
-use tokio::fs;
-use tokio::sync::RwLock;
+use tokio::sync::{Notify, RwLock};
 use tower_lsp::jsonrpc::Result;
+use tower_lsp::lsp_types::request::WorkDoneProgressCreate;
 use tower_lsp::lsp_types::{
-    CodeActionKind, CodeActionOptions, CodeActionParams, CodeActionProviderCapability,
-    CodeActionResponse, CompletionOptions, CompletionParams, CompletionResponse,
-    DidChangeTextDocumentParams, DidChangeWatchedFilesParams,
+    notification, CodeActionKind, CodeActionOptions, CodeActionParams,
+    CodeActionProviderCapability, CodeActionResponse, CompletionOptions, CompletionParams,
+    CompletionResponse, DidChangeTextDocumentParams, DidChangeWatchedFilesParams,
     DidChangeWatchedFilesRegistrationOptions, DidChangeWorkspaceFoldersParams,
     DidCloseTextDocumentParams, DidOpenTextDocumentParams, DidSaveTextDocumentParams,
     FileSystemWatcher, GlobPattern, GotoDefinitionParams, GotoDefinitionResponse, Hover,
     HoverParams, HoverProviderCapability, InitializeParams, InitializeResult, InitializedParams,
-    Location, OneOf, PrepareRenameResponse, ReferenceParams, Registration, RenameOptions,
-    RenameParams, ServerCapabilities, ServerInfo, TextDocumentPositionParams,
-    TextDocumentSyncCapability, TextDocumentSyncKind, TextDocumentSyncOptions, Url, WorkspaceEdit,
+    Location, NumberOrString, OneOf, PrepareRenameResponse, ProgressParams, ProgressParamsValue,
+    ReferenceParams, Registration, RenameOptions, RenameParams, ServerCapabilities, ServerInfo,
+    TextDocumentPositionParams, TextDocumentSyncCapability, TextDocumentSyncKind,
+    TextDocumentSyncOptions, Url, WorkDoneProgress, WorkDoneProgressBegin,
+    WorkDoneProgressCreateParams, WorkDoneProgressEnd, WorkspaceEdit,
     WorkspaceFoldersServerCapabilities, WorkspaceServerCapabilities,
 };
 use tower_lsp::{Client, LanguageServer};
@@ -37,6 +38,9 @@ pub struct Backend {
     pub workspace: Workspace,
     pub search_paths: RwLock<Vec<Url>>,
     pub workspace_roots: DashSet<PathBuf>,
+    // Initialize scan.
+    ready: AtomicBool,
+    notify_ready: Notify,
 }
 
 impl Backend {
@@ -47,10 +51,12 @@ impl Backend {
             workspace: Workspace::new(),
             search_paths: RwLock::new(vec![]),
             workspace_roots: DashSet::new(),
+            ready: AtomicBool::new(false),
+            notify_ready: Notify::new(),
         }
     }
 
-    pub async fn update_search_paths(&self) {
+    pub async fn update_search_paths_and_discover_files(&self) -> Vec<Url> {
         let start = Instant::now();
         let roots: Vec<_> = self
             .workspace_roots
@@ -61,10 +67,12 @@ impl Backend {
         if roots.is_empty() {
             let mut search_paths_guard = self.search_paths.write().await;
             *search_paths_guard = vec![];
-            return;
+            return vec![];
         }
 
         let search_paths = DashSet::new();
+        let fbs_files = DashSet::new();
+
         let mut builder = WalkBuilder::new(&roots[0]);
         if roots.len() > 1 {
             for root in &roots[1..] {
@@ -75,10 +83,15 @@ impl Backend {
         let roots_arc = std::sync::Arc::new(roots);
         builder.build_parallel().run(|| {
             let search_paths = &search_paths;
+            let fbs_files = &fbs_files;
             let roots = std::sync::Arc::clone(&roots_arc);
             Box::new(move |result| {
                 if let Ok(entry) = result {
                     if is_flatbuffer_schema_path(entry.path()) {
+                        if let Ok(url) = Url::from_file_path(entry.path()) {
+                            fbs_files.insert(url);
+                        }
+
                         let intermediate_paths =
                             crate::utils::paths::get_intermediate_paths(entry.path(), &roots);
                         for path in intermediate_paths {
@@ -96,92 +109,57 @@ impl Backend {
         debug!(
             "discovered include paths in {}: {:?}",
             start.elapsed().log_str(),
-            search_paths.iter().map(|u| u.path()).collect::<Vec<_>>()
+            search_paths.iter().map(|u| u.path()).collect::<Vec<_>>(),
         );
 
         let mut search_paths_guard = self.search_paths.write().await;
         *search_paths_guard = search_paths;
+
+        fbs_files.into_iter().collect::<Vec<_>>()
     }
 
-    // TODO: Move this to workspace
-    pub async fn parse_and_discover(&self, initial_uri: Url, initial_content: Option<String>) {
-        let mut files_to_parse = vec![(initial_uri.clone(), initial_content)];
-        let mut parsed_files = HashSet::new();
-        let mut all_diagnostics = std::collections::HashMap::new();
+    pub async fn initialize_workspace(&self) {
+        self.scan_workspace().await;
+    }
 
-        let old_included_files: Vec<Url> = self
+    pub async fn scan_workspace(&self) {
+        let fbs_files = self.update_search_paths_and_discover_files().await;
+        for uri in fbs_files {
+            if !self.workspace.has_symbols_for(&uri) {
+                self.parse_and_publish(uri, None).await;
+            }
+        }
+    }
+
+    pub async fn parse_and_publish(&self, uri: Url, content: Option<String>) {
+        let search_paths_guard = self.search_paths.read().await;
+        let (diagnostics, updated_files) = self
             .workspace
-            .file_includes
-            .get(&initial_uri)
-            .map(|v| v.value().clone())
-            .unwrap_or_default();
+            .parse_and_update(uri, content, &self.document_map, &search_paths_guard)
+            .await;
 
-        while let Some((uri, content_opt)) = files_to_parse.pop() {
-            if !parsed_files.insert(uri.clone()) {
+        for file_uri in updated_files {
+            let mut new_diags = diagnostics.get(&file_uri).cloned().unwrap_or_default();
+
+            new_diags.sort_by(|a, b| {
+                a.message
+                    .cmp(&b.message)
+                    .then_with(|| a.range.start.cmp(&b.range.start))
+            });
+
+            let old_diags = self.workspace.published_diagnostics.get(&file_uri);
+
+            let has_changed = old_diags.map_or(true, |d| *d.value() != new_diags);
+            if !has_changed {
                 continue;
             }
 
-            let content = if let Some(c) = content_opt {
-                self.document_map
-                    .insert(uri.to_string(), Rope::from_str(&c));
-                c
-            } else if let Some(doc) = self.document_map.get(&uri.to_string()) {
-                doc.value().to_string()
-            } else {
-                match fs::read_to_string(uri.to_file_path().unwrap()).await {
-                    Ok(text) => {
-                        self.document_map
-                            .insert(uri.to_string(), Rope::from_str(&text));
-                        text
-                    }
-                    Err(e) => {
-                        error!("failed to read file {}: {}", uri.path(), e);
-                        continue;
-                    }
-                }
-            };
-
-            let start_time = Instant::now();
-            let search_paths_guard = self.search_paths.read().await;
-
-            // FlatcFFIParser is stateless.
-            let (diagnostics_map, symbol_table, included_files, root_type_info) =
-                FlatcFFIParser.parse(&uri, &content, &search_paths_guard);
-            let elapsed_time = start_time.elapsed();
-            debug!("parsed in {}: {}", elapsed_time.log_str(), uri.path());
-
-            if let Some(st) = symbol_table {
-                self.workspace
-                    .update_symbols(&uri, st, included_files.clone(), root_type_info);
-            } else {
-                self.workspace.update_includes(&uri, included_files.clone());
-            }
-
-            for (file_uri, diagnostics) in diagnostics_map {
-                all_diagnostics.insert(file_uri, diagnostics);
-            }
-
-            for included_uri in included_files {
-                if !parsed_files.contains(&included_uri) {
-                    files_to_parse.push((included_uri, None));
-                }
-            }
-        }
-
-        let mut files_to_update = HashSet::new();
-        files_to_update.insert(initial_uri);
-        for uri in old_included_files {
-            files_to_update.insert(uri);
-        }
-        for uri in parsed_files {
-            files_to_update.insert(uri);
-        }
-
-        for uri in files_to_update {
-            let diagnostics = all_diagnostics.remove(&uri).unwrap_or_default();
             self.client
-                .publish_diagnostics(uri, diagnostics, None)
+                .publish_diagnostics(file_uri.clone(), new_diags.clone(), None)
                 .await;
+            self.workspace
+                .published_diagnostics
+                .insert(file_uri, new_diags);
         }
     }
 }
@@ -249,7 +227,44 @@ impl LanguageServer for Backend {
     }
 
     async fn initialized(&self, _: InitializedParams) {
-        info!("Server initialized!");
+        info!("Client initialized!");
+
+        let token = NumberOrString::String("initial-repo-scan".to_string());
+        if let Err(err) = self
+            .client
+            .send_request::<WorkDoneProgressCreate>(WorkDoneProgressCreateParams {
+                token: token.clone(),
+            })
+            .await
+        {
+            error!("failed to create initialized scan progress: {}", err)
+        }
+
+        self.client
+            .send_notification::<notification::Progress>(ProgressParams {
+                token: token.clone(),
+                value: ProgressParamsValue::WorkDone(WorkDoneProgress::Begin(
+                    WorkDoneProgressBegin {
+                        title: "flatbuffers".to_string(),
+                        cancellable: Some(false),
+                        message: Some("discovering files".to_string()),
+                        percentage: None,
+                    },
+                )),
+            })
+            .await;
+
+        lifecycle::handle_initialized(&self).await;
+        self.mark_ready();
+
+        self.client
+            .send_notification::<notification::Progress>(ProgressParams {
+                token: token.clone(),
+                value: ProgressParamsValue::WorkDone(WorkDoneProgress::End(WorkDoneProgressEnd {
+                    message: Some("complete".to_string()),
+                })),
+            })
+            .await;
 
         self.client
             .register_capability(vec![Registration {
@@ -267,6 +282,8 @@ impl LanguageServer for Backend {
             }])
             .await
             .unwrap();
+
+        info!("Server initialized!");
     }
 
     async fn shutdown(&self) -> Result<()> {
@@ -275,22 +292,27 @@ impl LanguageServer for Backend {
     }
 
     async fn did_open(&self, params: DidOpenTextDocumentParams) {
+        self.wait_until_ready().await;
         lifecycle::handle_did_open(self, params).await;
     }
 
     async fn did_change(&self, params: DidChangeTextDocumentParams) {
+        self.wait_until_ready().await;
         lifecycle::handle_did_change(self, params).await;
     }
 
     async fn did_close(&self, params: DidCloseTextDocumentParams) {
+        self.wait_until_ready().await;
         lifecycle::handle_did_close(self, params).await;
     }
 
     async fn did_save(&self, params: DidSaveTextDocumentParams) {
+        self.wait_until_ready().await;
         lifecycle::handle_did_save(self, params).await;
     }
 
     async fn did_change_watched_files(&self, params: DidChangeWatchedFilesParams) {
+        self.wait_until_ready().await;
         // What about folders? Watching files is sufficient.
         // New folder created     : empty so can't have .fbs files.
         // Existing folder deleted: if it has .fbs they will show up as deleted.
@@ -305,15 +327,18 @@ impl LanguageServer for Backend {
             info!("fbs file changed, updating search paths...");
             // In theory we could avoid a full scan, but
             // these events are rare enough that we can stay simple.
-            self.update_search_paths().await;
+            // TODO: This needs to reset state for the changed files.
+            self.scan_workspace().await;
         }
     }
 
     async fn did_change_workspace_folders(&self, params: DidChangeWorkspaceFoldersParams) {
+        self.wait_until_ready().await;
         lifecycle::handle_did_change_workspace_folders(self, params).await
     }
 
     async fn hover(&self, params: HoverParams) -> Result<Option<Hover>> {
+        self.wait_until_ready().await;
         hover::handle_hover(self, params).await
     }
 
@@ -321,18 +346,22 @@ impl LanguageServer for Backend {
         &self,
         params: GotoDefinitionParams,
     ) -> Result<Option<GotoDefinitionResponse>> {
+        self.wait_until_ready().await;
         goto_definition::handle_goto_definition(self, params).await
     }
 
     async fn references(&self, params: ReferenceParams) -> Result<Option<Vec<Location>>> {
+        self.wait_until_ready().await;
         references::handle_references(self, params).await
     }
 
     async fn completion(&self, params: CompletionParams) -> Result<Option<CompletionResponse>> {
+        self.wait_until_ready().await;
         completion::handle_completion(self, params).await
     }
 
     async fn code_action(&self, params: CodeActionParams) -> Result<Option<CodeActionResponse>> {
+        self.wait_until_ready().await;
         code_action::handle_code_action(self, params).await
     }
 
@@ -340,10 +369,26 @@ impl LanguageServer for Backend {
         &self,
         params: TextDocumentPositionParams,
     ) -> Result<Option<PrepareRenameResponse>> {
+        self.wait_until_ready().await;
         rename::prepare_rename(self, params).await
     }
 
     async fn rename(&self, params: RenameParams) -> Result<Option<WorkspaceEdit>> {
+        self.wait_until_ready().await;
         rename::rename(self, params).await
+    }
+}
+
+impl Backend {
+    async fn wait_until_ready(&self) {
+        if self.ready.load(Ordering::Acquire) {
+            return;
+        }
+        self.notify_ready.notified().await;
+    }
+
+    fn mark_ready(&self) {
+        self.ready.store(true, Ordering::Release);
+        self.notify_ready.notify_waiters();
     }
 }

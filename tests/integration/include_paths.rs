@@ -26,7 +26,7 @@ root_type ApiRequest;
 
     // The server will send three `PublishDiagnostics` notifications,
     // two for api.fbs and one for common.fbs. We need to check all of them.
-    for _ in 0..3 {
+    for _ in 0..2 {
         let params = harness
             .notification::<notification::PublishDiagnostics>()
             .await;

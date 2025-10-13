@@ -6,7 +6,9 @@ use tempfile::TempDir;
 use tokio::io::{self, AsyncReadExt, AsyncWriteExt, DuplexStream};
 use tower_lsp::jsonrpc::{Id, Request, Response};
 use tower_lsp::lsp_types::notification::Notification;
-use tower_lsp::lsp_types::request::Request as LspRequest;
+use tower_lsp::lsp_types::request::{
+    RegisterCapability, Request as LspRequest, WorkDoneProgressCreate,
+};
 use tower_lsp::lsp_types::*;
 use tower_lsp::{LspService, Server};
 
@@ -19,6 +21,7 @@ use super::test_logger;
 pub enum ServerMessage {
     Response(Response),
     Notification(Request),
+    ServerRequest(Request),
 }
 
 pub struct TestHarness {
@@ -120,9 +123,14 @@ impl TestHarness {
             return ServerMessage::Response(response);
         }
 
-        // If that fails, try to parse it as a Notification (which looks like a Request with no id).
-        if let Ok(notification) = serde_json::from_str::<Request>(&msg_str) {
-            return ServerMessage::Notification(notification);
+        // If that fails, try to parse it as a Request-like object.
+        if let Ok(request) = serde_json::from_str::<Request>(&msg_str) {
+            // A server-to-client request has an ID, but a notification does not.
+            if request.id().is_some() {
+                return ServerMessage::ServerRequest(request);
+            } else {
+                return ServerMessage::Notification(request);
+            }
         }
 
         panic!("Failed to deserialize server message: {}", msg_str);
@@ -134,6 +142,16 @@ impl TestHarness {
     }
 
     pub async fn initialize_and_open(&mut self, workspace: &[(&str, &str)]) {
+        let files_to_open: Vec<_> = workspace.iter().map(|(name, _)| *name).collect();
+        self.initialize_and_open_some(workspace, &files_to_open)
+            .await
+    }
+
+    pub async fn initialize_and_open_some(
+        &mut self,
+        workspace: &[(&str, &str)],
+        files_to_open: &[&str],
+    ) {
         // 1. Write files to disk first so the server can see them during initialization.
         for (name, content) in workspace {
             let uri = self.root_uri.join(name).unwrap();
@@ -156,7 +174,7 @@ impl TestHarness {
         self.send_request(req).await;
         let res = match self.recv_message().await {
             ServerMessage::Response(res) => res,
-            ServerMessage::Notification(req) => {
+            ServerMessage::ServerRequest(req) | ServerMessage::Notification(req) => {
                 panic!(
                     "Received unexpected response while waiting for initizlie response: {:?}",
                     req
@@ -173,19 +191,22 @@ impl TestHarness {
         self.send_request(req).await;
 
         // 4. Send "didOpen" notifications for the files.
+        let open_set: std::collections::HashSet<&str> = files_to_open.iter().cloned().collect();
         for (name, content) in workspace {
-            let uri = self.root_uri.join(name).unwrap();
-            let text_document = TextDocumentItem {
-                uri,
-                language_id: "flatbuffers".to_string(),
-                version: 1,
-                text: content.to_string(),
-            };
-            let params = DidOpenTextDocumentParams { text_document };
-            let req = Request::build("textDocument/didOpen")
-                .params(serde_json::to_value(params).unwrap())
-                .finish();
-            self.send_request(req).await;
+            if open_set.contains(name) {
+                let uri = self.root_uri.join(name).unwrap();
+                let text_document = TextDocumentItem {
+                    uri,
+                    language_id: "flatbuffers".to_string(),
+                    version: 1,
+                    text: content.to_string(),
+                };
+                let params = DidOpenTextDocumentParams { text_document };
+                let req = Request::build("textDocument/didOpen")
+                    .params(serde_json::to_value(params).unwrap())
+                    .finish();
+                self.send_request(req).await;
+            }
         }
     }
 
@@ -252,6 +273,10 @@ impl TestHarness {
                     // Store it in our buffer to be processed by a later call to `notification()`.
                     self.unhandled_notifications.push_back(req);
                 }
+                ServerMessage::ServerRequest(req) => {
+                    // The server sent us a request. Handle it and continue waiting for our response.
+                    self.handle_server_request(req).await;
+                }
             }
         }
     }
@@ -297,6 +322,10 @@ impl TestHarness {
                         self.unhandled_notifications.push_back(req);
                     }
                 }
+                ServerMessage::ServerRequest(req) => {
+                    // The server sent us a request. Handle it and continue waiting for our notification.
+                    self.handle_server_request(req).await;
+                }
             }
         }
     }
@@ -332,6 +361,25 @@ impl TestHarness {
                 io::ErrorKind::TimedOut,
                 "timed out waiting for a response",
             )),
+        }
+    }
+
+    async fn handle_server_request(&mut self, req: Request) {
+        match req.method() {
+            WorkDoneProgressCreate::METHOD | RegisterCapability::METHOD => {
+                let id = req.id().unwrap().clone();
+                let result = serde_json::json!(null);
+                let response = Response::from_ok(id, result);
+                let response_str = serde_json::to_string(&response).unwrap();
+                let encoded_response = Self::encode(&response_str);
+                self.req_stream
+                    .write_all(encoded_response.as_bytes())
+                    .await
+                    .unwrap();
+            }
+            _ => {
+                panic!("Received unhandled server request: {}", req.method());
+            }
         }
     }
 
