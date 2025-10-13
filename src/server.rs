@@ -131,6 +131,37 @@ impl Backend {
         }
     }
 
+    pub async fn remove_workspace_folder(&self, folder_uri: &Url) {
+        let uris_to_remove: std::collections::HashSet<Url> = self
+            .workspace
+            .file_definitions
+            .iter()
+            .map(|entry| entry.key().clone())
+            .filter(|uri| uri.as_str().starts_with(folder_uri.as_str()))
+            .collect();
+
+        let mut files_to_reparse = std::collections::HashSet::new();
+        for uri in &uris_to_remove {
+            let affected_files = self.workspace.remove_file(uri);
+            for f in affected_files {
+                if !uris_to_remove.contains(&f) {
+                    files_to_reparse.insert(f);
+                }
+            }
+            self.client
+                .publish_diagnostics(uri.clone(), vec![], None)
+                .await;
+        }
+
+        let mut search_paths_guard = self.search_paths.write().await;
+        search_paths_guard.retain(|path_uri| !path_uri.as_str().starts_with(folder_uri.as_str()));
+        drop(search_paths_guard);
+
+        for uri in files_to_reparse {
+            self.parse_and_publish(uri, None).await;
+        }
+    }
+
     pub async fn parse_and_publish(&self, uri: Url, content: Option<String>) {
         let search_paths_guard = self.search_paths.read().await;
         let (diagnostics, updated_files) = self
@@ -313,22 +344,46 @@ impl LanguageServer for Backend {
 
     async fn did_change_watched_files(&self, params: DidChangeWatchedFilesParams) {
         self.wait_until_ready().await;
+
         // What about folders? Watching files is sufficient.
         // New folder created     : empty so can't have .fbs files.
         // Existing folder deleted: if it has .fbs they will show up as deleted.
         // Existing folder renamed: if it has .fbs they will show up as deleted
         //                          and created in the new location.
-        let should_update = params
-            .changes
-            .iter()
-            .any(|event| is_flatbuffer_schema(&event.uri));
 
-        if should_update {
-            info!("fbs file changed, updating search paths...");
-            // In theory we could avoid a full scan, but
-            // these events are rare enough that we can stay simple.
-            // TODO: This needs to reset state for the changed files.
-            self.scan_workspace().await;
+        let mut files_to_reparse = std::collections::HashSet::new();
+
+        for event in params.changes {
+            let canonical_uri = crate::utils::paths::canonical_file_url(&event.uri);
+            if !is_flatbuffer_schema(&canonical_uri) {
+                continue;
+            }
+
+            match event.typ {
+                tower_lsp::lsp_types::FileChangeType::CREATED => {
+                    files_to_reparse.insert(canonical_uri);
+                }
+                tower_lsp::lsp_types::FileChangeType::CHANGED => {
+                    // NOTE: This doubles the work done on save,
+                    // but allows us to capture file changes made
+                    // outside of the client (e.g. git checkout).
+                    files_to_reparse.insert(canonical_uri);
+                }
+                tower_lsp::lsp_types::FileChangeType::DELETED => {
+                    let affected_files = self.workspace.remove_file(&canonical_uri);
+                    for uri in affected_files {
+                        files_to_reparse.insert(uri);
+                    }
+                    self.client
+                        .publish_diagnostics(canonical_uri, vec![], None)
+                        .await;
+                }
+                _ => {}
+            }
+        }
+
+        for uri in files_to_reparse {
+            self.parse_and_publish(uri, None).await;
         }
     }
 

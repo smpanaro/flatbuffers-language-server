@@ -11,6 +11,7 @@ mod references;
 mod rename;
 mod scenarios;
 mod test_logger;
+mod workspace;
 
 #[tokio::test]
 async fn initialize_server_test() {

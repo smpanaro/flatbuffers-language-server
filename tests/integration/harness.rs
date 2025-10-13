@@ -210,6 +210,73 @@ impl TestHarness {
         }
     }
 
+    pub async fn initialize_with_workspace_folders(
+        &mut self,
+        folder_names: &[&str],
+        workspace_files: &[(&str, &str)],
+        files_to_open: &[&str],
+    ) {
+        let mut workspace_folders = Vec::new();
+        for folder_name in folder_names {
+            let folder_path = self.temp_dir.path().join(folder_name);
+            fs::create_dir_all(&folder_path).unwrap();
+            let canonical_folder_path = folder_path.canonicalize().unwrap_or(folder_path);
+            let folder_uri = Url::from_directory_path(canonical_folder_path).unwrap();
+            workspace_folders.push(WorkspaceFolder {
+                uri: folder_uri,
+                name: folder_name.to_string(),
+            });
+        }
+
+        for (name, content) in workspace_files {
+            let path = self.temp_dir.path().join(name);
+            if let Some(parent) = path.parent() {
+                fs::create_dir_all(parent).unwrap();
+            }
+            fs::write(path, content).unwrap();
+        }
+
+        let mut params = InitializeParams::default();
+        params.workspace_folders = Some(workspace_folders);
+
+        let id = self.next_request_id();
+        let req = Request::build("initialize")
+            .params(serde_json::to_value(params).unwrap())
+            .id(id)
+            .finish();
+        self.send_request(req).await;
+        let res = match self.recv_message().await {
+            ServerMessage::Response(res) => res,
+            _ => panic!("unexpected message"),
+        };
+        assert!(res.is_ok());
+
+        let params = InitializedParams {};
+        let req = Request::build("initialized")
+            .params(serde_json::to_value(params).unwrap())
+            .finish();
+        self.send_request(req).await;
+
+        let open_set: std::collections::HashSet<&str> = files_to_open.iter().cloned().collect();
+        for (name, content) in workspace_files {
+            if open_set.contains(name) {
+                let path = self.temp_dir.path().join(name);
+                let uri = Url::from_file_path(path).unwrap();
+                let text_document = TextDocumentItem {
+                    uri,
+                    language_id: "flatbuffers".to_string(),
+                    version: 1,
+                    text: content.to_string(),
+                };
+                let params = DidOpenTextDocumentParams { text_document };
+                let req = Request::build("textDocument/didOpen")
+                    .params(serde_json::to_value(params).unwrap())
+                    .finish();
+                self.send_request(req).await;
+            }
+        }
+    }
+
     pub async fn change_file(
         &mut self,
         identifier: VersionedTextDocumentIdentifier,
@@ -238,6 +305,13 @@ impl TestHarness {
             text_document: TextDocumentIdentifier { uri },
         };
         let req = Request::build("textDocument/didClose")
+            .params(serde_json::to_value(params).unwrap())
+            .finish();
+        self.send_request(req).await;
+    }
+
+    pub async fn send_notification<N: Notification>(&mut self, params: N::Params) {
+        let req = Request::build(N::METHOD)
             .params(serde_json::to_value(params).unwrap())
             .finish();
         self.send_request(req).await;

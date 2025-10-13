@@ -279,6 +279,31 @@ impl Workspace {
         self.file_definitions.contains_key(uri)
     }
 
+    pub fn remove_file(&self, uri: &Url) -> Vec<Url> {
+        if let Some((_, old_symbol_keys)) = self.file_definitions.remove(uri) {
+            for key in old_symbol_keys {
+                self.symbols.remove(&key);
+            }
+        }
+
+        if let Some((_, included_files)) = self.file_includes.remove(uri) {
+            for included_uri in included_files {
+                if let Some(mut included_by) = self.file_included_by.get_mut(&included_uri) {
+                    included_by.retain(|x| x != uri);
+                }
+            }
+        }
+
+        self.root_types.remove(uri);
+        self.published_diagnostics.remove(uri);
+
+        if let Some((_, included_by_files)) = self.file_included_by.remove(uri) {
+            return included_by_files;
+        }
+
+        vec![]
+    }
+
     pub async fn parse_and_update(
         &self,
         initial_uri: Url,
@@ -326,6 +351,13 @@ impl Workspace {
             if let Some(st) = symbol_table {
                 self.update_symbols(&uri, st, included_files.clone(), root_type_info);
             } else {
+                // A parse error occurred, but we don't want to clear the old symbol table
+                // as it may be useful to the user while they are editing.
+                // We do want to make sure that we are tracking this file's existence,
+                // in case it needs to be cleaned up later.
+                if !self.file_definitions.contains_key(&uri) {
+                    self.file_definitions.insert(uri.clone(), vec![]);
+                }
                 self.update_includes(&uri, included_files.clone());
             }
 
