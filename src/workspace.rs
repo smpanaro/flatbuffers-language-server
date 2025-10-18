@@ -307,29 +307,21 @@ impl Workspace {
     pub async fn parse_and_update(
         &self,
         initial_uri: Url,
-        initial_content: Option<String>,
         document_map: &DashMap<String, ropey::Rope>,
         search_paths: &[Url],
+        parsed_files: &mut HashSet<Url>,
     ) -> (HashMap<Url, Vec<Diagnostic>>, HashSet<Url>) {
-        let mut files_to_parse = vec![(initial_uri.clone(), initial_content)];
-        let mut parsed_files = HashSet::new();
+        let mut files_to_parse = vec![initial_uri.clone()];
+        let mut newly_parsed_files = HashSet::new();
         let mut all_diagnostics = std::collections::HashMap::new();
 
-        let old_included_files = self
-            .file_includes
-            .get(&initial_uri)
-            .map(|v| v.value().clone())
-            .unwrap_or_default();
-
-        while let Some((uri, content_opt)) = files_to_parse.pop() {
+        while let Some(uri) = files_to_parse.pop() {
             if !parsed_files.insert(uri.clone()) {
                 continue;
             }
+            newly_parsed_files.insert(uri.clone());
 
-            let content = if let Some(c) = content_opt {
-                document_map.insert(uri.to_string(), ropey::Rope::from_str(&c));
-                c
-            } else if let Some(doc) = document_map.get(&uri.to_string()) {
+            let content = if let Some(doc) = document_map.get(&uri.to_string()) {
                 doc.value().to_string()
             } else {
                 match tokio::fs::read_to_string(uri.to_file_path().unwrap()).await {
@@ -367,15 +359,14 @@ impl Workspace {
 
             for included_uri in included_files {
                 if !parsed_files.contains(&included_uri) {
-                    files_to_parse.push((included_uri, None));
+                    files_to_parse.push(included_uri);
                 }
             }
         }
 
         let mut files_to_update = HashSet::new();
         files_to_update.insert(initial_uri);
-        files_to_update.extend(old_included_files);
-        files_to_update.extend(parsed_files);
+        files_to_update.extend(newly_parsed_files);
 
         (all_diagnostics, files_to_update)
     }

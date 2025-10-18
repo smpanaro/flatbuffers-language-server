@@ -14,9 +14,11 @@ pub async fn handle_did_open(backend: &Backend, params: DidOpenTextDocumentParam
     }
     let canonical_uri = crate::utils::paths::canonical_file_url(&params.text_document.uri);
 
-    backend
-        .parse_and_publish(canonical_uri, Some(params.text_document.text))
-        .await;
+    backend.document_map.insert(
+        canonical_uri.to_string(),
+        ropey::Rope::from_str(&params.text_document.text),
+    );
+    backend.parse_many_and_publish(vec![canonical_uri]).await;
 }
 
 pub async fn handle_did_change(backend: &Backend, mut params: DidChangeTextDocumentParams) {
@@ -30,7 +32,7 @@ pub async fn handle_did_change(backend: &Backend, mut params: DidChangeTextDocum
     backend
         .document_map
         .insert(canonical_uri.to_string(), ropey::Rope::from_str(&content));
-    backend.parse_and_publish(canonical_uri, None).await;
+    backend.parse_many_and_publish(vec![canonical_uri]).await;
 }
 
 pub async fn handle_did_save(backend: &Backend, params: DidSaveTextDocumentParams) {
@@ -41,57 +43,34 @@ pub async fn handle_did_save(backend: &Backend, params: DidSaveTextDocumentParam
 
     let canonical_uri = crate::utils::paths::canonical_file_url(&params.text_document.uri);
 
+    if let Some(text) = params.text {
+        backend
+            .document_map
+            .insert(canonical_uri.to_string(), ropey::Rope::from_str(&text));
+    }
+
     let mut files_to_reparse = vec![canonical_uri.clone()];
     if let Some(includers) = backend.workspace.file_included_by.get(&canonical_uri) {
         files_to_reparse.extend(includers.value().clone());
     }
 
-    for uri in files_to_reparse {
-        backend.parse_and_publish(uri, None).await;
-    }
+    backend.parse_many_and_publish(files_to_reparse).await;
 }
 
-pub async fn handle_did_close(backend: &Backend, params: DidCloseTextDocumentParams) {
+pub async fn handle_did_close(_: &Backend, params: DidCloseTextDocumentParams) {
     debug!("closed: {}", params.text_document.uri.path());
     if !is_flatbuffer_schema(&params.text_document.uri) {
         return;
     }
-
-    let canonical_uri = crate::utils::paths::canonical_file_url(&params.text_document.uri);
-
-    // TODO: Maybe we shouldn't remove all these things?
-    backend.document_map.remove(&canonical_uri.to_string());
-
-    let includers = backend
-        .workspace
-        .file_included_by
-        .get(&canonical_uri)
-        .map(|v| v.value().clone())
-        .unwrap_or_default();
-
-    // Remove symbols defined in the closed file
-    if let Some((_, old_symbol_keys)) = backend.workspace.file_definitions.remove(&canonical_uri) {
-        for key in old_symbol_keys {
-            backend.workspace.symbols.remove(&key);
-        }
-    }
-
-    backend.workspace.update_includes(&canonical_uri, vec![]);
-
-    // Re-parse files that included the closed file
-    for uri in includers {
-        backend.parse_and_publish(uri.clone(), None).await;
-    }
 }
 
 pub async fn handle_initialize(backend: &Backend, params: InitializeParams) {
-    if let Some(folders) = &params.workspace_folders {
-        for folder in folders {
-            if let Ok(path) = folder.uri.to_file_path() {
-                backend.workspace_roots.insert(path);
-            }
+    for folder in params.workspace_folders.as_deref().unwrap_or_default() {
+        if let Ok(path) = folder.uri.to_file_path() {
+            backend.workspace_roots.insert(path);
         }
     }
+
     if let Some(root_uri) = get_root_uri(&params) {
         if let Ok(path) = root_uri.to_file_path() {
             backend.workspace_roots.insert(path);
@@ -108,7 +87,7 @@ pub async fn handle_initialized(backend: &Backend) {
         .collect();
     info!("initial workspace roots: {:?}", roots);
 
-    backend.initialize_workspace().await;
+    backend.scan_workspace().await;
 
     debug!(
         "initialized scan in {}: {} files",

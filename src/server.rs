@@ -118,17 +118,13 @@ impl Backend {
         fbs_files.into_iter().collect::<Vec<_>>()
     }
 
-    pub async fn initialize_workspace(&self) {
-        self.scan_workspace().await;
-    }
-
     pub async fn scan_workspace(&self) {
-        let fbs_files = self.update_search_paths_and_discover_files().await;
-        for uri in fbs_files {
-            if !self.workspace.has_symbols_for(&uri) {
-                self.parse_and_publish(uri, None).await;
-            }
-        }
+        let fbs_files = self
+            .update_search_paths_and_discover_files()
+            .await
+            .into_iter()
+            .filter(|uri| !self.workspace.has_symbols_for(uri));
+        self.parse_many_and_publish(fbs_files).await;
     }
 
     pub async fn remove_workspace_folder(&self, folder_uri: &Url) {
@@ -157,16 +153,27 @@ impl Backend {
         search_paths_guard.retain(|path_uri| !path_uri.as_str().starts_with(folder_uri.as_str()));
         drop(search_paths_guard);
 
-        for uri in files_to_reparse {
-            self.parse_and_publish(uri, None).await;
+        self.parse_many_and_publish(files_to_reparse).await;
+    }
+
+    pub async fn parse_many_and_publish(&self, uris: impl IntoIterator<Item = Url>) {
+        let mut parsed_in_scan = std::collections::HashSet::new();
+        for uri in uris {
+            if !parsed_in_scan.contains(&uri) {
+                self.parse_and_publish(uri, &mut parsed_in_scan).await;
+            }
         }
     }
 
-    pub async fn parse_and_publish(&self, uri: Url, content: Option<String>) {
+    pub async fn parse_and_publish(
+        &self,
+        uri: Url,
+        parsed_in_scan: &mut std::collections::HashSet<Url>,
+    ) {
         let search_paths_guard = self.search_paths.read().await;
         let (diagnostics, updated_files) = self
             .workspace
-            .parse_and_update(uri, content, &self.document_map, &search_paths_guard)
+            .parse_and_update(uri, &self.document_map, &search_paths_guard, parsed_in_scan)
             .await;
 
         for file_uri in updated_files {
@@ -382,9 +389,7 @@ impl LanguageServer for Backend {
             }
         }
 
-        for uri in files_to_reparse {
-            self.parse_and_publish(uri, None).await;
-        }
+        self.parse_many_and_publish(files_to_reparse).await;
     }
 
     async fn did_change_workspace_folders(&self, params: DidChangeWorkspaceFoldersParams) {
