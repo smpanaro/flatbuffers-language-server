@@ -1,5 +1,6 @@
 use crate::parser::Parser;
 use crate::symbol_table::{RootTypeInfo, Symbol, SymbolInfo, SymbolKind};
+use crate::utils::paths::canonical_file_url;
 use dashmap::DashMap;
 use std::collections::{HashMap, HashSet};
 use tower_lsp::lsp_types::{Diagnostic, Location, Range, Url};
@@ -302,6 +303,25 @@ impl Workspace {
         }
 
         vec![]
+    }
+
+    pub fn expand_to_known_files(&self, url: &Url) -> Vec<Url> {
+        let canon = canonical_file_url(url);
+        let Ok(path) = canon.to_file_path() else {
+            return vec![];
+        };
+
+        let has_ext = path.extension().is_some();
+        if has_ext {
+            return vec![canon.clone()];
+        }
+
+        self.file_definitions
+            .iter()
+            .filter_map(|e| e.key().to_file_path().ok())
+            .filter(|fp| fp.starts_with(&path))
+            .filter_map(|fp| Url::from_file_path(fp).ok())
+            .collect()
     }
 
     pub async fn parse_and_update(

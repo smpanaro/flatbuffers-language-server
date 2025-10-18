@@ -357,12 +357,18 @@ impl LanguageServer for Backend {
         // Existing folder deleted: if it has .fbs they will show up as deleted.
         // Existing folder renamed: if it has .fbs they will show up as deleted
         //                          and created in the new location.
+        // ... except from VSCode. For which we handle folders below.
 
         let mut files_to_reparse = std::collections::HashSet::new();
 
         for event in params.changes {
             let canonical_uri = crate::utils::paths::canonical_file_url(&event.uri);
-            if !is_flatbuffer_schema(&canonical_uri) {
+
+            let has_ext = canonical_uri
+                .to_file_path()
+                .ok()
+                .map_or(false, |p| p.extension().is_some());
+            if !is_flatbuffer_schema(&canonical_uri) && has_ext {
                 continue;
             }
 
@@ -377,13 +383,19 @@ impl LanguageServer for Backend {
                     files_to_reparse.insert(canonical_uri);
                 }
                 tower_lsp::lsp_types::FileChangeType::DELETED => {
-                    let affected_files = self.workspace.remove_file(&canonical_uri);
-                    for uri in affected_files {
-                        files_to_reparse.insert(uri);
+                    // VSCode doesn't report the files in a deleted folder, so we do our best.
+                    let deleted_files = self.workspace.expand_to_known_files(&canonical_uri);
+                    for deleted in deleted_files.clone() {
+                        let affected_files = self.workspace.remove_file(&deleted);
+                        for uri in affected_files {
+                            if !deleted_files.contains(&uri) {
+                                files_to_reparse.insert(uri);
+                            }
+                        }
+                        info!("marking {} deleted", deleted.path());
+                        self.document_map.remove(deleted.as_str());
+                        self.client.publish_diagnostics(deleted, vec![], None).await;
                     }
-                    self.client
-                        .publish_diagnostics(canonical_uri, vec![], None)
-                        .await;
                 }
                 _ => {}
             }
