@@ -3,7 +3,7 @@ name: Release
 on:
   push:
     tags:
-      - "v*.*.*"
+      - "[0-9]+.[0-9]+.[0-9]+"
   workflow_dispatch:
 
 jobs:
@@ -14,16 +14,16 @@ jobs:
         include:
           - os: ubuntu-latest
             target: x86_64-unknown-linux-gnu
-            archive-name: flatbuffers-language-server-linux-x64.tar.gz
+            archive_ext: tar.gz
           - os: macos-latest
             target: x86_64-apple-darwin
-            archive-name: flatbuffers-language-server-macos-x64.tar.gz
+            archive_ext: tar.gz
           - os: macos-latest
             target: aarch64-apple-darwin
-            archive-name: flatbuffers-language-server-macos-arm64.tar.gz
+            archive_ext: tar.gz
           - os: windows-latest
             target: x86_64-pc-windows-msvc
-            archive-name: flatbuffers-language-server-windows-x64.zip
+            archive_ext: zip
 
     runs-on: ${{ matrix.os }}
 
@@ -35,6 +35,24 @@ jobs:
         uses: actions/checkout@v5
         with:
           submodules: "recursive"
+
+      - name: Prepare version and validate with Cargo.toml
+        id: prep_version
+        shell: bash
+        run: |
+          if [[ "${{ github.ref_type }}" == "tag" ]]; then
+            VERSION="${{ github.ref_name }}"
+            echo "Version from tag: $VERSION"
+
+            if ! grep -q "^version = \"$VERSION\"" Cargo.toml; then
+              echo "Error: Git tag version ($VERSION) does not match the version in Cargo.toml." >&2
+              exit 1
+            fi
+          else
+            VERSION="dev"
+            echo "Version set to 'dev' for non-tag event."
+          fi
+          echo "VERSION=$VERSION" >> $GITHUB_ENV
 
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
@@ -58,19 +76,26 @@ jobs:
       - name: Build
         run: cargo build --release --target ${{ matrix.target }}
 
+      - name: Prepare archive name
+        id: archive_name
+        shell: bash
+        run: |
+          ARCHIVE_NAME="flatbuffers-language-server-${{ env.VERSION }}-${{ matrix.target }}.${{ matrix.archive_ext }}"
+          echo "ARCHIVE_NAME=${ARCHIVE_NAME}" >> $GITHUB_ENV
+
       - name: Package binary (Linux/macOS)
         if: runner.os != 'Windows'
-        run: tar czvf ${{ matrix.archive-name }} -C target/${{ matrix.target }}/release flatbuffers-language-server
+        run: tar czvf ${{ env.ARCHIVE_NAME }} -C target/${{ matrix.target }}/release flatbuffers-language-server
 
       - name: Package binary (Windows)
         if: runner.os == 'Windows'
-        run: powershell -Command "Compress-Archive -Path target\${{ matrix.target }}\release\flatbuffers-language-server.exe -DestinationPath ${{ matrix.archive-name }}"
+        run: powershell -Command "Compress-Archive -Path target\${{ matrix.target }}\release\flatbuffers-language-server.exe -DestinationPath ${{ env.ARCHIVE_NAME }}"
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
-          name: ${{ matrix.archive-name }}
-          path: ${{ matrix.archive-name }}
+          name: ${{ env.ARCHIVE_NAME }}
+          path: ${{ env.ARCHIVE_NAME }}
 
   create-release:
     name: Create Release
