@@ -1,7 +1,5 @@
-use std::collections::HashMap;
-use tower_lsp::lsp_types::{Diagnostic, Url};
-
-use crate::utils::paths::canonical_file_url;
+use std::{collections::HashMap, path::PathBuf};
+use tower_lsp::lsp_types::Diagnostic;
 
 pub mod codes;
 pub mod duplicate_definition;
@@ -12,14 +10,14 @@ pub mod snake_case_warning;
 pub mod undefined_type;
 
 pub trait ErrorDiagnosticHandler {
-    fn handle(&self, line: &str, content: &str) -> Option<(Url, Diagnostic)>;
+    fn handle(&self, line: &str, content: &str) -> Option<(PathBuf, Diagnostic)>;
 }
 
 pub fn generate_diagnostics_from_error_string(
     error_str: &str,
     content: &str,
-) -> HashMap<Url, Vec<Diagnostic>> {
-    let mut diagnostics_map: HashMap<Url, Vec<Diagnostic>> = HashMap::new();
+) -> HashMap<PathBuf, Vec<Diagnostic>> {
+    let mut diagnostics_map: HashMap<PathBuf, Vec<Diagnostic>> = HashMap::new();
     let handlers: Vec<Box<dyn ErrorDiagnosticHandler>> = vec![
         Box::new(duplicate_definition::DuplicateDefinitionHandler),
         Box::new(expecting_token::ExpectingTokenHandler),
@@ -30,11 +28,8 @@ pub fn generate_diagnostics_from_error_string(
 
     for line in error_str.lines() {
         for handler in &handlers {
-            if let Some((file_uri, diagnostic)) = handler.handle(line, content) {
-                diagnostics_map
-                    .entry(canonical_file_url(&file_uri))
-                    .or_default()
-                    .push(diagnostic);
+            if let Some((path, diagnostic)) = handler.handle(line, content) {
+                diagnostics_map.entry(path).or_default().push(diagnostic);
                 break;
             }
         }

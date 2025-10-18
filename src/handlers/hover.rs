@@ -1,6 +1,7 @@
 use crate::analysis::resolve_symbol_at;
 use crate::ext::duration::DurationFormat;
 use crate::server::Backend;
+use crate::utils::paths::url_to_path_buf;
 use log::debug;
 use ropey::Rope;
 use std::time::Instant;
@@ -51,6 +52,10 @@ pub async fn handle_hover(backend: &Backend, params: HoverParams) -> Result<Opti
     let pos = params.text_document_position_params.position;
     let mut res: Option<Hover> = None;
 
+    let Ok(path) = url_to_path_buf(&uri) else {
+        return Ok(None);
+    };
+
     if let Some(resolved) = resolve_symbol_at(&backend.workspace, &uri, pos) {
         res = Some(Hover {
             contents: HoverContents::Markup(MarkupContent {
@@ -59,7 +64,7 @@ pub async fn handle_hover(backend: &Backend, params: HoverParams) -> Result<Opti
             }),
             range: Some(resolved.range),
         });
-    } else if let Some(doc) = backend.document_map.get(uri.as_str()) {
+    } else if let Some(doc) = backend.document_map.get(&path) {
         if !is_inside_braces(&doc, pos) {
             if let Some(line) = doc.lines().nth(pos.line as usize) {
                 let (start_char, end_char) = find_word_at_pos(&line.to_string(), pos.character);
@@ -92,7 +97,7 @@ pub async fn handle_hover(backend: &Backend, params: HoverParams) -> Result<Opti
     debug!(
         "hover in {}: {} L{}C{}",
         elapsed.log_str(),
-        &uri.path(),
+        path.display(),
         pos.line + 1,
         pos.character + 1
     );

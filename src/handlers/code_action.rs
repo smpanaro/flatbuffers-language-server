@@ -1,5 +1,6 @@
 use crate::diagnostics::codes::DiagnosticCode;
 use crate::server::Backend;
+use crate::utils::paths::url_to_path_buf;
 
 use serde_json::Value;
 use std::collections::HashMap;
@@ -177,14 +178,15 @@ fn generate_undefined_type_code_actions(
         return vec![];
     };
 
-    let Some(doc) = backend.document_map.get(uri.as_str()) else {
+    let Ok(current_path) = url_to_path_buf(uri) else {
         return vec![];
     };
 
-    let Ok(current_path) = uri.to_file_path() else {
+    let Some(current_dir) = current_path.parent() else {
         return vec![];
     };
-    let Some(current_dir) = current_path.parent() else {
+
+    let Some(doc) = backend.document_map.get(&current_path) else {
         return vec![];
     };
 
@@ -222,9 +224,7 @@ fn generate_undefined_type_code_actions(
     let mut code_actions = Vec::new();
 
     for symbol in matching_symbols {
-        let Ok(symbol_path) = symbol.info.location.uri.to_file_path() else {
-            continue;
-        };
+        let symbol_path = symbol.info.location.path.to_path_buf();
         let Some(relative_path) = pathdiff::diff_paths(&symbol_path, current_dir) else {
             continue;
         };
@@ -234,11 +234,11 @@ fn generate_undefined_type_code_actions(
             backend
                 .workspace
                 .file_includes
-                .get(uri)
+                .get(&current_path)
                 .map_or(false, |includes| {
                     includes
                         .iter()
-                        .any(|include_uri| include_uri == &symbol.info.location.uri)
+                        .any(|include_path| include_path == &symbol_path)
                 });
 
         let has_existing_includes = last_include_line.is_some();

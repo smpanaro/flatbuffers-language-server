@@ -2,22 +2,24 @@ use crate::analysis::find_enclosing_table;
 use crate::ext::duration::DurationFormat;
 use crate::server::Backend;
 use crate::symbol_table::SymbolKind;
+use crate::utils::paths::url_to_path_buf;
 use log::debug;
 use once_cell::sync::Lazy;
 use regex::Regex;
 use ropey::Rope;
+use std::path::PathBuf;
 use std::time::Instant;
 use tower_lsp::jsonrpc::Result;
 use tower_lsp::lsp_types::{
     CompletionItem, CompletionItemKind, CompletionParams, CompletionResponse, Documentation,
-    MarkupContent, MarkupKind, Position, Range, TextEdit, Url,
+    MarkupContent, MarkupKind, Position, Range, TextEdit,
 };
 
 static FIELD_RE: Lazy<Regex> = Lazy::new(|| Regex::new(r"^\s*(\w+)\s*:\s*(\w*)").unwrap());
 
 fn handle_attribute_completion(
     backend: &Backend,
-    uri: &Url,
+    path: &PathBuf,
     position: Position,
     line: &str,
 ) -> Option<CompletionResponse> {
@@ -45,7 +47,7 @@ fn handle_attribute_completion(
 
         // ID completion
         if "id".starts_with(last_word) {
-            if let Some(table_symbol) = find_enclosing_table(&backend.workspace, uri, position) {
+            if let Some(table_symbol) = find_enclosing_table(&backend.workspace, path, position) {
                 if let SymbolKind::Table(table) = &table_symbol.kind {
                     let mut max_id = -1;
                     let mut style_with_space = true;
@@ -59,7 +61,7 @@ fn handle_attribute_completion(
                                 // Check styling
                                 if let Some(line) = backend
                                     .document_map
-                                    .get(uri.as_str())
+                                    .get(path)
                                     .unwrap()
                                     .lines()
                                     .nth(field.info.location.range.start.line as usize)
@@ -439,10 +441,13 @@ pub async fn handle_completion(
     params: CompletionParams,
 ) -> Result<Option<CompletionResponse>> {
     let start = Instant::now();
-    let uri = params.text_document_position.text_document.uri;
     let position = params.text_document_position.position;
 
-    let Some(doc) = backend.document_map.get(uri.as_str()) else {
+    let Ok(path) = url_to_path_buf(&params.text_document_position.text_document.uri) else {
+        return Ok(None);
+    };
+
+    let Some(doc) = backend.document_map.get(&path) else {
         return Ok(None);
     };
     let Some(line) = doc
@@ -458,7 +463,7 @@ pub async fn handle_completion(
     }
 
     let response =
-        if let Some(response) = handle_attribute_completion(backend, &uri, position, &line) {
+        if let Some(response) = handle_attribute_completion(backend, &path, position, &line) {
             Some(response)
         } else if let Some(response) = handle_root_type_completion(backend, &line) {
             Some(response)
@@ -472,7 +477,7 @@ pub async fn handle_completion(
     debug!(
         "completion in {}: {} L{}C{} -> {} items",
         elapsed.log_str(),
-        &uri.path(),
+        path.display(),
         position.line + 1,
         position.character + 1,
         response.as_ref().map_or(0, |r| match r {

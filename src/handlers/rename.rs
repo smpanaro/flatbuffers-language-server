@@ -21,7 +21,7 @@ pub async fn prepare_rename(
         return Ok(None);
     };
 
-    if resolved.target.info.location.uri.scheme() == "builtin" {
+    if resolved.target.info.builtin {
         return Ok(None);
     }
 

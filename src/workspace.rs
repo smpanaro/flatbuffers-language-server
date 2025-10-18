@@ -1,9 +1,9 @@
 use crate::parser::Parser;
-use crate::symbol_table::{RootTypeInfo, Symbol, SymbolInfo, SymbolKind};
-use crate::utils::paths::canonical_file_url;
+use crate::symbol_table::{Location, RootTypeInfo, Symbol, SymbolInfo, SymbolKind};
 use dashmap::DashMap;
 use std::collections::{HashMap, HashSet};
-use tower_lsp::lsp_types::{Diagnostic, Location, Range, Url};
+use std::path::PathBuf;
+use tower_lsp::lsp_types::{Diagnostic, Range};
 
 #[derive(Debug, Clone)]
 pub struct Workspace {
@@ -14,14 +14,14 @@ pub struct Workspace {
     /// Keywords in the FlatBuffers language.
     pub keywords: DashMap<String, String>,
     /// Map from file URI to the list of symbol keys defined in that file.
-    pub file_definitions: DashMap<Url, Vec<String>>,
+    pub file_definitions: DashMap<PathBuf, Vec<String>>,
     /// Map from file URI to the list of files it includes.
-    pub file_includes: DashMap<Url, Vec<Url>>,
+    pub file_includes: DashMap<PathBuf, Vec<PathBuf>>,
     /// Map from file URI to the list of files that include it.
-    pub file_included_by: DashMap<Url, Vec<Url>>,
+    pub file_included_by: DashMap<PathBuf, Vec<PathBuf>>,
     /// Map from file URI to the root type defined in that file.
-    pub root_types: DashMap<Url, RootTypeInfo>,
-    pub published_diagnostics: DashMap<Url, Vec<Diagnostic>>,
+    pub root_types: DashMap<PathBuf, RootTypeInfo>,
+    pub published_diagnostics: DashMap<PathBuf, Vec<Diagnostic>>,
     pub builtin_attributes: DashMap<String, Attribute>,
 }
 
@@ -58,10 +58,11 @@ fn populate_builtins(workspace: &mut Workspace) {
                 name: type_name.to_string(),
                 namespace: vec![],
                 location: Location {
-                    uri: Url::parse("builtin:scalar").unwrap(),
+                    path: PathBuf::new(),
                     range: Range::default(),
                 },
                 documentation: Some(doc.to_string()),
+                builtin: true,
             },
             kind: SymbolKind::Scalar,
         };
@@ -231,161 +232,155 @@ impl Workspace {
 
     pub fn update_symbols(
         &self,
-        uri: &Url,
+        path: &PathBuf,
         st: crate::symbol_table::SymbolTable,
-        included_files: Vec<Url>,
+        included_files: Vec<PathBuf>,
         root_type_info: Option<crate::symbol_table::RootTypeInfo>,
     ) {
-        if let Some((_, old_symbol_keys)) = self.file_definitions.remove(uri) {
+        if let Some((_, old_symbol_keys)) = self.file_definitions.remove(path) {
             for key in old_symbol_keys {
                 self.symbols.remove(&key);
             }
         }
-        self.root_types.remove(uri);
+        self.root_types.remove(path);
 
-        self.update_includes(uri, included_files);
+        self.update_includes(path, included_files);
 
         let symbol_map = st.into_inner();
         let new_symbol_keys: Vec<String> = symbol_map.keys().cloned().collect();
         for (key, symbol) in symbol_map {
             self.symbols.insert(key, symbol);
         }
-        self.file_definitions.insert(uri.clone(), new_symbol_keys);
+        self.file_definitions.insert(path.clone(), new_symbol_keys);
 
         if let Some(rti) = root_type_info {
-            self.root_types.insert(uri.clone(), rti);
+            self.root_types.insert(path.clone(), rti);
         }
     }
 
-    pub fn update_includes(&self, uri: &Url, included_uris: Vec<Url>) {
-        if let Some((_, old_included_files)) = self.file_includes.remove(uri) {
-            for old_included_uri in old_included_files {
-                if let Some(mut included_by) = self.file_included_by.get_mut(&old_included_uri) {
-                    included_by.retain(|x| x != uri);
+    pub fn update_includes(&self, path: &PathBuf, included_paths: Vec<PathBuf>) {
+        if let Some((_, old_included_files)) = self.file_includes.remove(path) {
+            for old_included_path in old_included_files {
+                if let Some(mut included_by) = self.file_included_by.get_mut(&old_included_path) {
+                    included_by.retain(|x| x != path);
                 }
             }
         }
 
-        for included_uri in &included_uris {
+        for included_path in &included_paths {
             self.file_included_by
-                .entry(included_uri.clone())
+                .entry(included_path.clone())
                 .or_default()
-                .push(uri.clone());
+                .push(path.clone());
         }
 
-        self.file_includes.insert(uri.clone(), included_uris);
+        self.file_includes.insert(path.clone(), included_paths);
     }
 
-    pub fn has_symbols_for(&self, uri: &Url) -> bool {
-        self.file_definitions.contains_key(uri)
+    pub fn has_symbols_for(&self, path: &PathBuf) -> bool {
+        self.file_definitions.contains_key(path)
     }
 
-    pub fn remove_file(&self, uri: &Url) -> Vec<Url> {
-        if let Some((_, old_symbol_keys)) = self.file_definitions.remove(uri) {
+    pub fn remove_file(&self, path: &PathBuf) -> Vec<PathBuf> {
+        if let Some((_, old_symbol_keys)) = self.file_definitions.remove(path) {
             for key in old_symbol_keys {
                 self.symbols.remove(&key);
             }
         }
 
-        if let Some((_, included_files)) = self.file_includes.remove(uri) {
-            for included_uri in included_files {
-                if let Some(mut included_by) = self.file_included_by.get_mut(&included_uri) {
-                    included_by.retain(|x| x != uri);
+        if let Some((_, included_files)) = self.file_includes.remove(path) {
+            for included_path in included_files {
+                if let Some(mut included_by) = self.file_included_by.get_mut(&included_path) {
+                    included_by.retain(|x| x != path);
                 }
             }
         }
 
-        self.root_types.remove(uri);
-        self.published_diagnostics.remove(uri);
+        self.root_types.remove(path);
+        self.published_diagnostics.remove(path);
 
-        if let Some((_, included_by_files)) = self.file_included_by.remove(uri) {
+        if let Some((_, included_by_files)) = self.file_included_by.remove(path) {
             return included_by_files;
         }
 
         vec![]
     }
 
-    pub fn expand_to_known_files(&self, url: &Url) -> Vec<Url> {
-        let canon = canonical_file_url(url);
-        let Ok(path) = canon.to_file_path() else {
-            return vec![];
-        };
-
+    pub fn expand_to_known_files(&self, path: &PathBuf) -> Vec<PathBuf> {
         let has_ext = path.extension().is_some();
         if has_ext {
-            return vec![canon.clone()];
+            return vec![path.clone()];
         }
 
         self.file_definitions
             .iter()
-            .filter_map(|e| e.key().to_file_path().ok())
-            .filter(|fp| fp.starts_with(&path))
-            .filter_map(|fp| Url::from_file_path(fp).ok())
+            .map(|e| e.key().clone())
+            .filter(|fp| fp.starts_with(path))
             .collect()
     }
 
     pub async fn parse_and_update(
         &self,
-        initial_uri: Url,
-        document_map: &DashMap<String, ropey::Rope>,
-        search_paths: &[Url],
-        parsed_files: &mut HashSet<Url>,
-    ) -> (HashMap<Url, Vec<Diagnostic>>, HashSet<Url>) {
-        let mut files_to_parse = vec![initial_uri.clone()];
+        initial_path: PathBuf,
+        document_map: &DashMap<PathBuf, ropey::Rope>,
+        search_paths: &[PathBuf],
+        parsed_files: &mut HashSet<PathBuf>,
+    ) -> (HashMap<PathBuf, Vec<Diagnostic>>, HashSet<PathBuf>) {
+        let mut files_to_parse = vec![initial_path.clone()];
         let mut newly_parsed_files = HashSet::new();
         let mut all_diagnostics = std::collections::HashMap::new();
 
-        while let Some(uri) = files_to_parse.pop() {
-            if !parsed_files.insert(uri.clone()) {
+        while let Some(path) = files_to_parse.pop() {
+            if !parsed_files.insert(path.clone()) {
                 continue;
             }
-            newly_parsed_files.insert(uri.clone());
+            newly_parsed_files.insert(path.clone());
 
-            let content = if let Some(doc) = document_map.get(&uri.to_string()) {
+            let content = if let Some(doc) = document_map.get(&path) {
                 doc.value().to_string()
             } else {
-                match tokio::fs::read_to_string(uri.to_file_path().unwrap()).await {
+                match tokio::fs::read_to_string(&path).await {
                     Ok(text) => {
-                        document_map.insert(uri.to_string(), ropey::Rope::from_str(&text));
+                        document_map.insert(path.clone(), ropey::Rope::from_str(&text));
                         text
                     }
                     Err(e) => {
-                        log::error!("failed to read file {}: {}", uri.path(), e);
+                        log::error!("failed to read file {}: {}", path.display(), e);
                         continue;
                     }
                 }
             };
 
-            log::info!("parsing: {}", uri.clone().path());
+            log::info!("parsing: {}", path.display());
             let (diagnostics_map, symbol_table, included_files, root_type_info) =
-                crate::parser::FlatcFFIParser.parse(&uri, &content, search_paths);
+                crate::parser::FlatcFFIParser.parse(&path, &content, search_paths);
 
             if let Some(st) = symbol_table {
-                self.update_symbols(&uri, st, included_files.clone(), root_type_info);
+                self.update_symbols(&path, st, included_files.clone(), root_type_info);
             } else {
                 // A parse error occurred, but we don't want to clear the old symbol table
                 // as it may be useful to the user while they are editing.
                 // We do want to make sure that we are tracking this file's existence,
                 // in case it needs to be cleaned up later.
-                if !self.file_definitions.contains_key(&uri) {
-                    self.file_definitions.insert(uri.clone(), vec![]);
+                if !self.file_definitions.contains_key(&path) {
+                    self.file_definitions.insert(path.clone(), vec![]);
                 }
-                self.update_includes(&uri, included_files.clone());
+                self.update_includes(&path, included_files.clone());
             }
 
-            for (file_uri, diagnostics) in diagnostics_map {
-                all_diagnostics.insert(file_uri, diagnostics);
+            for (file_path, diagnostics) in diagnostics_map {
+                all_diagnostics.insert(file_path, diagnostics);
             }
 
-            for included_uri in included_files {
-                if !parsed_files.contains(&included_uri) {
-                    files_to_parse.push(included_uri);
+            for included_path in included_files {
+                if !parsed_files.contains(&included_path) {
+                    files_to_parse.push(included_path);
                 }
             }
         }
 
         let mut files_to_update = HashSet::new();
-        files_to_update.insert(initial_uri);
+        files_to_update.insert(initial_path);
         files_to_update.extend(newly_parsed_files);
 
         (all_diagnostics, files_to_update)

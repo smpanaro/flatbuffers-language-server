@@ -1,8 +1,10 @@
+use std::{fs, path::PathBuf};
+
 use crate::diagnostics::ErrorDiagnosticHandler;
 use log::error;
 use once_cell::sync::Lazy;
 use regex::Regex;
-use tower_lsp::lsp_types::{Diagnostic, DiagnosticSeverity, Position, Range, Url};
+use tower_lsp::lsp_types::{Diagnostic, DiagnosticSeverity, Position, Range};
 
 static RE: Lazy<Regex> = Lazy::new(|| {
     Regex::new(r"^.+?:(\d+):\s*(\d+):\s+(error|warning):\s+(.+?)(?:, originally at: .+?:(\d+))?$")
@@ -12,11 +14,11 @@ static RE: Lazy<Regex> = Lazy::new(|| {
 pub struct GenericDiagnosticHandler;
 
 impl ErrorDiagnosticHandler for GenericDiagnosticHandler {
-    fn handle(&self, line: &str, _content: &str) -> Option<(Url, Diagnostic)> {
+    fn handle(&self, line: &str, _content: &str) -> Option<(PathBuf, Diagnostic)> {
         if let Some(captures) = RE.captures(line) {
             let file_path = captures.get(0).unwrap().as_str().split(':').next().unwrap();
-            let Ok(file_uri) = Url::from_file_path(file_path) else {
-                error!("failed to parse file into url: {}", file_path);
+            let Ok(file_path) = fs::canonicalize(file_path) else {
+                error!("failed to canonicalize file: {}", file_path);
                 return None;
             };
 
@@ -50,7 +52,7 @@ impl ErrorDiagnosticHandler for GenericDiagnosticHandler {
             };
 
             return Some((
-                file_uri,
+                file_path,
                 Diagnostic {
                     range,
                     severity: Some(severity),

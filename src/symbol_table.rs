@@ -1,8 +1,23 @@
-use crate::utils::parsed_type::ParsedType;
-use std::collections::HashMap;
-use tower_lsp::lsp_types::{CompletionItemKind, Location, Position, Range, Url};
+use crate::utils::{parsed_type::ParsedType, paths::path_buf_to_url};
+use std::{collections::HashMap, path::PathBuf};
+use tower_lsp::lsp_types::{self, CompletionItemKind, Position, Range};
 
 use crate::ext::range::RangeExt;
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Location {
+    pub path: PathBuf,
+    pub range: Range,
+}
+
+impl From<Location> for lsp_types::Location {
+    fn from(val: Location) -> Self {
+        lsp_types::Location {
+            uri: path_buf_to_url(&val.path).unwrap(),
+            range: val.range,
+        }
+    }
+}
 
 #[derive(Debug, Clone)]
 pub struct RootTypeInfo {
@@ -14,7 +29,7 @@ pub struct RootTypeInfo {
 // A map from a fully qualified name to its symbol definition
 #[derive(Debug)]
 pub struct SymbolTable {
-    pub uri: Url,
+    pub path: PathBuf,
     table: HashMap<String, Symbol>,
 }
 
@@ -43,6 +58,7 @@ pub struct SymbolInfo {
     pub namespace: Vec<String>,
     pub location: Location,
     pub documentation: Option<String>,
+    pub builtin: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -104,8 +120,8 @@ impl Symbol {
         }
     }
 
-    pub fn find_symbol<'a>(&'a self, uri: &Url, pos: Position) -> Option<&'a Symbol> {
-        if self.info.location.uri.path() != uri.path() {
+    pub fn find_symbol<'a>(&'a self, path: &PathBuf, pos: Position) -> Option<&'a Symbol> {
+        if self.info.location.path != *path {
             return None;
         }
 
@@ -192,9 +208,9 @@ impl Symbol {
 
 impl SymbolTable {
     /// Create a new token map.
-    pub fn new(uri: Url) -> SymbolTable {
+    pub fn new(path: PathBuf) -> SymbolTable {
         SymbolTable {
-            uri,
+            path: path,
             table: HashMap::with_capacity(2048),
         }
     }

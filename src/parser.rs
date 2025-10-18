@@ -5,26 +5,25 @@ use crate::symbol_table::{
     Table, Union, UnionVariant,
 };
 use crate::utils::parsed_type::parse_type;
-use crate::utils::paths::canonical_file_url;
-use crate::utils::paths::file_path_to_canonical_url;
 use log::{debug, error};
 use std::collections::HashMap;
 use std::ffi::c_char;
 use std::ffi::{CStr, CString};
 use std::fs;
-use tower_lsp::lsp_types::{Diagnostic, Location, Position, Range, Url};
+use std::path::{Path, PathBuf};
+use tower_lsp::lsp_types::{Diagnostic, Position, Range};
 
 /// A trait for parsing FlatBuffers schema files.
 pub trait Parser {
     fn parse(
         &self,
-        uri: &Url,
+        path: &Path,
         content: &str,
-        search_paths: &[Url],
+        search_paths: &[PathBuf],
     ) -> (
-        HashMap<Url, Vec<Diagnostic>>,
+        HashMap<PathBuf, Vec<Diagnostic>>,
         Option<SymbolTable>,
-        Vec<Url>,
+        Vec<PathBuf>,
         Option<RootTypeInfo>,
     );
 }
@@ -35,25 +34,24 @@ pub struct FlatcFFIParser;
 impl Parser for FlatcFFIParser {
     fn parse(
         &self,
-        uri: &Url,
+        path: &Path,
         content: &str,
-        search_paths: &[Url],
+        search_paths: &[PathBuf],
     ) -> (
-        HashMap<Url, Vec<Diagnostic>>,
+        HashMap<PathBuf, Vec<Diagnostic>>,
         Option<SymbolTable>,
-        Vec<Url>,
+        Vec<PathBuf>,
         Option<RootTypeInfo>,
     ) {
         let c_content = match CString::new(content) {
             Ok(s) => s,
             Err(_) => return (HashMap::new(), None, vec![], None), // Content has null bytes
         };
-        let c_filename = CString::new(uri.to_file_path().unwrap().to_str().unwrap()).unwrap();
+        let c_filename = CString::new(path.to_str().unwrap_or_default()).unwrap();
 
         let c_search_paths: Vec<CString> = search_paths
             .iter()
-            .filter_map(|url| url.to_file_path().ok()) // Url -> PathBuf
-            .filter_map(|path| CString::new(path.to_str().unwrap_or("")).ok()) // PathBuf -> CString
+            .filter_map(|path| CString::new(path.to_str().unwrap_or_default()).ok())
             .collect();
 
         let mut c_path_ptrs: Vec<*const c_char> =
@@ -73,11 +71,11 @@ impl Parser for FlatcFFIParser {
             let (diagnostics, symbol_table, included_files, root_type_info) =
                 if ffi::is_parser_success(parser_ptr) {
                     let (st, included, root_info, diags) =
-                        parse_success_case(parser_ptr, uri, content, search_paths);
+                        parse_success_case(parser_ptr, path, content, search_paths);
                     (diags, Some(st), included, root_info)
                 } else {
                     (
-                        parse_error_messages(parser_ptr, &uri, content),
+                        parse_error_messages(parser_ptr, path, content),
                         None,
                         extract_all_included_files(parser_ptr),
                         None,
@@ -94,23 +92,23 @@ impl Parser for FlatcFFIParser {
 /// Handles the successful parse case.
 unsafe fn parse_success_case(
     parser_ptr: *mut ffi::FlatbuffersParser,
-    uri: &Url,
+    path: &Path,
     content: &str,
-    search_paths: &[Url],
+    search_paths: &[PathBuf],
 ) -> (
     SymbolTable,
-    Vec<Url>,
+    Vec<PathBuf>,
     Option<RootTypeInfo>,
-    HashMap<Url, Vec<Diagnostic>>,
+    HashMap<PathBuf, Vec<Diagnostic>>,
 ) {
-    let mut st = SymbolTable::new(uri.clone());
+    let mut st = SymbolTable::new(path.to_path_buf());
     extract_structs_and_tables(parser_ptr, &mut st);
     extract_enums_and_unions(parser_ptr, &mut st);
 
     let included_files = extract_all_included_files(parser_ptr);
     let root_type_info = extract_root_type(parser_ptr);
 
-    let mut diagnostics = parse_error_messages(parser_ptr, uri, content); // warnings
+    let mut diagnostics = parse_error_messages(parser_ptr, path, content); // warnings
     let include_graph = unsafe { build_include_graph(parser_ptr) };
     diagnostics::semantic::analyze_unused_includes(
         &st,
@@ -128,12 +126,12 @@ unsafe fn parse_success_case(
 /// Parse flatc's error messages (in the error case) or warnings (in the success case).
 unsafe fn parse_error_messages(
     parser_ptr: *mut ffi::FlatbuffersParser,
-    uri: &Url,
+    path: &Path,
     content: &str,
-) -> HashMap<Url, Vec<Diagnostic>> {
+) -> HashMap<PathBuf, Vec<Diagnostic>> {
     let error_str_ptr = ffi::get_parser_error(parser_ptr);
     if let Some(error_str) = c_str_to_optional_string(error_str_ptr).take_if(|s| !s.is_empty()) {
-        debug!("flatc error parsing {}: {}", uri.path(), error_str);
+        debug!("flatc error parsing {}: {}", path.display(), error_str);
         diagnostics::generate_diagnostics_from_error_string(&error_str, content)
     } else {
         HashMap::new()
@@ -141,14 +139,14 @@ unsafe fn parse_error_messages(
 }
 
 /// Extracts all included file paths from the parser.
-unsafe fn extract_all_included_files(parser_ptr: *mut ffi::FlatbuffersParser) -> Vec<Url> {
+unsafe fn extract_all_included_files(parser_ptr: *mut ffi::FlatbuffersParser) -> Vec<PathBuf> {
     let mut included_files = Vec::new();
     let num_included = ffi::get_num_all_included_files(parser_ptr);
     for i in 0..num_included {
-        if let Some(uri) = c_str_to_optional_string(ffi::get_all_included_file_path(parser_ptr, i))
-            .and_then(|p| file_path_to_canonical_url(&p))
+        if let Some(path) = c_str_to_optional_string(ffi::get_all_included_file_path(parser_ptr, i))
+            .and_then(|p| fs::canonicalize(&p).ok())
         {
-            included_files.push(uri);
+            included_files.push(path);
         }
     }
     included_files
@@ -177,8 +175,8 @@ unsafe fn extract_structs_and_tables(
         };
 
         let file = c_str_to_string(def_info.file);
-        let Some(file_uri) = file_path_to_canonical_url(&file) else {
-            error!("failed to parse file into url: {}", file);
+        let Ok(file_path) = fs::canonicalize(&file) else {
+            error!("failed to canonicalize file: {}", file);
             continue;
         };
 
@@ -210,7 +208,7 @@ unsafe fn extract_structs_and_tables(
             let documentation = c_str_to_optional_string(field_info.documentation);
 
             let field_symbol = create_symbol(
-                &file_uri,
+                &file_path,
                 field_name.clone(),
                 vec![], // Fields do not have namespaces themselves
                 field_info.line,
@@ -242,7 +240,7 @@ unsafe fn extract_structs_and_tables(
         let documentation = c_str_to_optional_string(def_info.documentation);
 
         let symbol = create_symbol(
-            &file_uri,
+            &file_path,
             name,
             namespace,
             def_info.line,
@@ -274,8 +272,8 @@ unsafe fn extract_enums_and_unions(parser_ptr: *mut ffi::FlatbuffersParser, st: 
         };
 
         let file = c_str_to_string(def_info.file);
-        let Some(file_uri) = file_path_to_canonical_url(&file) else {
-            error!("failed to parse file into url: {}", file);
+        let Ok(file_path) = fs::canonicalize(&file) else {
+            error!("failed to canonicalize file: {}", file);
             continue;
         };
 
@@ -310,8 +308,8 @@ unsafe fn extract_enums_and_unions(parser_ptr: *mut ffi::FlatbuffersParser, st: 
                         let type_source = c_str_to_string(val_info.type_source);
                         let type_range = val_info.type_range.into();
                         let parsed_type = parse_type(&type_source, type_range);
-                        let location = Location {
-                            uri: file_uri.clone(),
+                        let location = crate::symbol_table::Location {
+                            path: file_path.clone(),
                             range: type_range,
                         };
                         UnionVariant {
@@ -341,7 +339,7 @@ unsafe fn extract_enums_and_unions(parser_ptr: *mut ffi::FlatbuffersParser, st: 
         let documentation = c_str_to_optional_string(def_info.documentation);
 
         let symbol = create_symbol(
-            &file_uri,
+            &file_path,
             name,
             namespace,
             def_info.line,
@@ -355,28 +353,31 @@ unsafe fn extract_enums_and_unions(parser_ptr: *mut ffi::FlatbuffersParser, st: 
 
 /// Extracts the root type definition from the parser.
 unsafe fn extract_root_type(parser_ptr: *mut ffi::FlatbuffersParser) -> Option<RootTypeInfo> {
-    if ffi::has_root_type(parser_ptr) {
-        let root_def = ffi::get_root_type_info(parser_ptr);
-        let qualified_name = c_str_to_string(root_def.name);
-        let file = c_str_to_string(root_def.file);
-
-        if let Some(file_uri) = file_path_to_canonical_url(&file) {
-            let type_source = c_str_to_string(root_def.type_source);
-            let type_range = root_def.type_range.into();
-            let parsed_type = parse_type(&type_source, type_range);
-
-            let location = Location {
-                uri: file_uri,
-                range: type_range,
-            };
-            return Some(RootTypeInfo {
-                location,
-                type_name: qualified_name,
-                parsed_type,
-            });
-        }
+    if !ffi::has_root_type(parser_ptr) {
+        return None;
     }
-    None
+    let root_def = ffi::get_root_type_info(parser_ptr);
+    let qualified_name = c_str_to_string(root_def.name);
+    let file = c_str_to_string(root_def.file);
+
+    let Ok(file_path) = fs::canonicalize(&file) else {
+        error!("failed to canonicalize file: {}", file);
+        return None;
+    };
+
+    let type_source = c_str_to_string(root_def.type_source);
+    let type_range = root_def.type_range.into();
+    let parsed_type = parse_type(&type_source, type_range);
+
+    let location = crate::symbol_table::Location {
+        path: file_path,
+        range: type_range,
+    };
+    Some(RootTypeInfo {
+        location,
+        type_name: qualified_name,
+        parsed_type,
+    })
 }
 
 unsafe fn build_include_graph(
@@ -431,7 +432,7 @@ unsafe fn c_str_to_optional_string(ptr: *const std::os::raw::c_char) -> Option<S
 
 /// Helper to create a symbol and its location.
 fn create_symbol(
-    uri: &Url,
+    file_path: &PathBuf,
     name: String,
     namespace: Vec<String>,
     line: u32,
@@ -439,8 +440,8 @@ fn create_symbol(
     kind: SymbolKind,
     documentation: Option<String>,
 ) -> Symbol {
-    let location = Location {
-        uri: canonical_file_url(uri),
+    let location = crate::symbol_table::Location {
+        path: file_path.clone(),
         range: Range::new(
             Position::new(line, col - (name.chars().count() as u32)),
             Position::new(line, col),
@@ -451,6 +452,7 @@ fn create_symbol(
         namespace,
         location,
         documentation,
+        builtin: false,
     };
     Symbol { info, kind }
 }

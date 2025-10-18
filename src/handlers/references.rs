@@ -2,6 +2,7 @@ use crate::analysis::resolve_symbol_at;
 use crate::ext::duration::DurationFormat;
 use crate::server::Backend;
 use crate::symbol_table;
+use crate::utils::paths::path_buf_to_url;
 use log::debug;
 use std::time::Instant;
 use tower_lsp::jsonrpc::Result;
@@ -19,7 +20,7 @@ pub async fn handle_references(
         return Ok(None);
     };
 
-    if resolved.target.info.location.uri.scheme() == "builtin" {
+    if resolved.target.info.builtin {
         return Ok(None);
     }
 
@@ -29,7 +30,9 @@ pub async fn handle_references(
     // Find all references to this symbol across all files
     for entry in backend.workspace.symbols.iter() {
         let symbol = entry.value();
-        let file_uri = &symbol.info.location.uri;
+        let Ok(file_uri) = path_buf_to_url(&symbol.info.location.path) else {
+            continue;
+        };
 
         if let symbol_table::SymbolKind::Union(u) = &symbol.kind {
             for variant in &u.variants {
@@ -62,10 +65,13 @@ pub async fn handle_references(
 
     // Check for root_type declarations
     for entry in backend.workspace.root_types.iter() {
+        let Ok(uri) = path_buf_to_url(entry.key()) else {
+            continue;
+        };
         let root_type_info = entry.value();
         if root_type_info.type_name == target_name {
             references.push(Location {
-                uri: entry.key().clone(),
+                uri,
                 range: root_type_info.parsed_type.type_name.range,
             });
         }
@@ -74,8 +80,8 @@ pub async fn handle_references(
     // Include the definition itself if requested
     if params.context.include_declaration {
         if let Some(def_symbol) = backend.workspace.symbols.get(&target_name) {
-            if def_symbol.info.location.uri.scheme() != "builtin" {
-                references.push(def_symbol.info.location.clone());
+            if !def_symbol.info.builtin {
+                references.push(def_symbol.info.location.clone().into());
             }
         }
     }

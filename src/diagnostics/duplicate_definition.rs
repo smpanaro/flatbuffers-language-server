@@ -1,3 +1,5 @@
+use std::{fs, path::PathBuf};
+
 use crate::diagnostics::ErrorDiagnosticHandler;
 use log::error;
 use once_cell::sync::Lazy;
@@ -16,11 +18,11 @@ static DUPLICATE_RE: Lazy<Regex> = Lazy::new(|| {
 pub struct DuplicateDefinitionHandler;
 
 impl ErrorDiagnosticHandler for DuplicateDefinitionHandler {
-    fn handle(&self, line: &str, _content: &str) -> Option<(Url, Diagnostic)> {
+    fn handle(&self, line: &str, _content: &str) -> Option<(PathBuf, Diagnostic)> {
         if let Some(captures) = DUPLICATE_RE.captures(line) {
             let file_path = captures[1].trim();
-            let Ok(file_uri) = Url::from_file_path(file_path) else {
-                error!("failed to parse file into url: {}", file_path);
+            let Ok(file_path) = fs::canonicalize(file_path) else {
+                error!("failed to canonicalize file: {}", file_path);
                 return None;
             };
 
@@ -64,7 +66,7 @@ impl ErrorDiagnosticHandler for DuplicateDefinitionHandler {
                 },
             };
             Some((
-                file_uri,
+                file_path,
                 Diagnostic {
                     range,
                     severity: Some(DiagnosticSeverity::ERROR),

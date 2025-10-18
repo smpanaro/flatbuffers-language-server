@@ -1,11 +1,13 @@
-use crate::diagnostics::codes::DiagnosticCode;
+use std::{fs, path::PathBuf};
+
 use crate::diagnostics::ErrorDiagnosticHandler;
+use crate::{diagnostics::codes::DiagnosticCode, utils::paths::path_buf_to_url};
 use log::error;
 use once_cell::sync::Lazy;
 use regex::Regex;
 use serde_json;
 use tower_lsp::lsp_types::{
-    Diagnostic, DiagnosticRelatedInformation, DiagnosticSeverity, Location, Position, Range, Url,
+    Diagnostic, DiagnosticRelatedInformation, DiagnosticSeverity, Location, Position, Range,
 };
 
 static RE: Lazy<Regex> = Lazy::new(|| {
@@ -16,11 +18,14 @@ static RE: Lazy<Regex> = Lazy::new(|| {
 pub struct ExpectingTokenHandler;
 
 impl ErrorDiagnosticHandler for ExpectingTokenHandler {
-    fn handle(&self, line: &str, content: &str) -> Option<(Url, Diagnostic)> {
+    fn handle(&self, line: &str, content: &str) -> Option<(PathBuf, Diagnostic)> {
         if let Some(captures) = RE.captures(line) {
             let file_path = captures[1].trim();
-            let Ok(file_uri) = Url::from_file_path(file_path) else {
-                error!("failed to parse file into url: {}", file_path);
+            let Ok(file_path) = fs::canonicalize(file_path) else {
+                error!("failed to canonicalize file: {}", file_path);
+                return None;
+            };
+            let Ok(file_url) = path_buf_to_url(&file_path) else {
                 return None;
             };
 
@@ -115,7 +120,7 @@ impl ErrorDiagnosticHandler for ExpectingTokenHandler {
                 );
                 related_information.push(DiagnosticRelatedInformation {
                     location: Location {
-                        uri: file_uri.clone(),
+                        uri: file_url.clone(),
                         range: unexpected_token_range,
                     },
                     message: "unexpected token".to_string(),
@@ -124,14 +129,14 @@ impl ErrorDiagnosticHandler for ExpectingTokenHandler {
 
             related_information.push(DiagnosticRelatedInformation {
                 location: Location {
-                    uri: file_uri.clone(),
+                    uri: file_url.clone(),
                     range,
                 },
                 message: format!("add `{}` here", expected_token),
             });
 
             return Some((
-                file_uri,
+                file_path,
                 Diagnostic {
                     range,
                     severity: Some(DiagnosticSeverity::ERROR),

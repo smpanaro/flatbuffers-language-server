@@ -1,10 +1,12 @@
+use std::{fs, path::PathBuf};
+
 use crate::diagnostics::codes::DiagnosticCode;
 use crate::diagnostics::ErrorDiagnosticHandler;
 use log::error;
 use once_cell::sync::Lazy;
 use regex::Regex;
 use serde_json::json;
-use tower_lsp::lsp_types::{Diagnostic, DiagnosticSeverity, Position, Range, Url};
+use tower_lsp::lsp_types::{Diagnostic, DiagnosticSeverity, Position, Range};
 
 static RE: Lazy<Regex> = Lazy::new(|| {
     Regex::new(r"^.+?:(\d+):\s*(\d+):\s+(error|warning):\s+(.+?)(?:, originally at: (.+?):(\d+)(?::(\d+)-(\d+):(\d+))?)?$")
@@ -18,7 +20,7 @@ static UNDEFINED_TYPE_RE: Lazy<Regex> = Lazy::new(|| {
 pub struct UndefinedTypeHandler;
 
 impl ErrorDiagnosticHandler for UndefinedTypeHandler {
-    fn handle(&self, line: &str, content: &str) -> Option<(Url, Diagnostic)> {
+    fn handle(&self, line: &str, content: &str) -> Option<(PathBuf, Diagnostic)> {
         if let Some(captures) = RE.captures(line) {
             let message = captures[4].trim().to_string();
             if let Some(undefined_type_captures) = UNDEFINED_TYPE_RE.captures(&message) {
@@ -108,8 +110,8 @@ impl ErrorDiagnosticHandler for UndefinedTypeHandler {
                     range = temp_range;
                 }
 
-                let Ok(file_uri) = Url::from_file_path(file_path) else {
-                    error!("failed to parse file into url: {}", file_path);
+                let Ok(file_path) = fs::canonicalize(file_path) else {
+                    error!("failed to canonicalize file: {}", file_path);
                     return None;
                 };
 
@@ -124,7 +126,7 @@ impl ErrorDiagnosticHandler for UndefinedTypeHandler {
                     .map(|type_name| json!({ "type_name": type_name.as_str() }));
 
                 return Some((
-                    file_uri,
+                    file_path,
                     Diagnostic {
                         range,
                         severity: Some(severity),

@@ -14,11 +14,11 @@ pub async fn handle_goto_definition(
         return Ok(None);
     };
 
-    if resolved.target.info.location.uri.scheme() == "builtin" {
+    if resolved.target.info.builtin {
         return Ok(None);
     }
 
     Ok(Some(GotoDefinitionResponse::Scalar(
-        resolved.target.info.location.clone(),
+        resolved.target.info.location.into(),
     )))
 }

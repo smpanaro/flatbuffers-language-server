@@ -34,16 +34,15 @@ pub fn get_intermediate_paths(starting_path: &Path, roots: &[PathBuf]) -> HashSe
     paths
 }
 
-pub fn canonical_file_url(url: &Url) -> Url {
+pub fn url_to_path_buf(url: &Url) -> Result<PathBuf, String> {
     url.to_file_path()
-        .ok()
-        .and_then(|p| fs::canonicalize(p).ok())
-        .and_then(|p| Url::from_file_path(p).ok())
-        .unwrap_or_else(|| url.clone())
+        .map_err(|()| format!("URL is not a file path: {url}"))
+        .and_then(|p| {
+            fs::canonicalize(&p)
+                .map_err(|err| format!("Failed to canonicalize path '{:?}': {}", p, err))
+        })
 }
 
-pub fn file_path_to_canonical_url(path: &String) -> Option<Url> {
-    Url::from_file_path(path)
-        .ok()
-        .map(|u| canonical_file_url(&u))
+pub fn path_buf_to_url(path: &Path) -> Result<Url, String> {
+    Url::from_file_path(path).map_err(|()| format!("Failed to convert path to URL: {:?}", path))
 }

@@ -1,4 +1,8 @@
-use crate::{ext::duration::DurationFormat, server::Backend, utils::paths::is_flatbuffer_schema};
+use crate::{
+    ext::duration::DurationFormat,
+    server::Backend,
+    utils::paths::{is_flatbuffer_schema, url_to_path_buf},
+};
 use log::{debug, info};
 use tokio::time::Instant;
 use tower_lsp::lsp_types::{
@@ -12,13 +16,15 @@ pub async fn handle_did_open(backend: &Backend, params: DidOpenTextDocumentParam
     if !is_flatbuffer_schema(&params.text_document.uri) {
         return;
     }
-    let canonical_uri = crate::utils::paths::canonical_file_url(&params.text_document.uri);
+    let Ok(path) = url_to_path_buf(&params.text_document.uri) else {
+        return;
+    };
 
     backend.document_map.insert(
-        canonical_uri.to_string(),
+        path.clone(),
         ropey::Rope::from_str(&params.text_document.text),
     );
-    backend.parse_many_and_publish(vec![canonical_uri]).await;
+    backend.parse_many_and_publish(vec![path]).await;
 }
 
 pub async fn handle_did_change(backend: &Backend, mut params: DidChangeTextDocumentParams) {
@@ -27,12 +33,15 @@ pub async fn handle_did_change(backend: &Backend, mut params: DidChangeTextDocum
         return;
     }
 
-    let canonical_uri = crate::utils::paths::canonical_file_url(&params.text_document.uri);
+    let Ok(path) = url_to_path_buf(&params.text_document.uri) else {
+        return;
+    };
+
     let content = params.content_changes.remove(0).text;
     backend
         .document_map
-        .insert(canonical_uri.to_string(), ropey::Rope::from_str(&content));
-    backend.parse_many_and_publish(vec![canonical_uri]).await;
+        .insert(path.clone(), ropey::Rope::from_str(&content));
+    backend.parse_many_and_publish(vec![path]).await;
 }
 
 pub async fn handle_did_save(backend: &Backend, params: DidSaveTextDocumentParams) {
@@ -41,16 +50,18 @@ pub async fn handle_did_save(backend: &Backend, params: DidSaveTextDocumentParam
         return;
     }
 
-    let canonical_uri = crate::utils::paths::canonical_file_url(&params.text_document.uri);
+    let Ok(path) = url_to_path_buf(&params.text_document.uri) else {
+        return;
+    };
 
     if let Some(text) = params.text {
         backend
             .document_map
-            .insert(canonical_uri.to_string(), ropey::Rope::from_str(&text));
+            .insert(path.clone(), ropey::Rope::from_str(&text));
     }
 
-    let mut files_to_reparse = vec![canonical_uri.clone()];
-    if let Some(includers) = backend.workspace.file_included_by.get(&canonical_uri) {
+    let mut files_to_reparse = vec![path.clone()];
+    if let Some(includers) = backend.workspace.file_included_by.get(&path) {
         files_to_reparse.extend(includers.value().clone());
     }
 
@@ -66,13 +77,13 @@ pub async fn handle_did_close(_: &Backend, params: DidCloseTextDocumentParams) {
 
 pub async fn handle_initialize(backend: &Backend, params: InitializeParams) {
     for folder in params.workspace_folders.as_deref().unwrap_or_default() {
-        if let Ok(path) = folder.uri.to_file_path() {
+        if let Ok(path) = url_to_path_buf(&folder.uri) {
             backend.workspace_roots.insert(path);
         }
     }
 
     if let Some(root_uri) = get_root_uri(&params) {
-        if let Ok(path) = root_uri.to_file_path() {
+        if let Ok(path) = url_to_path_buf(&root_uri) {
             backend.workspace_roots.insert(path);
         }
     }
@@ -101,7 +112,7 @@ pub async fn handle_did_change_workspace_folders(
     params: DidChangeWorkspaceFoldersParams,
 ) {
     for folder in params.event.removed {
-        if let Ok(path) = folder.uri.to_file_path() {
+        if let Ok(path) = url_to_path_buf(&folder.uri) {
             backend.workspace_roots.remove(&path);
             info!("removed root folder: {}", path.to_string_lossy());
         }
@@ -110,7 +121,7 @@ pub async fn handle_did_change_workspace_folders(
 
     let mut was_folder_added = false;
     for folder in params.event.added {
-        if let Ok(path) = folder.uri.to_file_path() {
+        if let Ok(path) = url_to_path_buf(&folder.uri) {
             if backend.workspace_roots.insert(path.clone()) {
                 info!("added root folder: {}", path.to_string_lossy());
                 was_folder_added = true;

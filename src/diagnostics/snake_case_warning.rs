@@ -1,4 +1,4 @@
-use std::str::FromStr;
+use std::{fs, path::PathBuf, str::FromStr};
 
 use crate::diagnostics::codes::DiagnosticCode;
 use crate::diagnostics::ErrorDiagnosticHandler;
@@ -22,13 +22,13 @@ static SNAKE_CASE_RE: Lazy<Regex> = Lazy::new(|| {
 pub struct SnakeCaseWarningHandler;
 
 impl ErrorDiagnosticHandler for SnakeCaseWarningHandler {
-    fn handle(&self, line: &str, _content: &str) -> Option<(Url, Diagnostic)> {
+    fn handle(&self, line: &str, _content: &str) -> Option<(PathBuf, Diagnostic)> {
         let Some(captures) = SNAKE_CASE_RE.captures(line) else {
             return None;
         };
         let file_path = captures[1].trim();
-        let Ok(file_uri) = Url::from_file_path(file_path) else {
-            error!("failed to parse file into url: {}", file_path);
+        let Ok(file_path) = fs::canonicalize(file_path) else {
+            error!("failed to canonicalize file: {}", file_path);
             return None;
         };
 
@@ -55,7 +55,7 @@ impl ErrorDiagnosticHandler for SnakeCaseWarningHandler {
         };
 
         Some((
-            file_uri,
+            file_path,
             Diagnostic {
                 range,
                 severity: Some(DiagnosticSeverity::WARNING),

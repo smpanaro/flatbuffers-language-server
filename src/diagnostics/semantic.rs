@@ -3,13 +3,13 @@ use std::collections::{HashMap, HashSet};
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use tower_lsp::lsp_types::{Diagnostic, DiagnosticSeverity, DiagnosticTag, Position, Range, Url};
+use tower_lsp::lsp_types::{Diagnostic, DiagnosticSeverity, DiagnosticTag, Position, Range};
 
 use crate::symbol_table::{SymbolKind, SymbolTable};
 
 pub fn analyze_deprecated_fields(
     st: &SymbolTable,
-    diagnostics: &mut HashMap<Url, Vec<Diagnostic>>,
+    diagnostics: &mut HashMap<PathBuf, Vec<Diagnostic>>,
 ) {
     for symbol in st.values() {
         let fields = match &symbol.kind {
@@ -22,7 +22,7 @@ pub fn analyze_deprecated_fields(
             if let SymbolKind::Field(field_def) = &field.kind {
                 if field_def.deprecated {
                     diagnostics
-                        .entry(field.info.location.uri.clone())
+                        .entry(field.info.location.path.to_path_buf())
                         .or_default()
                         .push(Diagnostic {
                             range: Range {
@@ -45,21 +45,21 @@ pub fn analyze_deprecated_fields(
 
 pub fn analyze_unused_includes(
     st: &SymbolTable,
-    diagnostics: &mut HashMap<Url, Vec<Diagnostic>>,
+    diagnostics: &mut HashMap<PathBuf, Vec<Diagnostic>>,
     file_contents: &str,
     include_graph: &HashMap<String, Vec<String>>,
-    search_paths: &[Url],
+    search_paths: &[PathBuf],
     root_type_info: &Option<crate::symbol_table::RootTypeInfo>,
 ) {
     let mut used_types = HashSet::new();
     if let Some(root_type) = root_type_info {
-        if root_type.location.uri == st.uri {
+        if root_type.location.path == st.path {
             used_types.insert(root_type.type_name.clone());
         }
     }
 
     for symbol in st.values() {
-        if symbol.info.location.uri != st.uri {
+        if symbol.info.location.path != st.path {
             continue;
         }
         match &symbol.kind {
@@ -87,13 +87,10 @@ pub fn analyze_unused_includes(
     }
 
     let mut directly_required_files = HashSet::new();
-    for used_type in &used_types {
-        if let Some(symbol) = st.get(used_type) {
-            if let Ok(path) = symbol.info.location.uri.to_file_path() {
-                if let Some(canonical) = fs::canonicalize(path).ok() {
-                    directly_required_files.insert(canonical);
-                }
-            }
+    for used_type in used_types {
+        if let Some(symbol) = st.get(&used_type) {
+            let path = &symbol.info.location.path;
+            directly_required_files.insert(path.to_path_buf());
         }
     }
 
@@ -111,21 +108,15 @@ pub fn analyze_unused_includes(
         if let Some(includes) = include_graph.get(file.to_str().unwrap()) {
             for include in includes {
                 if let Some(canonical) = fs::canonicalize(include).ok() {
-                    let mut path = std::path::PathBuf::new();
-                    path.push(canonical);
-                    queue.push(path);
+                    queue.push(canonical.to_path_buf());
                 }
             }
         }
     }
 
-    let current_dir = st
-        .uri
-        .to_file_path()
-        .unwrap()
-        .parent()
-        .unwrap()
-        .to_path_buf();
+    let Some(current_dir) = st.path.parent() else {
+        return;
+    };
 
     for (line_num, line) in file_contents.lines().enumerate() {
         if !line.trim().starts_with("include") {
@@ -148,7 +139,7 @@ pub fn analyze_unused_includes(
                     },
                 };
                 diagnostics
-                    .entry(st.uri.clone())
+                    .entry(st.path.clone())
                     .or_default()
                     .push(Diagnostic {
                         range,
@@ -168,15 +159,13 @@ pub fn analyze_unused_includes(
 fn resolve_include(
     current_dir: &Path,
     include_path: &str,
-    search_paths: &[Url],
+    search_paths: &[PathBuf],
 ) -> Option<PathBuf> {
     // 1. Check against search paths
-    for search_path_url in search_paths {
-        if let Ok(search_path) = search_path_url.to_file_path() {
-            if let Some(canon) = fs::canonicalize(search_path.join(include_path)).ok() {
-                if canon.exists() {
-                    return Some(canon);
-                }
+    for search_path in search_paths {
+        if let Some(canon) = fs::canonicalize(search_path.join(include_path)).ok() {
+            if canon.exists() {
+                return Some(canon);
             }
         }
     }

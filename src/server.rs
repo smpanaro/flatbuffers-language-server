@@ -2,12 +2,17 @@ use crate::ext::duration::DurationFormat;
 use crate::handlers::{
     code_action, completion, goto_definition, hover, lifecycle, references, rename,
 };
-use crate::utils::paths::{is_flatbuffer_schema, is_flatbuffer_schema_path};
+use crate::utils::paths::{
+    get_intermediate_paths, is_flatbuffer_schema, is_flatbuffer_schema_path, path_buf_to_url,
+    url_to_path_buf,
+};
 use crate::workspace::Workspace;
 use dashmap::{DashMap, DashSet};
 use ignore::{WalkBuilder, WalkState};
 use log::{debug, error, info};
 use ropey::Rope;
+use std::collections::HashSet;
+use std::fs;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Instant;
@@ -34,9 +39,10 @@ use tower_lsp::{Client, LanguageServer};
 #[derive(Debug)]
 pub struct Backend {
     pub client: Client,
-    pub document_map: DashMap<String, Rope>,
+    // TODO: Some/all of this should move to backend.
+    pub document_map: DashMap<PathBuf, Rope>,
     pub workspace: Workspace,
-    pub search_paths: RwLock<Vec<Url>>,
+    pub search_paths: RwLock<Vec<PathBuf>>,
     pub workspace_roots: DashSet<PathBuf>,
     // Initialize scan.
     ready: AtomicBool,
@@ -56,7 +62,7 @@ impl Backend {
         }
     }
 
-    pub async fn update_search_paths_and_discover_files(&self) -> Vec<Url> {
+    pub async fn update_search_paths_and_discover_files(&self) -> Vec<PathBuf> {
         let start = Instant::now();
         let roots: Vec<_> = self
             .workspace_roots
@@ -88,15 +94,12 @@ impl Backend {
             Box::new(move |result| {
                 if let Ok(entry) = result {
                     if is_flatbuffer_schema_path(entry.path()) {
-                        if let Ok(url) = Url::from_file_path(entry.path()) {
-                            fbs_files.insert(url);
-                        }
+                        if let Ok(path) = fs::canonicalize(entry.path()) {
+                            fbs_files.insert(path.to_path_buf());
 
-                        let intermediate_paths =
-                            crate::utils::paths::get_intermediate_paths(entry.path(), &roots);
-                        for path in intermediate_paths {
-                            if let Ok(url) = Url::from_directory_path(&path) {
-                                search_paths.insert(url);
+                            let intermediate_paths = get_intermediate_paths(&path, &roots);
+                            for intermediate in intermediate_paths {
+                                search_paths.insert(intermediate);
                             }
                         }
                     }
@@ -105,11 +108,11 @@ impl Backend {
             })
         });
 
-        let search_paths: Vec<Url> = search_paths.into_iter().collect();
+        let search_paths: Vec<PathBuf> = search_paths.into_iter().collect();
         debug!(
             "discovered include paths in {}: {:?}",
             start.elapsed().log_str(),
-            search_paths.iter().map(|u| u.path()).collect::<Vec<_>>(),
+            search_paths,
         );
 
         let mut search_paths_guard = self.search_paths.write().await;
@@ -128,56 +131,61 @@ impl Backend {
     }
 
     pub async fn remove_workspace_folder(&self, folder_uri: &Url) {
-        let uris_to_remove: std::collections::HashSet<Url> = self
+        let Ok(folder_path) = url_to_path_buf(folder_uri) else {
+            return;
+        };
+        let uris_to_remove: HashSet<PathBuf> = self
             .workspace
             .file_definitions
             .iter()
             .map(|entry| entry.key().clone())
-            .filter(|uri| uri.as_str().starts_with(folder_uri.as_str()))
+            .filter(|path| path.starts_with(&folder_path))
             .collect();
 
-        let mut files_to_reparse = std::collections::HashSet::new();
-        for uri in &uris_to_remove {
-            let affected_files = self.workspace.remove_file(uri);
+        let mut files_to_reparse = HashSet::new();
+        for path in &uris_to_remove {
+            let affected_files = self.workspace.remove_file(path);
             for f in affected_files {
                 if !uris_to_remove.contains(&f) {
                     files_to_reparse.insert(f);
                 }
             }
-            self.client
-                .publish_diagnostics(uri.clone(), vec![], None)
-                .await;
+
+            if let Ok(uri) = path_buf_to_url(path) {
+                self.client.publish_diagnostics(uri, vec![], None).await;
+            }
         }
 
         let mut search_paths_guard = self.search_paths.write().await;
-        search_paths_guard.retain(|path_uri| !path_uri.as_str().starts_with(folder_uri.as_str()));
+        search_paths_guard.retain(|path| !path.starts_with(&folder_path));
         drop(search_paths_guard);
 
         self.parse_many_and_publish(files_to_reparse).await;
     }
 
-    pub async fn parse_many_and_publish(&self, uris: impl IntoIterator<Item = Url>) {
-        let mut parsed_in_scan = std::collections::HashSet::new();
-        for uri in uris {
-            if !parsed_in_scan.contains(&uri) {
-                self.parse_and_publish(uri, &mut parsed_in_scan).await;
+    pub async fn parse_many_and_publish(&self, paths: impl IntoIterator<Item = PathBuf>) {
+        let mut parsed_in_scan = HashSet::new();
+        for path in paths {
+            if !parsed_in_scan.contains(&path) {
+                self.parse_and_publish(&path, &mut parsed_in_scan).await;
             }
         }
     }
 
-    pub async fn parse_and_publish(
-        &self,
-        uri: Url,
-        parsed_in_scan: &mut std::collections::HashSet<Url>,
-    ) {
+    pub async fn parse_and_publish(&self, path: &PathBuf, parsed_in_scan: &mut HashSet<PathBuf>) {
         let search_paths_guard = self.search_paths.read().await;
         let (diagnostics, updated_files) = self
             .workspace
-            .parse_and_update(uri, &self.document_map, &search_paths_guard, parsed_in_scan)
+            .parse_and_update(
+                path.to_path_buf(),
+                &self.document_map,
+                &search_paths_guard,
+                parsed_in_scan,
+            )
             .await;
 
-        for file_uri in updated_files {
-            let mut new_diags = diagnostics.get(&file_uri).cloned().unwrap_or_default();
+        for file_path in updated_files {
+            let mut new_diags = diagnostics.get(&file_path).cloned().unwrap_or_default();
 
             new_diags.sort_by(|a, b| {
                 a.message
@@ -185,19 +193,21 @@ impl Backend {
                     .then_with(|| a.range.start.cmp(&b.range.start))
             });
 
-            let old_diags = self.workspace.published_diagnostics.get(&file_uri);
+            let old_diags = self.workspace.published_diagnostics.get(&file_path);
 
             let has_changed = old_diags.map_or(true, |d| *d.value() != new_diags);
             if !has_changed {
                 continue;
             }
 
-            self.client
-                .publish_diagnostics(file_uri.clone(), new_diags.clone(), None)
-                .await;
-            self.workspace
-                .published_diagnostics
-                .insert(file_uri, new_diags);
+            if let Ok(file_uri) = path_buf_to_url(&file_path) {
+                self.client
+                    .publish_diagnostics(file_uri, new_diags.clone(), None)
+                    .await;
+                self.workspace
+                    .published_diagnostics
+                    .insert(file_path, new_diags);
+            }
         }
     }
 }
@@ -359,32 +369,33 @@ impl LanguageServer for Backend {
         //                          and created in the new location.
         // ... except from VSCode. For which we handle folders below.
 
-        let mut files_to_reparse = std::collections::HashSet::new();
+        let mut files_to_reparse = HashSet::new();
 
         for event in params.changes {
-            let canonical_uri = crate::utils::paths::canonical_file_url(&event.uri);
+            // Canonicalize will fail for deleted files, so fall back to non-canonical.
+            // TODO: Figure out a better heuristic (resolve parents or store client<>canonical map or scan).
+            let Ok(path) = url_to_path_buf(&event.uri).or_else(|_| event.uri.to_file_path()) else {
+                continue;
+            };
 
-            let has_ext = canonical_uri
-                .to_file_path()
-                .ok()
-                .map_or(false, |p| p.extension().is_some());
-            if !is_flatbuffer_schema(&canonical_uri) && has_ext {
+            let has_ext = path.extension().is_some();
+            if !is_flatbuffer_schema(&event.uri) && has_ext {
                 continue;
             }
 
             match event.typ {
                 tower_lsp::lsp_types::FileChangeType::CREATED => {
-                    files_to_reparse.insert(canonical_uri);
+                    files_to_reparse.insert(path);
                 }
                 tower_lsp::lsp_types::FileChangeType::CHANGED => {
                     // NOTE: This doubles the work done on save,
                     // but allows us to capture file changes made
                     // outside of the client (e.g. git checkout).
-                    files_to_reparse.insert(canonical_uri);
+                    files_to_reparse.insert(path);
                 }
                 tower_lsp::lsp_types::FileChangeType::DELETED => {
                     // VSCode doesn't report the files in a deleted folder, so we do our best.
-                    let deleted_files = self.workspace.expand_to_known_files(&canonical_uri);
+                    let deleted_files = self.workspace.expand_to_known_files(&path);
                     for deleted in deleted_files.clone() {
                         let affected_files = self.workspace.remove_file(&deleted);
                         for uri in affected_files {
@@ -392,9 +403,14 @@ impl LanguageServer for Backend {
                                 files_to_reparse.insert(uri);
                             }
                         }
-                        info!("marking {} deleted", deleted.path());
-                        self.document_map.remove(deleted.as_str());
-                        self.client.publish_diagnostics(deleted, vec![], None).await;
+                        info!("marking {} deleted", deleted.display());
+                        self.document_map.remove(&deleted);
+                        if let Ok(deleted_uri) = path_buf_to_url(&deleted) {
+                            // TODO: Should also update the cache.
+                            self.client
+                                .publish_diagnostics(deleted_uri, vec![], None)
+                                .await;
+                        }
                     }
                 }
                 _ => {}

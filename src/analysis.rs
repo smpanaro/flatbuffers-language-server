@@ -1,5 +1,8 @@
+use std::path::PathBuf;
+
 use crate::ext::range::RangeExt;
 use crate::symbol_table::{self, Symbol};
+use crate::utils::paths::url_to_path_buf;
 use crate::workspace::Workspace;
 
 use tower_lsp::lsp_types::{Position, Range, Url};
@@ -21,7 +24,11 @@ pub fn resolve_symbol_at(
     position: Position,
 ) -> Option<ResolvedSymbol> {
     // Check if the cursor is on a root_type declaration
-    if let Some(root_type_info) = workspace.root_types.get(uri) {
+    let Ok(path) = url_to_path_buf(uri) else {
+        return None;
+    };
+
+    if let Some(root_type_info) = workspace.root_types.get(&path) {
         if root_type_info
             .parsed_type
             .type_name
@@ -41,7 +48,7 @@ pub fn resolve_symbol_at(
     let symbol_at_cursor = workspace
         .symbols
         .iter()
-        .find_map(|entry| entry.value().find_symbol(uri, position).cloned())?;
+        .find_map(|entry| entry.value().find_symbol(&path, position).cloned())?;
 
     if let symbol_table::SymbolKind::Union(u) = &symbol_at_cursor.kind {
         for variant in &u.variants {
@@ -112,7 +119,7 @@ pub fn resolve_symbol_at(
 
 pub fn find_enclosing_table<'a>(
     workspace: &'a Workspace,
-    uri: &Url,
+    path: &PathBuf,
     position: Position,
 ) -> Option<Symbol> {
     let mut symbols_before_cursor: Vec<_> = workspace
@@ -120,7 +127,7 @@ pub fn find_enclosing_table<'a>(
         .iter()
         .filter(|entry| {
             let symbol = entry.value();
-            if symbol.info.location.uri != *uri {
+            if &symbol.info.location.path != path {
                 return false;
             }
             if symbol.info.location.range.start < position {
