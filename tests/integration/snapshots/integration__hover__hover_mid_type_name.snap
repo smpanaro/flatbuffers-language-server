@@ -5,7 +5,7 @@ expression: "serde_json::to_string_pretty(&response).unwrap()"
 {
   "contents": {
     "kind": "markdown",
-    "value": "```flatbuffers\ntable Widget {\n  name: string\n}\n```"
+    "value": "```flatbuffers\ntable Widget {\n  name:string;\n}\n```"
   },
   "range": {
     "start": {

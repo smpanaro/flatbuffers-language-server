@@ -178,7 +178,7 @@ impl Symbol {
             }
             SymbolKind::Scalar => format!("{} // scalar", self.info.name),
             SymbolKind::Field(f) => {
-                format!("{}: {}", self.info.name, f.parsed_type.to_display_string())
+                format!("{}:{};", self.info.name, f.parsed_type.to_display_string())
             }
         };
         code_content.push_str(&definition);
@@ -247,7 +247,7 @@ fn fields_markdown(fields: &[Symbol]) -> String {
             .filter_map(|field| {
                 if let SymbolKind::Field(f) = &field.kind {
                     Some(format!(
-                        "  {}: {}",
+                        "  {}:{};",
                         field.info.name,
                         f.parsed_type.to_display_string()
                     ))

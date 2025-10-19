@@ -5,7 +5,7 @@ expression: "serde_json::to_string_pretty(&response).unwrap()"
 {
   "contents": {
     "kind": "markdown",
-    "value": "```flatbuffers\ntable IncludedTable {\n  b: bool\n}\n```\n\n---\n\n This is from another file."
+    "value": "```flatbuffers\ntable IncludedTable {\n  b:bool;\n}\n```\n\n---\n\n This is from another file."
   },
   "range": {
     "start": {

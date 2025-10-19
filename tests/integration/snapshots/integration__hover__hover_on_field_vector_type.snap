@@ -1,11 +1,11 @@
 ---
 source: tests/integration/hover.rs
-expression: "serde_json::to_string_pretty(&res).unwrap()"
+expression: "serde_json::to_string_pretty(&response).unwrap()"
 ---
 {
   "contents": {
     "kind": "markdown",
-    "value": "```flatbuffers\nstruct Point {\n  x: float\n  y: float\n}\n```\n\n---\n\n A 2D coordinate.\n\n---\n\nSize: 8 bytes\n\nAlignment: 4 bytes"
+    "value": "```flatbuffers\nstruct Point {\n  x:float;\n  y:float;\n}\n```\n\n---\n\n A 2D coordinate.\n\n---\n\nSize: 8 bytes\n\nAlignment: 4 bytes"
   },
   "range": {
     "start": {
