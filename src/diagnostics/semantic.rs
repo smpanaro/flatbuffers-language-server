@@ -3,7 +3,7 @@ use std::collections::{HashMap, HashSet};
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use tower_lsp::lsp_types::{Diagnostic, DiagnosticSeverity, DiagnosticTag, Position, Range};
+use tower_lsp_server::lsp_types::{Diagnostic, DiagnosticSeverity, DiagnosticTag, Position, Range};
 
 use crate::symbol_table::{SymbolKind, SymbolTable};
 
@@ -144,7 +144,7 @@ pub fn analyze_unused_includes(
                     .push(Diagnostic {
                         range,
                         severity: Some(DiagnosticSeverity::HINT),
-                        code: Some(tower_lsp::lsp_types::NumberOrString::String(
+                        code: Some(tower_lsp_server::lsp_types::NumberOrString::String(
                             DiagnosticCode::UnusedInclude.as_str().to_string(),
                         )),
                         message: format!("unused include: {}", include_path),

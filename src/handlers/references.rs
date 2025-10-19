@@ -5,8 +5,8 @@ use crate::symbol_table;
 use crate::utils::paths::path_buf_to_url;
 use log::debug;
 use std::time::Instant;
-use tower_lsp::jsonrpc::Result;
-use tower_lsp::lsp_types::{Location, ReferenceParams};
+use tower_lsp_server::jsonrpc::Result;
+use tower_lsp_server::lsp_types::{Location, ReferenceParams};
 
 pub async fn handle_references(
     backend: &Backend,

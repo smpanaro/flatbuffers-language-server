@@ -1,7 +1,7 @@
 use crate::lsp_logger::LspLogger;
 use crate::server::Backend;
 use log::info;
-use tower_lsp::{LspService, Server};
+use tower_lsp_server::{LspService, Server};
 
 pub mod analysis;
 pub mod diagnostics;

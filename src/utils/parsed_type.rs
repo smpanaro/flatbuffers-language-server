@@ -1,4 +1,4 @@
-use tower_lsp::lsp_types::{Position, Range};
+use tower_lsp_server::lsp_types::{Position, Range};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct TypePart {
@@ -172,7 +172,7 @@ impl ParsedType {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use tower_lsp::lsp_types::{Position, Range};
+    use tower_lsp_server::lsp_types::{Position, Range};
 
     #[test]
     fn test_simple_type() {

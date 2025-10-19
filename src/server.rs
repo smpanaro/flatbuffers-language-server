@@ -4,7 +4,7 @@ use crate::handlers::{
 };
 use crate::utils::paths::{
     get_intermediate_paths, is_flatbuffer_schema, is_flatbuffer_schema_path, path_buf_to_url,
-    url_to_path_buf,
+    uri_to_path_buf,
 };
 use crate::workspace::Workspace;
 use dashmap::{DashMap, DashSet};
@@ -17,9 +17,9 @@ use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Instant;
 use tokio::sync::{Notify, RwLock};
-use tower_lsp::jsonrpc::Result;
-use tower_lsp::lsp_types::request::WorkDoneProgressCreate;
-use tower_lsp::lsp_types::{
+use tower_lsp_server::jsonrpc::Result;
+use tower_lsp_server::lsp_types::request::WorkDoneProgressCreate;
+use tower_lsp_server::lsp_types::{
     notification, CodeActionKind, CodeActionOptions, CodeActionParams,
     CodeActionProviderCapability, CodeActionResponse, CompletionOptions, CompletionParams,
     CompletionResponse, DidChangeTextDocumentParams, DidChangeWatchedFilesParams,
@@ -30,11 +30,11 @@ use tower_lsp::lsp_types::{
     Location, NumberOrString, OneOf, PrepareRenameResponse, ProgressParams, ProgressParamsValue,
     ReferenceParams, Registration, RenameOptions, RenameParams, ServerCapabilities, ServerInfo,
     TextDocumentPositionParams, TextDocumentSyncCapability, TextDocumentSyncKind,
-    TextDocumentSyncOptions, Url, WorkDoneProgress, WorkDoneProgressBegin,
+    TextDocumentSyncOptions, Uri, WorkDoneProgress, WorkDoneProgressBegin,
     WorkDoneProgressCreateParams, WorkDoneProgressEnd, WorkspaceEdit,
     WorkspaceFoldersServerCapabilities, WorkspaceServerCapabilities,
 };
-use tower_lsp::{Client, LanguageServer};
+use tower_lsp_server::{Client, LanguageServer, UriExt};
 
 #[derive(Debug)]
 pub struct Backend {
@@ -130,8 +130,8 @@ impl Backend {
         self.parse_many_and_publish(fbs_files).await;
     }
 
-    pub async fn remove_workspace_folder(&self, folder_uri: &Url) {
-        let Ok(folder_path) = url_to_path_buf(folder_uri) else {
+    pub async fn remove_workspace_folder(&self, folder_uri: &Uri) {
+        let Ok(folder_path) = uri_to_path_buf(folder_uri) else {
             return;
         };
         let uris_to_remove: HashSet<PathBuf> = self
@@ -212,7 +212,6 @@ impl Backend {
     }
 }
 
-#[tower_lsp::async_trait]
 impl LanguageServer for Backend {
     async fn initialize(&self, params: InitializeParams) -> Result<InitializeResult> {
         info!("Initializing server...");
@@ -374,7 +373,8 @@ impl LanguageServer for Backend {
         for event in params.changes {
             // Canonicalize will fail for deleted files, so fall back to non-canonical.
             // TODO: Figure out a better heuristic (resolve parents or store client<>canonical map or scan).
-            let Ok(path) = url_to_path_buf(&event.uri).or_else(|_| event.uri.to_file_path()) else {
+            let non_canonical = event.uri.to_file_path().and_then(|p| Some(p.to_path_buf()));
+            let Some(path) = uri_to_path_buf(&event.uri).ok().or(non_canonical) else {
                 continue;
             };
 
@@ -384,16 +384,16 @@ impl LanguageServer for Backend {
             }
 
             match event.typ {
-                tower_lsp::lsp_types::FileChangeType::CREATED => {
+                tower_lsp_server::lsp_types::FileChangeType::CREATED => {
                     files_to_reparse.insert(path);
                 }
-                tower_lsp::lsp_types::FileChangeType::CHANGED => {
+                tower_lsp_server::lsp_types::FileChangeType::CHANGED => {
                     // NOTE: This doubles the work done on save,
                     // but allows us to capture file changes made
                     // outside of the client (e.g. git checkout).
                     files_to_reparse.insert(path);
                 }
-                tower_lsp::lsp_types::FileChangeType::DELETED => {
+                tower_lsp_server::lsp_types::FileChangeType::DELETED => {
                     // VSCode doesn't report the files in a deleted folder, so we do our best.
                     let deleted_files = self.workspace.expand_to_known_files(&path);
                     for deleted in deleted_files.clone() {

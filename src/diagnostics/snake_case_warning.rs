@@ -6,8 +6,8 @@ use heck::ToSnakeCase;
 use log::error;
 use once_cell::sync::Lazy;
 use regex::Regex;
-use tower_lsp::lsp_types::{
-    CodeDescription, Diagnostic, DiagnosticSeverity, NumberOrString, Position, Range, Url,
+use tower_lsp_server::lsp_types::{
+    CodeDescription, Diagnostic, DiagnosticSeverity, NumberOrString, Position, Range, Uri,
 };
 
 // Regex to capture snake_case warnings:
@@ -62,7 +62,7 @@ impl ErrorDiagnosticHandler for SnakeCaseWarningHandler {
                 code: Some(NumberOrString::String(
                     DiagnosticCode::NonSnakeCase.as_str().to_string(),
                 )),
-                code_description: Url::from_str("https://flatbuffers.dev/schema/#style-guide")
+                code_description: Uri::from_str("https://flatbuffers.dev/schema/#style-guide")
                     .map(|u| CodeDescription { href: u })
                     .ok(),
 

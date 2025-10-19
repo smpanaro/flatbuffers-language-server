@@ -11,7 +11,7 @@ use std::ffi::c_char;
 use std::ffi::{CStr, CString};
 use std::fs;
 use std::path::{Path, PathBuf};
-use tower_lsp::lsp_types::{Diagnostic, Position, Range};
+use tower_lsp_server::lsp_types::{Diagnostic, Position, Range};
 
 /// A trait for parsing FlatBuffers schema files.
 pub trait Parser {

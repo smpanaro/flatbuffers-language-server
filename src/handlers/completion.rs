@@ -2,15 +2,15 @@ use crate::analysis::find_enclosing_table;
 use crate::ext::duration::DurationFormat;
 use crate::server::Backend;
 use crate::symbol_table::SymbolKind;
-use crate::utils::paths::url_to_path_buf;
+use crate::utils::paths::uri_to_path_buf;
 use log::debug;
 use once_cell::sync::Lazy;
 use regex::Regex;
 use ropey::Rope;
 use std::path::PathBuf;
 use std::time::Instant;
-use tower_lsp::jsonrpc::Result;
-use tower_lsp::lsp_types::{
+use tower_lsp_server::jsonrpc::Result;
+use tower_lsp_server::lsp_types::{
     CompletionItem, CompletionItemKind, CompletionParams, CompletionResponse, Documentation,
     MarkupContent, MarkupKind, Position, Range, TextEdit,
 };
@@ -105,7 +105,7 @@ fn handle_attribute_completion(
                                 value: "The next available field id for this table. IDs must be contiguous and start at 0.".to_string(),
                             })),
                             sort_text: Some("00".to_string()),
-                            text_edit: Some(tower_lsp::lsp_types::CompletionTextEdit::Edit(
+                            text_edit: Some(tower_lsp_server::lsp_types::CompletionTextEdit::Edit(
                                 TextEdit {
                                     range,
                                     new_text: if style_with_space {
@@ -443,7 +443,7 @@ pub async fn handle_completion(
     let start = Instant::now();
     let position = params.text_document_position.position;
 
-    let Ok(path) = url_to_path_buf(&params.text_document_position.text_document.uri) else {
+    let Ok(path) = uri_to_path_buf(&params.text_document_position.text_document.uri) else {
         return Ok(None);
     };
 

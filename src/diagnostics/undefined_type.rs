@@ -6,7 +6,7 @@ use log::error;
 use once_cell::sync::Lazy;
 use regex::Regex;
 use serde_json::json;
-use tower_lsp::lsp_types::{Diagnostic, DiagnosticSeverity, Position, Range};
+use tower_lsp_server::lsp_types::{Diagnostic, DiagnosticSeverity, Position, Range};
 
 static RE: Lazy<Regex> = Lazy::new(|| {
     Regex::new(r"^.+?:(\d+):\s*(\d+):\s+(error|warning):\s+(.+?)(?:, originally at: (.+?):(\d+)(?::(\d+)-(\d+):(\d+))?)?$")
@@ -130,7 +130,7 @@ impl ErrorDiagnosticHandler for UndefinedTypeHandler {
                     Diagnostic {
                         range,
                         severity: Some(severity),
-                        code: Some(tower_lsp::lsp_types::NumberOrString::String(
+                        code: Some(tower_lsp_server::lsp_types::NumberOrString::String(
                             DiagnosticCode::UndefinedType.as_str().to_string(),
                         )),
                         message,

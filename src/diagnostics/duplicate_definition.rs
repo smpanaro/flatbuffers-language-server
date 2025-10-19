@@ -4,8 +4,12 @@ use crate::diagnostics::ErrorDiagnosticHandler;
 use log::error;
 use once_cell::sync::Lazy;
 use regex::Regex;
-use tower_lsp::lsp_types::{
-    Diagnostic, DiagnosticRelatedInformation, DiagnosticSeverity, Location, Position, Range, Url,
+use tower_lsp_server::{
+    lsp_types::{
+        Diagnostic, DiagnosticRelatedInformation, DiagnosticSeverity, Location, Position, Range,
+        Uri,
+    },
+    UriExt,
 };
 
 // Regex to captures duplicate definitions:
@@ -53,7 +57,7 @@ impl ErrorDiagnosticHandler for DuplicateDefinitionHandler {
                 .unwrap_or(0u32)
                 .saturating_sub(unqualified_name_length);
             let previous_location = Location {
-                uri: Url::from_file_path(captures[6].trim()).unwrap(),
+                uri: Uri::from_file_path(captures[6].trim()).unwrap(),
                 range: Range {
                     start: Position {
                         line: prev_line,

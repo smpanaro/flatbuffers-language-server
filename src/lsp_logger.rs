@@ -1,6 +1,6 @@
 use log::{Level, Log, Metadata, Record};
-use tower_lsp::lsp_types::MessageType;
-use tower_lsp::Client;
+use tower_lsp_server::lsp_types::MessageType;
+use tower_lsp_server::Client;
 
 fn level_to_message_type(level: Level) -> MessageType {
     match level {

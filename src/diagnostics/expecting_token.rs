@@ -6,7 +6,7 @@ use log::error;
 use once_cell::sync::Lazy;
 use regex::Regex;
 use serde_json;
-use tower_lsp::lsp_types::{
+use tower_lsp_server::lsp_types::{
     Diagnostic, DiagnosticRelatedInformation, DiagnosticSeverity, Location, Position, Range,
 };
 
@@ -142,7 +142,7 @@ impl ErrorDiagnosticHandler for ExpectingTokenHandler {
                     severity: Some(DiagnosticSeverity::ERROR),
                     message,
                     related_information: Some(related_information),
-                    code: Some(tower_lsp::lsp_types::NumberOrString::String(
+                    code: Some(tower_lsp_server::lsp_types::NumberOrString::String(
                         DiagnosticCode::ExpectingToken.as_str().to_string(),
                     )),
                     data: Some(serde_json::json!({ "expected": expected_token, "eol": is_eol })),

@@ -1,4 +1,4 @@
-use tower_lsp::lsp_types::Position;
+use tower_lsp_server::lsp_types::Position;
 
 pub fn parse_fixture(fixture: &str) -> (String, Position) {
     let mut content = String::new();

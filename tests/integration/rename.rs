@@ -1,16 +1,17 @@
 use crate::harness::TestHarness;
 use crate::helpers::parse_fixture;
 use std::collections::HashMap;
-use tower_lsp::lsp_types::{
+use std::str::FromStr;
+use tower_lsp_server::lsp_types::{
     request, Position, Range, RenameParams, TextDocumentIdentifier, TextDocumentPositionParams,
-    TextEdit, Url,
+    TextEdit, Uri,
 };
 
 async fn get_rename_edits(
     fixture: &str,
     other_files: &[(&str, &str)],
     new_name: &str,
-) -> HashMap<Url, Vec<TextEdit>> {
+) -> HashMap<Uri, Vec<TextEdit>> {
     let (content, position) = parse_fixture(fixture);
 
     let mut workspace = vec![("schema.fbs", content.as_str())];
@@ -19,7 +20,7 @@ async fn get_rename_edits(
     let mut harness = TestHarness::new();
     harness.initialize_and_open(&workspace).await;
 
-    let main_file_uri = harness.root_uri.join("schema.fbs").unwrap();
+    let main_file_uri = harness.file_uri("schema.fbs");
     let result = harness
         .call::<request::Rename>(RenameParams {
             text_document_position: TextDocumentPositionParams {
@@ -148,7 +149,7 @@ table OtherTable {
     uris.sort();
 
     assert!(uris[0].ends_with("other.fbs"));
-    let other_edits = &changes[&Url::parse(&uris[0]).unwrap()];
+    let other_edits = &changes[&Uri::from_str(&uris[0]).unwrap()];
     assert_eq!(other_edits.len(), 1);
     assert_eq!(
         other_edits[0],
@@ -159,7 +160,7 @@ table OtherTable {
     );
 
     assert!(uris[1].ends_with("schema.fbs"));
-    let main_edits = &changes[&Url::parse(&uris[1]).unwrap()];
+    let main_edits = &changes[&Uri::from_str(&uris[1]).unwrap()];
     assert_eq!(main_edits.len(), 1);
     assert_eq!(
         main_edits[0],

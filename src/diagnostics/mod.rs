@@ -1,5 +1,5 @@
 use std::{collections::HashMap, path::PathBuf};
-use tower_lsp::lsp_types::Diagnostic;
+use tower_lsp_server::lsp_types::Diagnostic;
 
 pub mod codes;
 pub mod duplicate_definition;

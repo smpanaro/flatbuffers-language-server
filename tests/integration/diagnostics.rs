@@ -1,5 +1,5 @@
 use crate::harness::TestHarness;
-use tower_lsp::lsp_types::{
+use tower_lsp_server::lsp_types::{
     notification, request, CodeActionContext, CodeActionOrCommand, CodeActionParams,
     DiagnosticSeverity, DiagnosticTag, Position, Range, TextDocumentIdentifier,
 };
@@ -16,7 +16,7 @@ async fn diagnostic_error_has_correct_range() {
         .notification::<notification::PublishDiagnostics>()
         .await;
 
-    let schema_uri = harness.root_uri.join("schema.fbs").unwrap();
+    let schema_uri = harness.file_uri("schema.fbs");
     assert_eq!(params.uri, schema_uri);
     assert_eq!(
         params.diagnostics.len(),
@@ -43,8 +43,8 @@ union Whichever { One }
         .initialize_and_open(&[("a.fbs", content_a), ("b.fbs", content_b)])
         .await;
 
-    let a_uri = harness.root_uri.join("a.fbs").unwrap();
-    let b_uri = harness.root_uri.join("b.fbs").unwrap();
+    let a_uri = harness.file_uri("a.fbs");
+    let b_uri = harness.file_uri("b.fbs");
     let mut params_a = None;
     let mut params_b = None;
     for _ in 0..2 {
@@ -135,7 +135,7 @@ table Foo {
         .initialize_and_open(&[("schema.fbs", content), ("included.fbs", included_content)])
         .await;
 
-    let schema_uri = harness.root_uri.join("schema.fbs").unwrap();
+    let schema_uri = harness.file_uri("schema.fbs");
     let diagnostics = loop {
         let params = harness
             .notification::<notification::PublishDiagnostics>()
@@ -251,7 +251,7 @@ include "pastries.fbs";
         ])
         .await;
 
-    let schema_uri = harness.root_uri.join("schema.fbs").unwrap();
+    let schema_uri = harness.file_uri("schema.fbs");
     let diagnostics = loop {
         let param = harness
             .notification::<notification::PublishDiagnostics>()
@@ -573,7 +573,7 @@ root_type Pen;
         .initialize_and_open(&[("schema.fbs", main), ("included.fbs", included)])
         .await;
 
-    let included_uri = harness.root_uri.join("included.fbs").unwrap();
+    let included_uri = harness.file_uri("included.fbs");
     let mut diagnostics = vec![];
     let mut other_diagnostics_count = 0;
     for _ in 0..2 {
@@ -617,7 +617,7 @@ root_type Pen;
         .initialize_and_open(&[("schema.fbs", main), ("included.fbs", included)])
         .await;
 
-    let included_uri = harness.root_uri.join("included.fbs").unwrap();
+    let included_uri = harness.file_uri("included.fbs");
     let mut diagnostics = vec![];
     let mut other_diagnostics_count = 0;
     for _ in 0..2 {

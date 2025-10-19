@@ -1,6 +1,6 @@
 use crate::{harness::TestHarness, helpers::parse_fixture};
 use insta::assert_snapshot;
-use tower_lsp::lsp_types::{
+use tower_lsp_server::lsp_types::{
     notification, request, HoverParams, Position, Range, TextDocumentIdentifier,
     TextDocumentPositionParams, VersionedTextDocumentIdentifier,
 };
@@ -15,7 +15,7 @@ async fn error_appears_on_change_and_is_then_cleared() {
         .initialize_and_open(&[("schema.fbs", initial_content)])
         .await;
 
-    let schema_uri = harness.root_uri.join("schema.fbs").unwrap();
+    let schema_uri = harness.file_uri("schema.fbs");
 
     // 1. We should get an initial empty diagnostic pass.
     {
@@ -93,8 +93,8 @@ table MyTable {
         ])
         .await;
 
-    let schema_uri = harness.root_uri.join("schema.fbs").unwrap();
-    let included_uri = harness.root_uri.join("included.fbs").unwrap();
+    let schema_uri = harness.file_uri("schema.fbs");
+    let included_uri = harness.file_uri("included.fbs");
 
     let hover_params = HoverParams {
         text_document_position_params: TextDocumentPositionParams {
@@ -146,7 +146,7 @@ root_type T;
         assert_eq!(params.diagnostics.len(), 0);
     }
 
-    let uri = harness.root_uri.join("schema.fbs").unwrap();
+    let uri = harness.file_uri("schema.fbs");
     harness
         .change_file(
             VersionedTextDocumentIdentifier { uri, version: 2 },

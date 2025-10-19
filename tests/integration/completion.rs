@@ -1,7 +1,7 @@
 use crate::harness::TestHarness;
 use crate::helpers::parse_fixture;
 use insta::assert_snapshot;
-use tower_lsp::lsp_types::{
+use tower_lsp_server::lsp_types::{
     notification, request, CompletionContext, CompletionParams, CompletionTriggerKind,
     TextDocumentIdentifier, TextDocumentPositionParams, VersionedTextDocumentIdentifier,
 };
@@ -26,7 +26,7 @@ async fn get_completion_list(
     initial_workspace.extend_from_slice(other_files);
     harness.initialize_and_open(&initial_workspace).await;
 
-    let main_file_uri = harness.root_uri.join("schema.fbs").unwrap();
+    let main_file_uri = harness.file_uri("schema.fbs");
 
     // Wait for initial diagnostics to be published for all files.
     for _ in 0..initial_workspace.len() {
@@ -65,8 +65,8 @@ async fn get_completion_list(
 
     let mut items = response
         .map(|resp| match resp {
-            tower_lsp::lsp_types::CompletionResponse::Array(items) => items,
-            tower_lsp::lsp_types::CompletionResponse::List(list) => list.items,
+            tower_lsp_server::lsp_types::CompletionResponse::Array(items) => items,
+            tower_lsp_server::lsp_types::CompletionResponse::List(list) => list.items,
         })
         .unwrap_or_default();
     items.sort_by_key(|item| item.sort_text.as_ref().unwrap_or(&item.label).to_owned());

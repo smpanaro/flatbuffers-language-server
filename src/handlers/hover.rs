@@ -1,12 +1,12 @@
 use crate::analysis::resolve_symbol_at;
 use crate::ext::duration::DurationFormat;
 use crate::server::Backend;
-use crate::utils::paths::url_to_path_buf;
+use crate::utils::paths::uri_to_path_buf;
 use log::debug;
 use ropey::Rope;
 use std::time::Instant;
-use tower_lsp::jsonrpc::Result;
-use tower_lsp::lsp_types::{
+use tower_lsp_server::jsonrpc::Result;
+use tower_lsp_server::lsp_types::{
     Hover, HoverContents, HoverParams, MarkupContent, MarkupKind, Position, Range,
 };
 
@@ -52,7 +52,7 @@ pub async fn handle_hover(backend: &Backend, params: HoverParams) -> Result<Opti
     let pos = params.text_document_position_params.position;
     let mut res: Option<Hover> = None;
 
-    let Ok(path) = url_to_path_buf(&uri) else {
+    let Ok(path) = uri_to_path_buf(&uri) else {
         return Ok(None);
     };
 

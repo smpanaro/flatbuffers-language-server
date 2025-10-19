@@ -1,6 +1,8 @@
 use crate::harness::TestHarness;
 use insta::assert_snapshot;
-use tower_lsp::lsp_types::{request, CodeActionContext, CodeActionParams, TextDocumentIdentifier};
+use tower_lsp_server::lsp_types::{
+    request, CodeActionContext, CodeActionParams, TextDocumentIdentifier,
+};
 
 /// Gets code actions for a multi-file workspace, waiting for a specific diagnostic to appear first.
 async fn get_code_actions_for_workspace(
@@ -11,7 +13,7 @@ async fn get_code_actions_for_workspace(
 ) -> String {
     harness.initialize_and_open(workspace).await;
 
-    let file_uri = harness.root_uri.join(file_to_test).unwrap();
+    let file_uri = harness.file_uri(file_to_test);
 
     // Wait for the specific diagnostic we want to test.
     let diagnostic = harness
@@ -42,8 +44,8 @@ async fn get_code_actions_for_workspace(
     let mut actions = response.unwrap_or_default();
     actions.sort_by(|a, b| match (a, b) {
         (
-            tower_lsp::lsp_types::CodeActionOrCommand::CodeAction(a),
-            tower_lsp::lsp_types::CodeActionOrCommand::CodeAction(b),
+            tower_lsp_server::lsp_types::CodeActionOrCommand::CodeAction(a),
+            tower_lsp_server::lsp_types::CodeActionOrCommand::CodeAction(b),
         ) => a.title.cmp(&b.title),
         _ => std::cmp::Ordering::Equal,
     });
@@ -77,7 +79,7 @@ table MyTable {
     )
     .await;
 
-    let redacted_response = response.replace(&harness.root_uri.to_string(), "[ROOT_URI]/");
+    let redacted_response = response.replace(harness.root_uri().as_str(), "[ROOT_URI]");
     assert_snapshot!(redacted_response);
 }
 
@@ -102,7 +104,7 @@ table MyTable {}
     )
     .await;
 
-    let redacted_response = response.replace(&harness.root_uri.to_string(), "[ROOT_URI]/");
+    let redacted_response = response.replace(harness.root_uri().as_str(), "[ROOT_URI]");
     assert_snapshot!(redacted_response);
 }
 
@@ -130,7 +132,7 @@ table T {
     )
     .await;
 
-    let redacted_response = response.replace(&harness.root_uri.to_string(), "[ROOT_URI]/");
+    let redacted_response = response.replace(harness.root_uri().as_str(), "[ROOT_URI]");
     assert_snapshot!(redacted_response);
 }
 
@@ -156,7 +158,7 @@ table MyTable {}
     )
     .await;
 
-    let redacted_response = response.replace(&harness.root_uri.to_string(), "[ROOT_URI]/");
+    let redacted_response = response.replace(harness.root_uri().as_str(), "[ROOT_URI]");
     assert_snapshot!(redacted_response);
 }
 
@@ -184,7 +186,7 @@ table T {
     )
     .await;
 
-    let redacted_response = response.replace(&harness.root_uri.to_string(), "[ROOT_URI]/");
+    let redacted_response = response.replace(harness.root_uri().as_str(), "[ROOT_URI]");
     assert_snapshot!(redacted_response);
 }
 
@@ -212,7 +214,7 @@ table T {
     )
     .await;
 
-    let redacted_response = response.replace(&harness.root_uri.to_string(), "[ROOT_URI]/");
+    let redacted_response = response.replace(harness.root_uri().as_str(), "[ROOT_URI]");
     assert_snapshot!(redacted_response);
 }
 
@@ -225,7 +227,7 @@ async fn no_code_action_for_other_diagnostics() {
         .initialize_and_open(&[("schema.fbs", fixture)])
         .await;
 
-    let schema_uri = harness.root_uri.join("schema.fbs").unwrap();
+    let schema_uri = harness.file_uri("schema.fbs");
     let diagnostic = harness.get_first_diagnostic_for_file(&schema_uri).await;
 
     let response = harness
@@ -245,7 +247,7 @@ async fn no_code_action_for_other_diagnostics() {
     let actions = response.unwrap_or_default();
     assert!(actions.is_empty());
     let response_str = serde_json::to_string_pretty(&actions).unwrap();
-    let redacted_response = response_str.replace(&harness.root_uri.to_string(), "[ROOT_URI]/");
+    let redacted_response = response_str.replace(harness.root_uri().as_str(), "[ROOT_URI]");
     assert_snapshot!(redacted_response);
 }
 
@@ -266,7 +268,7 @@ table Foo {
     )
     .await;
 
-    let redacted_response = response.replace(&harness.root_uri.to_string(), "[ROOT_URI]/");
+    let redacted_response = response.replace(harness.root_uri().as_str(), "[ROOT_URI]");
     assert_snapshot!(redacted_response);
 }
 
@@ -284,7 +286,7 @@ root_type MyTable"#;
     )
     .await;
 
-    let redacted_response = response.replace(&harness.root_uri.to_string(), "[ROOT_URI]/");
+    let redacted_response = response.replace(harness.root_uri().as_str(), "[ROOT_URI]");
     assert_snapshot!(redacted_response);
 }
 
@@ -307,7 +309,7 @@ include "pastries.fbs";
     )
     .await;
 
-    let redacted_response = response.replace(&harness.root_uri.to_string(), "[ROOT_URI]/");
+    let redacted_response = response.replace(harness.root_uri().as_str(), "[ROOT_URI]");
     assert_snapshot!(redacted_response);
 }
 
@@ -330,12 +332,12 @@ async fn code_action_for_undefined_type_in_unopened_file() {
     let response = harness
         .call::<request::CodeActionRequest>(CodeActionParams {
             text_document: TextDocumentIdentifier {
-                uri: harness.root_uri.join("api.fbs").unwrap(),
+                uri: harness.file_uri("api.fbs"),
             },
             range: diagnostic.range,
             context: CodeActionContext {
                 diagnostics: vec![diagnostic],
-                only: Some(vec![tower_lsp::lsp_types::CodeActionKind::QUICKFIX]),
+                only: Some(vec![tower_lsp_server::lsp_types::CodeActionKind::QUICKFIX]),
                 trigger_kind: None,
             },
             work_done_progress_params: Default::default(),
@@ -345,6 +347,6 @@ async fn code_action_for_undefined_type_in_unopened_file() {
         .unwrap();
 
     let response_str = serde_json::to_string_pretty(&response).unwrap();
-    let redacted_response = response_str.replace(&harness.root_uri.to_string(), "[ROOT_URI]/");
+    let redacted_response = response_str.replace(harness.root_uri().as_str(), "[ROOT_URI]");
     assert_snapshot!(redacted_response);
 }

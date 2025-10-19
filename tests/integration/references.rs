@@ -1,6 +1,6 @@
 use crate::harness::TestHarness;
 use crate::helpers::parse_fixture;
-use tower_lsp::lsp_types::{
+use tower_lsp_server::lsp_types::{
     request, Location, Position, Range, ReferenceContext, ReferenceParams, TextDocumentIdentifier,
     TextDocumentPositionParams,
 };
@@ -14,7 +14,7 @@ async fn get_references(fixture: &str, other_files: &[(&str, &str)]) -> Vec<Loca
     let mut harness = TestHarness::new();
     harness.initialize_and_open(&workspace).await;
 
-    let main_file_uri = harness.root_uri.join("schema.fbs").unwrap();
+    let main_file_uri = harness.file_uri("schema.fbs");
     harness
         .call::<request::References>(ReferenceParams {
             text_document_position: TextDocumentPositionParams {
@@ -126,8 +126,8 @@ table MyTable {
         ])
         .await;
 
-    let included_uri = harness.root_uri.join("included.fbs").unwrap();
-    let main_uri = harness.root_uri.join("main.fbs").unwrap();
+    let included_uri = harness.file_uri("included.fbs");
+    let main_uri = harness.file_uri("main.fbs");
 
     let mut locations = harness
         .call::<request::References>(ReferenceParams {
@@ -200,9 +200,9 @@ table Beans {
         ])
         .await;
 
-    let coffee_uri = harness.root_uri.join("coffee.fbs").unwrap();
-    let pastry_uri = harness.root_uri.join("pastry.fbs").unwrap();
-    let main_uri = harness.root_uri.join("main.fbs").unwrap();
+    let coffee_uri = harness.file_uri("coffee.fbs");
+    let pastry_uri = harness.file_uri("pastry.fbs");
+    let main_uri = harness.file_uri("main.fbs");
 
     // Starting from Declaration.
     let mut coffee_locations = harness
@@ -303,8 +303,8 @@ table Y {
         ])
         .await;
 
-    let included_uri = harness.root_uri.join("included.fbs").unwrap();
-    let main_uri = harness.root_uri.join("main.fbs").unwrap();
+    let included_uri = harness.file_uri("included.fbs");
+    let main_uri = harness.file_uri("main.fbs");
 
     let mut locations = harness
         .call::<request::References>(ReferenceParams {
@@ -370,8 +370,8 @@ struct Y {
         ])
         .await;
 
-    let included_uri = harness.root_uri.join("included.fbs").unwrap();
-    let main_uri = harness.root_uri.join("main.fbs").unwrap();
+    let included_uri = harness.file_uri("included.fbs");
+    let main_uri = harness.file_uri("main.fbs");
 
     let mut locations = harness
         .call::<request::References>(ReferenceParams {
@@ -433,8 +433,8 @@ root_type Two.Numbe$0r;
         ])
         .await;
 
-    let included_uri = harness.root_uri.join("included.fbs").unwrap();
-    let main_uri = harness.root_uri.join("main.fbs").unwrap();
+    let included_uri = harness.file_uri("included.fbs");
+    let main_uri = harness.file_uri("main.fbs");
 
     let mut locations = harness
         .call::<request::References>(ReferenceParams {
@@ -503,8 +503,8 @@ union Types {
         ])
         .await;
 
-    let included_uri = harness.root_uri.join("included.fbs").unwrap();
-    let main_uri = harness.root_uri.join("main.fbs").unwrap();
+    let included_uri = harness.file_uri("included.fbs");
+    let main_uri = harness.file_uri("main.fbs");
 
     let mut locations = harness
         .call::<request::References>(ReferenceParams {

@@ -2,15 +2,16 @@ use flatbuffers_language_server::server::Backend;
 use serde::de::DeserializeOwned;
 use std::collections::VecDeque;
 use std::fs;
+use std::path::{Path, PathBuf};
 use tempfile::TempDir;
 use tokio::io::{self, AsyncReadExt, AsyncWriteExt, DuplexStream};
-use tower_lsp::jsonrpc::{Id, Request, Response};
-use tower_lsp::lsp_types::notification::Notification;
-use tower_lsp::lsp_types::request::{
+use tower_lsp_server::jsonrpc::{Id, Request, Response};
+use tower_lsp_server::lsp_types::notification::Notification;
+use tower_lsp_server::lsp_types::request::{
     RegisterCapability, Request as LspRequest, WorkDoneProgressCreate,
 };
-use tower_lsp::lsp_types::*;
-use tower_lsp::{LspService, Server};
+use tower_lsp_server::{lsp_types::*, UriExt};
+use tower_lsp_server::{LspService, Server};
 
 use super::test_logger;
 
@@ -33,7 +34,7 @@ pub struct TestHarness {
     request_id: i64,
     #[allow(dead_code)] // Unused, but keep so the directory isn't cleaned up.
     temp_dir: TempDir,
-    pub root_uri: Url,
+    pub root_path: PathBuf,
 }
 
 impl TestHarness {
@@ -47,7 +48,7 @@ impl TestHarness {
         tokio::spawn(Server::new(req_server, res_server, socket).serve(service));
 
         let temp_dir = TempDir::new().unwrap();
-        let root_uri = Url::from_directory_path(temp_dir.path().canonicalize().unwrap()).unwrap();
+        let root_path = temp_dir.path().canonicalize().unwrap();
 
         Self {
             req_stream: req_client,
@@ -57,8 +58,16 @@ impl TestHarness {
             unhandled_notifications: VecDeque::new(),
             request_id: 0,
             temp_dir,
-            root_uri,
+            root_path,
         }
+    }
+
+    pub fn file_uri<P: AsRef<Path>>(&self, path: P) -> Uri {
+        Uri::from_file_path(self.root_path.join(path)).unwrap()
+    }
+
+    pub fn root_uri(&self) -> Uri {
+        Uri::from_file_path(self.root_path.clone()).unwrap()
     }
 
     fn encode(payload: &str) -> String {
@@ -154,8 +163,7 @@ impl TestHarness {
     ) {
         // 1. Write files to disk first so the server can see them during initialization.
         for (name, content) in workspace {
-            let uri = self.root_uri.join(name).unwrap();
-            let path = uri.to_file_path().unwrap();
+            let path = self.root_path.join(name);
             if let Some(parent) = path.parent() {
                 fs::create_dir_all(parent).unwrap();
             }
@@ -164,7 +172,10 @@ impl TestHarness {
 
         // 2. Send "initialize" request.
         let mut params = InitializeParams::default();
-        params.root_uri = Some(self.root_uri.clone());
+        #[allow(deprecated)]
+        {
+            params.root_uri = Some(Uri::from_file_path(self.root_path.clone()).unwrap());
+        }
 
         let id = self.next_request_id();
         let req = Request::build("initialize")
@@ -194,7 +205,7 @@ impl TestHarness {
         let open_set: std::collections::HashSet<&str> = files_to_open.iter().cloned().collect();
         for (name, content) in workspace {
             if open_set.contains(name) {
-                let uri = self.root_uri.join(name).unwrap();
+                let uri = Uri::from_file_path(self.root_path.join(name)).unwrap();
                 let text_document = TextDocumentItem {
                     uri,
                     language_id: "flatbuffers".to_string(),
@@ -221,7 +232,7 @@ impl TestHarness {
             let folder_path = self.temp_dir.path().join(folder_name);
             fs::create_dir_all(&folder_path).unwrap();
             let canonical_folder_path = folder_path.canonicalize().unwrap_or(folder_path);
-            let folder_uri = Url::from_directory_path(canonical_folder_path).unwrap();
+            let folder_uri = Uri::from_file_path(canonical_folder_path).unwrap();
             workspace_folders.push(WorkspaceFolder {
                 uri: folder_uri,
                 name: folder_name.to_string(),
@@ -261,7 +272,7 @@ impl TestHarness {
         for (name, content) in workspace_files {
             if open_set.contains(name) {
                 let path = self.temp_dir.path().join(name);
-                let uri = Url::from_file_path(path).unwrap();
+                let uri = Uri::from_file_path(path).unwrap();
                 let text_document = TextDocumentItem {
                     uri,
                     language_id: "flatbuffers".to_string(),
@@ -282,7 +293,7 @@ impl TestHarness {
         identifier: VersionedTextDocumentIdentifier,
         content: &str,
     ) {
-        if let Ok(path) = identifier.uri.to_file_path() {
+        if let Some(path) = identifier.uri.to_file_path() {
             fs::write(path, content).unwrap();
         }
 
@@ -300,7 +311,7 @@ impl TestHarness {
         self.send_request(req).await;
     }
 
-    pub async fn close_file(&mut self, uri: Url) {
+    pub async fn close_file(&mut self, uri: Uri) {
         let params = DidCloseTextDocumentParams {
             text_document: TextDocumentIdentifier { uri },
         };
@@ -470,7 +481,7 @@ impl TestHarness {
         }
     }
 
-    pub async fn get_first_diagnostic_for_file(&mut self, uri: &Url) -> Diagnostic {
+    pub async fn get_first_diagnostic_for_file(&mut self, uri: &Uri) -> Diagnostic {
         loop {
             let params = self
                 .notification::<notification::PublishDiagnostics>()

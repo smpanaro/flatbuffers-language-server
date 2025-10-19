@@ -1,12 +1,13 @@
 use crate::harness::TestHarness;
 use crate::helpers::parse_fixture;
-use tower_lsp::lsp_types::{
+use tower_lsp_server::lsp_types::{
     notification::{self, DidChangeWatchedFiles, DidChangeWorkspaceFolders},
     request, CompletionContext, CompletionParams, CompletionTriggerKind,
     DidChangeWatchedFilesParams, DidChangeWorkspaceFoldersParams, FileChangeType, FileEvent,
     TextDocumentIdentifier, TextDocumentPositionParams, WorkspaceFolder,
     WorkspaceFoldersChangeEvent,
 };
+use tower_lsp_server::UriExt;
 
 #[tokio::test]
 async fn diagnostics_are_cleared_on_file_deletion() {
@@ -16,7 +17,7 @@ async fn diagnostics_are_cleared_on_file_deletion() {
         .initialize_and_open(&[("schema.fbs", content)])
         .await;
 
-    let schema_uri = harness.root_uri.join("schema.fbs").unwrap();
+    let schema_uri = harness.file_uri("schema.fbs");
 
     // Wait for initial diagnostic
     let params = harness
@@ -70,7 +71,7 @@ table T {
             .await;
     }
 
-    let completion_uri = harness.root_uri.join("file_with_completion.fbs").unwrap();
+    let completion_uri = harness.file_uri("file_with_completion.fbs");
 
     let completions = harness
         .call::<request::Completion>(CompletionParams {
@@ -91,10 +92,10 @@ table T {
         .unwrap();
 
     let labels = match completions {
-        tower_lsp::lsp_types::CompletionResponse::Array(items) => {
+        tower_lsp_server::lsp_types::CompletionResponse::Array(items) => {
             items.into_iter().map(|i| i.label).collect::<Vec<_>>()
         }
-        tower_lsp::lsp_types::CompletionResponse::List(list) => {
+        tower_lsp_server::lsp_types::CompletionResponse::List(list) => {
             list.items.into_iter().map(|i| i.label).collect::<Vec<_>>()
         }
     };
@@ -102,7 +103,7 @@ table T {
     assert!(labels.contains(&"TypeFromDeletedFile".to_string()));
 
     // Simulate file deletion
-    let deleted_uri = harness.root_uri.join("file_to_delete.fbs").unwrap();
+    let deleted_uri = harness.file_uri("file_to_delete.fbs");
     let deleted_path = deleted_uri.to_file_path().unwrap();
     std::fs::remove_file(deleted_path).unwrap();
     harness
@@ -140,10 +141,10 @@ table T {
         .unwrap();
 
     let labels = match completions {
-        tower_lsp::lsp_types::CompletionResponse::Array(items) => {
+        tower_lsp_server::lsp_types::CompletionResponse::Array(items) => {
             items.into_iter().map(|i| i.label).collect::<Vec<_>>()
         }
-        tower_lsp::lsp_types::CompletionResponse::List(list) => {
+        tower_lsp_server::lsp_types::CompletionResponse::List(list) => {
             list.items.into_iter().map(|i| i.label).collect::<Vec<_>>()
         }
     };
@@ -160,7 +161,7 @@ async fn diagnostics_are_cleared_on_workspace_folder_removal() {
         .initialize_with_workspace_folders(&folders, &files, &["root2/schema.fbs"])
         .await;
 
-    let schema_uri = harness.root_uri.join("root2/schema.fbs").unwrap();
+    let schema_uri = harness.file_uri("root2/schema.fbs");
 
     let params = harness
         .notification::<notification::PublishDiagnostics>()
@@ -168,7 +169,7 @@ async fn diagnostics_are_cleared_on_workspace_folder_removal() {
     assert_eq!(params.uri, schema_uri);
     assert_eq!(params.diagnostics.len(), 1);
 
-    let root2_uri = harness.root_uri.join("root2/").unwrap();
+    let root2_uri = harness.file_uri("root2/");
     let removed_folder = WorkspaceFolder {
         uri: root2_uri.clone(),
         name: "root2".to_string(),
@@ -208,7 +209,7 @@ table T {
         .initialize_with_workspace_folders(&folders, &files, &["root1/completion.fbs"])
         .await;
 
-    let completion_uri = harness.root_uri.join("root1/completion.fbs").unwrap();
+    let completion_uri = harness.file_uri("root1/completion.fbs");
     for _ in 0..2 {
         let params = harness
             .notification::<notification::PublishDiagnostics>()
@@ -238,16 +239,16 @@ table T {
         .await
         .unwrap();
     let labels = match completions {
-        tower_lsp::lsp_types::CompletionResponse::Array(items) => {
+        tower_lsp_server::lsp_types::CompletionResponse::Array(items) => {
             items.into_iter().map(|i| i.label).collect::<Vec<_>>()
         }
-        tower_lsp::lsp_types::CompletionResponse::List(list) => {
+        tower_lsp_server::lsp_types::CompletionResponse::List(list) => {
             list.items.into_iter().map(|i| i.label).collect::<Vec<_>>()
         }
     };
     assert!(labels.contains(&"TypeFromRemovedFile".to_string()));
 
-    let root2_uri = harness.root_uri.join("root2/").unwrap();
+    let root2_uri = harness.file_uri("root2/");
     let removed_folder = WorkspaceFolder {
         uri: root2_uri.clone(),
         name: "root2".to_string(),
@@ -265,7 +266,7 @@ table T {
     // The server should emit an empty diagnostic for the file in the removed folder.
     // Note: Technically since this is the same as the diagnostic that was emitted
     //       initially, it would be okay to omit it here too.
-    let removed_file_uri = harness.root_uri.join("root2/schema.fbs").unwrap();
+    let removed_file_uri = harness.file_uri("root2/schema.fbs");
     let params = harness
         .notification::<notification::PublishDiagnostics>()
         .await;
@@ -290,10 +291,10 @@ table T {
         .await
         .unwrap();
     let labels = match completions {
-        tower_lsp::lsp_types::CompletionResponse::Array(items) => {
+        tower_lsp_server::lsp_types::CompletionResponse::Array(items) => {
             items.into_iter().map(|i| i.label).collect::<Vec<_>>()
         }
-        tower_lsp::lsp_types::CompletionResponse::List(list) => {
+        tower_lsp_server::lsp_types::CompletionResponse::List(list) => {
             list.items.into_iter().map(|i| i.label).collect::<Vec<_>>()
         }
     };

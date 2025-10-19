@@ -1,6 +1,6 @@
 use crate::utils::{parsed_type::ParsedType, paths::path_buf_to_url};
 use std::{collections::HashMap, path::PathBuf};
-use tower_lsp::lsp_types::{self, CompletionItemKind, Position, Range};
+use tower_lsp_server::lsp_types::{self, CompletionItemKind, Position, Range};
 
 use crate::ext::range::RangeExt;
 

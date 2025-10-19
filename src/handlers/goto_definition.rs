@@ -1,7 +1,7 @@
 use crate::analysis::resolve_symbol_at;
 use crate::server::Backend;
-use tower_lsp::jsonrpc::Result;
-use tower_lsp::lsp_types::{GotoDefinitionParams, GotoDefinitionResponse};
+use tower_lsp_server::jsonrpc::Result;
+use tower_lsp_server::lsp_types::{GotoDefinitionParams, GotoDefinitionResponse};
 
 pub async fn handle_goto_definition(
     backend: &Backend,

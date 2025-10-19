@@ -1,13 +1,16 @@
 use crate::{
     ext::duration::DurationFormat,
     server::Backend,
-    utils::paths::{is_flatbuffer_schema, url_to_path_buf},
+    utils::paths::{is_flatbuffer_schema, uri_to_path_buf},
 };
 use log::{debug, info};
 use tokio::time::Instant;
-use tower_lsp::lsp_types::{
-    DidChangeTextDocumentParams, DidChangeWorkspaceFoldersParams, DidCloseTextDocumentParams,
-    DidOpenTextDocumentParams, DidSaveTextDocumentParams, InitializeParams, Url,
+use tower_lsp_server::{
+    lsp_types::{
+        DidChangeTextDocumentParams, DidChangeWorkspaceFoldersParams, DidCloseTextDocumentParams,
+        DidOpenTextDocumentParams, DidSaveTextDocumentParams, InitializeParams, Uri,
+    },
+    UriExt,
 };
 
 pub async fn handle_did_open(backend: &Backend, params: DidOpenTextDocumentParams) {
@@ -16,7 +19,7 @@ pub async fn handle_did_open(backend: &Backend, params: DidOpenTextDocumentParam
     if !is_flatbuffer_schema(&params.text_document.uri) {
         return;
     }
-    let Ok(path) = url_to_path_buf(&params.text_document.uri) else {
+    let Ok(path) = uri_to_path_buf(&params.text_document.uri) else {
         return;
     };
 
@@ -33,7 +36,7 @@ pub async fn handle_did_change(backend: &Backend, mut params: DidChangeTextDocum
         return;
     }
 
-    let Ok(path) = url_to_path_buf(&params.text_document.uri) else {
+    let Ok(path) = uri_to_path_buf(&params.text_document.uri) else {
         return;
     };
 
@@ -50,7 +53,7 @@ pub async fn handle_did_save(backend: &Backend, params: DidSaveTextDocumentParam
         return;
     }
 
-    let Ok(path) = url_to_path_buf(&params.text_document.uri) else {
+    let Ok(path) = uri_to_path_buf(&params.text_document.uri) else {
         return;
     };
 
@@ -77,13 +80,13 @@ pub async fn handle_did_close(_: &Backend, params: DidCloseTextDocumentParams) {
 
 pub async fn handle_initialize(backend: &Backend, params: InitializeParams) {
     for folder in params.workspace_folders.as_deref().unwrap_or_default() {
-        if let Ok(path) = url_to_path_buf(&folder.uri) {
+        if let Ok(path) = uri_to_path_buf(&folder.uri) {
             backend.workspace_roots.insert(path);
         }
     }
 
     if let Some(root_uri) = get_root_uri(&params) {
-        if let Ok(path) = url_to_path_buf(&root_uri) {
+        if let Ok(path) = uri_to_path_buf(&root_uri) {
             backend.workspace_roots.insert(path);
         }
     }
@@ -112,7 +115,7 @@ pub async fn handle_did_change_workspace_folders(
     params: DidChangeWorkspaceFoldersParams,
 ) {
     for folder in params.event.removed {
-        if let Ok(path) = url_to_path_buf(&folder.uri) {
+        if let Ok(path) = uri_to_path_buf(&folder.uri) {
             backend.workspace_roots.remove(&path);
             info!("removed root folder: {}", path.to_string_lossy());
         }
@@ -121,7 +124,7 @@ pub async fn handle_did_change_workspace_folders(
 
     let mut was_folder_added = false;
     for folder in params.event.added {
-        if let Ok(path) = url_to_path_buf(&folder.uri) {
+        if let Ok(path) = uri_to_path_buf(&folder.uri) {
             if backend.workspace_roots.insert(path.clone()) {
                 info!("added root folder: {}", path.to_string_lossy());
                 was_folder_added = true;
@@ -135,12 +138,12 @@ pub async fn handle_did_change_workspace_folders(
 }
 
 #[allow(deprecated)]
-fn get_root_uri(params: &InitializeParams) -> Option<Url> {
+fn get_root_uri(params: &InitializeParams) -> Option<Uri> {
     // root_path is deprecated in favor of root_uri
     params.root_uri.clone().or_else(|| {
         params
             .root_path
             .as_ref()
-            .and_then(|p| Url::from_file_path(p).ok())
+            .and_then(|p| Uri::from_file_path(p))
     })
 }

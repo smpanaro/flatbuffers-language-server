@@ -1,7 +1,7 @@
 use crate::harness::TestHarness;
 use crate::helpers::parse_fixture;
 use insta::assert_snapshot;
-use tower_lsp::lsp_types::{
+use tower_lsp_server::lsp_types::{
     request, Hover, HoverParams, TextDocumentIdentifier, TextDocumentPositionParams,
 };
 
@@ -17,7 +17,7 @@ async fn get_hover_response(
 
     harness.initialize_and_open(&workspace).await;
 
-    let main_file_uri = harness.root_uri.join("schema.fbs").unwrap();
+    let main_file_uri = harness.file_uri("schema.fbs");
     harness
         .call::<request::HoverRequest>(HoverParams {
             text_document_position_params: TextDocumentPositionParams {

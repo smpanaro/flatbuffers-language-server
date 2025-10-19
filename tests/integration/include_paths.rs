@@ -1,5 +1,5 @@
 use crate::harness::TestHarness;
-use tower_lsp::lsp_types::notification;
+use tower_lsp_server::lsp_types::notification;
 
 #[tokio::test]
 async fn include_paths_are_discovered_correctly() {
@@ -21,8 +21,8 @@ root_type ApiRequest;
         ])
         .await;
 
-    let api_uri = harness.root_uri.join("services/api.fbs").unwrap();
-    let common_uri = harness.root_uri.join("schemas/common.fbs").unwrap();
+    let api_uri = harness.file_uri("services/api.fbs");
+    let common_uri = harness.file_uri("schemas/common.fbs");
 
     // The server will send three `PublishDiagnostics` notifications,
     // two for api.fbs and one for common.fbs. We need to check all of them.
@@ -42,7 +42,7 @@ root_type ApiRequest;
             );
         } else {
             panic!(
-                "Received diagnostics for unexpected file: {}\n{:?}",
+                "Received diagnostics for unexpected file: {:?}\n{:?}",
                 params.uri, params.diagnostics
             );
         }

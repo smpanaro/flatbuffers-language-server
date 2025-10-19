@@ -4,7 +4,7 @@ use crate::diagnostics::ErrorDiagnosticHandler;
 use log::error;
 use once_cell::sync::Lazy;
 use regex::Regex;
-use tower_lsp::lsp_types::{Diagnostic, DiagnosticSeverity, Position, Range};
+use tower_lsp_server::lsp_types::{Diagnostic, DiagnosticSeverity, Position, Range};
 
 static RE: Lazy<Regex> = Lazy::new(|| {
     Regex::new(r"^.+?:(\d+):\s*(\d+):\s+(error|warning):\s+(.+?)(?:, originally at: .+?:(\d+))?$")

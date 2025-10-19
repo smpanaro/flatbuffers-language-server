@@ -3,7 +3,7 @@ use crate::symbol_table::{Location, RootTypeInfo, Symbol, SymbolInfo, SymbolKind
 use dashmap::DashMap;
 use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
-use tower_lsp::lsp_types::{Diagnostic, Range};
+use tower_lsp_server::lsp_types::{Diagnostic, Range};
 
 #[derive(Debug, Clone)]
 pub struct Workspace {

@@ -1,13 +1,13 @@
 use crate::diagnostics::codes::DiagnosticCode;
 use crate::server::Backend;
-use crate::utils::paths::url_to_path_buf;
+use crate::utils::paths::uri_to_path_buf;
 
 use serde_json::Value;
 use std::collections::HashMap;
-use tower_lsp::jsonrpc::Result;
-use tower_lsp::lsp_types::{
+use tower_lsp_server::jsonrpc::Result;
+use tower_lsp_server::lsp_types::{
     CodeAction, CodeActionKind, CodeActionOrCommand, CodeActionParams, CodeActionResponse,
-    Diagnostic, DiagnosticSeverity, NumberOrString, Position, Range, TextEdit, Url, WorkspaceEdit,
+    Diagnostic, DiagnosticSeverity, NumberOrString, Position, Range, TextEdit, Uri, WorkspaceEdit,
 };
 
 /// Handles incoming code action requests from the LSP client.
@@ -136,7 +136,7 @@ pub async fn handle_code_action(
 
 /// Creates a CodeActionOrCommand representing a quick fix.
 fn create_quickfix(
-    uri: &Url,
+    uri: &Uri,
     diagnostic: &Diagnostic,
     title: String,
     edits: Vec<TextEdit>,
@@ -166,7 +166,7 @@ fn create_quickfix(
 /// or setting the file's namespace.
 fn generate_undefined_type_code_actions(
     backend: &Backend,
-    uri: &Url,
+    uri: &Uri,
     diagnostic: &Diagnostic,
 ) -> Vec<CodeActionOrCommand> {
     let Some(type_name) = diagnostic
@@ -178,7 +178,7 @@ fn generate_undefined_type_code_actions(
         return vec![];
     };
 
-    let Ok(current_path) = url_to_path_buf(uri) else {
+    let Ok(current_path) = uri_to_path_buf(uri) else {
         return vec![];
     };
 

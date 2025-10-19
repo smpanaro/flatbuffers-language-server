@@ -2,10 +2,10 @@ use std::path::PathBuf;
 
 use crate::ext::range::RangeExt;
 use crate::symbol_table::{self, Symbol};
-use crate::utils::paths::url_to_path_buf;
+use crate::utils::paths::uri_to_path_buf;
 use crate::workspace::Workspace;
 
-use tower_lsp::lsp_types::{Position, Range, Url};
+use tower_lsp_server::lsp_types::{Position, Range, Uri};
 
 /// Represents what symbol was found at a given location, and what it resolves to.
 #[derive(Debug, Clone)]
@@ -20,11 +20,11 @@ pub struct ResolvedSymbol {
 
 pub fn resolve_symbol_at(
     workspace: &Workspace,
-    uri: &Url,
+    uri: &Uri,
     position: Position,
 ) -> Option<ResolvedSymbol> {
     // Check if the cursor is on a root_type declaration
-    let Ok(path) = url_to_path_buf(uri) else {
+    let Ok(path) = uri_to_path_buf(uri) else {
         return None;
     };
 
