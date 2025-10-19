@@ -203,7 +203,11 @@ unsafe fn extract_structs_and_tables(
             let type_source = c_str_to_string(field_info.type_source);
 
             let type_range = field_info.type_range.into();
-            let parsed_type = parse_type(&type_source, type_range);
+            let Some(parsed_type) = parse_type(&type_source, type_range) else {
+                error!("Failed to parse field type at {}:{}:{}. Please open a GitHub Issue: https://github.com/smpanaro/flatbuffers-language-server/issues",
+                    file_path.display(), type_range.end.line, type_range.end.character);
+                continue;
+            };
 
             let documentation = c_str_to_optional_string(field_info.documentation);
 
@@ -304,19 +308,23 @@ unsafe fn extract_enums_and_unions(parser_ptr: *mut ffi::FlatbuffersParser, st: 
             SymbolKind::Union(Union {
                 variants: variants
                     .into_iter()
-                    .map(|(name, val_info)| {
+                    .filter_map(|(name, val_info)| {
                         let type_source = c_str_to_string(val_info.type_source);
                         let type_range = val_info.type_range.into();
-                        let parsed_type = parse_type(&type_source, type_range);
+                        let Some(parsed_type) = parse_type(&type_source, type_range) else {
+                            error!("Failed to parse union variant type at {}:{}:{}. Please open a GitHub Issue: https://github.com/smpanaro/flatbuffers-language-server/issues",
+                                file_path.display(), type_range.end.line, type_range.end.character);
+                            return None
+                        };
                         let location = crate::symbol_table::Location {
                             path: file_path.clone(),
                             range: type_range,
                         };
-                        UnionVariant {
+                        Some(UnionVariant {
                             name,
                             location,
                             parsed_type,
-                        }
+                        })
                     })
                     .collect(),
             })
@@ -367,7 +375,11 @@ unsafe fn extract_root_type(parser_ptr: *mut ffi::FlatbuffersParser) -> Option<R
 
     let type_source = c_str_to_string(root_def.type_source);
     let type_range = root_def.type_range.into();
-    let parsed_type = parse_type(&type_source, type_range);
+    let Some(parsed_type) = parse_type(&type_source, type_range) else {
+        error!("Failed to parse root type at {}:{}:{}. Please open a GitHub Issue: https://github.com/smpanaro/flatbuffers-language-server/issues",
+            file_path.display(), type_range.end.line, type_range.end.character);
+        return None;
+    };
 
     let location = crate::symbol_table::Location {
         path: file_path,

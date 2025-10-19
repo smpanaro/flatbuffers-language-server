@@ -1093,8 +1093,12 @@ CheckedError Parser::ParseField(StructDef &struct_def) {
     // Upgrade the type to be a BASE_TYPE_VECTOR64, since the attributes are
     // parsed after the type.
     const BaseType element_base_type = type.element;
+    const SourceRange decl_range = type.decl_range;
+    const std::string decl_text = type.decl_text;
     type = Type(BASE_TYPE_VECTOR64, type.struct_def, type.enum_def);
     type.element = element_base_type;
+    type.decl_range = decl_range;
+    type.decl_text = decl_text;
 
     // Since the field was already added to the parent object, update the type
     // in place.

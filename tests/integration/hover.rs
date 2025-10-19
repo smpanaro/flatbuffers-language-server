@@ -234,3 +234,17 @@ table Tab {
     let response = get_hover_response(&mut harness, fixture, &[]).await;
     assert!(response.is_some())
 }
+
+#[tokio::test]
+async fn hover_vector64() {
+    // vector64 is parsed uniquely and needs special handling.
+    let fixture = r#"
+table RootTable {
+    big_vector:[ui$0nt8] (vector64);
+}
+"#;
+
+    let mut harness = TestHarness::new();
+    let response = get_hover_response(&mut harness, fixture, &[]).await;
+    assert!(response.is_some())
+}

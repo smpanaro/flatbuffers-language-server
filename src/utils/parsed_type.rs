@@ -14,7 +14,7 @@ pub struct ParsedType {
     pub array_size: Option<TypePart>,
 }
 
-pub fn parse_type(text: &str, range: Range) -> ParsedType {
+pub fn parse_type(text: &str, range: Range) -> Option<ParsedType> {
     let mut parser = TypeParser::new(text, range.start);
     parser.parse()
 }
@@ -81,7 +81,7 @@ impl<'a> TypeParser<'a> {
         }
     }
 
-    fn parse_fqn(&mut self) -> (Vec<TypePart>, TypePart) {
+    fn parse_fqn(&mut self) -> Option<(Vec<TypePart>, TypePart)> {
         let mut parts = Vec::new();
         loop {
             let part = self.parse_part();
@@ -100,16 +100,22 @@ impl<'a> TypeParser<'a> {
                 break;
             }
         }
-        let type_name = parts.pop().expect("Type should have at least a name");
-        (parts, type_name)
+        // Unexpected, every type should have a name.
+        let Some(type_name) = parts.pop() else {
+            return None;
+        };
+
+        Some((parts, type_name))
     }
 
-    fn parse(&mut self) -> ParsedType {
+    fn parse(&mut self) -> Option<ParsedType> {
         self.skip_whitespace();
         let is_vector = self.consume_char('[');
         self.skip_whitespace();
 
-        let (namespace, type_name) = self.parse_fqn();
+        let Some((namespace, type_name)) = self.parse_fqn() else {
+            return None;
+        };
 
         let mut array_size = None;
         self.skip_whitespace();
@@ -124,12 +130,12 @@ impl<'a> TypeParser<'a> {
         }
         self.skip_whitespace();
 
-        ParsedType {
+        Some(ParsedType {
             is_vector,
             namespace,
             type_name,
             array_size,
-        }
+        })
     }
 }
 
@@ -178,7 +184,7 @@ mod tests {
     fn test_simple_type() {
         let text = "MyType";
         let range = Range::new(Position::new(1, 10), Position::new(1, 16));
-        let parsed = parse_type(text, range);
+        let parsed = parse_type(text, range).unwrap();
         assert_eq!(
             parsed,
             ParsedType {
@@ -197,7 +203,7 @@ mod tests {
     fn test_namespaced_type() {
         let text = "My.Name.Space.Type";
         let range = Range::new(Position::new(2, 5), Position::new(2, 23));
-        let parsed = parse_type(text, range);
+        let parsed = parse_type(text, range).unwrap();
         assert_eq!(
             parsed,
             ParsedType {
@@ -229,7 +235,7 @@ mod tests {
     fn test_vector_type() {
         let text = "[MyType]";
         let range = Range::new(Position::new(3, 12), Position::new(3, 20));
-        let parsed = parse_type(text, range);
+        let parsed = parse_type(text, range).unwrap();
         assert_eq!(
             parsed,
             ParsedType {
@@ -248,7 +254,7 @@ mod tests {
     fn test_vector_with_array_size() {
         let text = "[MyType:123]";
         let range = Range::new(Position::new(4, 4), Position::new(4, 16));
-        let parsed = parse_type(text, range);
+        let parsed = parse_type(text, range).unwrap();
         assert_eq!(
             parsed,
             ParsedType {
@@ -270,7 +276,7 @@ mod tests {
     fn test_namespaced_vector_with_array_size() {
         let text = "[My.Name.Space.Type:42]";
         let range = Range::new(Position::new(5, 2), Position::new(5, 25));
-        let parsed = parse_type(text, range);
+        let parsed = parse_type(text, range).unwrap();
         assert_eq!(
             parsed,
             ParsedType {
@@ -306,7 +312,7 @@ mod tests {
         // Note: Inputs should not have leading or trailing whitespace, but handling it is ok.
         let text = "  [  My.Type: 123 ]  ";
         let range = Range::new(Position::new(6, 1), Position::new(6, 22));
-        let parsed = parse_type(text, range);
+        let parsed = parse_type(text, range).unwrap();
         assert_eq!(
             parsed,
             ParsedType {
@@ -333,7 +339,7 @@ mod tests {
   MyType
 ]";
         let range = Range::new(Position::new(10, 4), Position::new(12, 5));
-        let parsed = parse_type(text, range);
+        let parsed = parse_type(text, range).unwrap();
         assert_eq!(
             parsed,
             ParsedType {

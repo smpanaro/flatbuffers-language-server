@@ -1,6 +1,5 @@
 #include "wrapper.h"
 #include "flatbuffers/idl.h"
-#include "flatbuffers/util.h"
 #include <string>
 #ifdef _WIN32
 #include <direct.h>
@@ -38,7 +37,8 @@ std::string GetTypeName(const flatbuffers::Type& type) {
             }
             break;
         }
-        case flatbuffers::BASE_TYPE_VECTOR: {
+        case flatbuffers::BASE_TYPE_VECTOR:
+        case flatbuffers::BASE_TYPE_VECTOR64: {
             return "[" + GetTypeName(type.VectorType()) + "]";
         }
         case flatbuffers::BASE_TYPE_ARRAY: {
@@ -62,6 +62,9 @@ std::string GetTypeName(const flatbuffers::Type& type) {
             }
             break;
         }
+        case flatbuffers::BASE_TYPE_FLOAT:
+        case flatbuffers::BASE_TYPE_DOUBLE:
+        case flatbuffers::BASE_TYPE_STRING:
         default: {
             break;
         }
@@ -318,6 +321,7 @@ struct FieldDefinitionInfo get_field_info(struct FlatbuffersParser* parser, int 
         flatbuffers::Type type  = field_def->value.type;
         switch (type.base_type) {
             case flatbuffers::BASE_TYPE_VECTOR:
+            case flatbuffers::BASE_TYPE_VECTOR64:
             case flatbuffers::BASE_TYPE_ARRAY: {
                 type = type.VectorType();
             }
