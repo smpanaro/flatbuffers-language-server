@@ -1,6 +1,6 @@
 ## Unreleased
 
-## 0.0.1
+## 0.0.1 - October 19, 2025
 
 This is the initial release!
 
