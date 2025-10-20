@@ -16,6 +16,14 @@ A language server implementation for [Google FlatBuffers](https://flatbuffers.de
 
 # Usage
 
+## Zed
+Use the `main` branch of [zed-flatbuffers](https://github.com/smpanaro/zed-flatbuffers/tree/main).
+
+## VSCode (+ Forks)
+Install via the Extension Marketplace [here](https://marketplace.visualstudio.com/items?itemName=smpanaro.flatbuffers-language-server).
+
+## Build from Source
+
 Install Rust. (Instructions [here](https://www.rust-lang.org/tools/install).)
 
 ```sh
@@ -30,6 +38,3 @@ Content-Length: 127
 ```
 
 Configure your IDE to point at the `target/debug/flatbuffers-language-server` binary.
-
-## Zed
-Use the `lsp` branch of [zed-flatbuffers](https://github.com/smpanaro/zed-flatbuffers/tree/lsp)
