@@ -1,131 +1,112 @@
-use crate::{
-    ext::duration::DurationFormat,
-    server::Backend,
-    utils::paths::{is_flatbuffer_schema, uri_to_path_buf},
-};
+use crate::{ext::duration::DurationFormat, server::Backend, utils::paths::uri_to_path_buf};
 use log::{debug, info};
 use tokio::time::Instant;
 use tower_lsp_server::{
     lsp_types::{
-        DidChangeTextDocumentParams, DidChangeWorkspaceFoldersParams, DidCloseTextDocumentParams,
-        DidOpenTextDocumentParams, DidSaveTextDocumentParams, InitializeParams, Uri,
+        Diagnostic, DidChangeTextDocumentParams, DidChangeWorkspaceFoldersParams,
+        DidCloseTextDocumentParams, DidOpenTextDocumentParams, DidSaveTextDocumentParams,
+        InitializeParams, Uri,
     },
     UriExt,
 };
 
-pub async fn handle_did_open(backend: &Backend, params: DidOpenTextDocumentParams) {
-    debug!("opened: {}", params.text_document.uri.path());
-    // Not sure why, but we occasionally get non .fbs files.
-    if !is_flatbuffer_schema(&params.text_document.uri) {
-        return;
+pub async fn handle_did_open(
+    backend: &Backend,
+    params: DidOpenTextDocumentParams,
+) -> Vec<(Uri, Vec<Diagnostic>)> {
+    if let Some(path) = backend.documents.handle_did_open(params) {
+        backend.analysis.parse_many_and_publish(vec![path]).await
+    } else {
+        vec![]
     }
-    let Ok(path) = uri_to_path_buf(&params.text_document.uri) else {
-        return;
-    };
-
-    backend.document_map.insert(
-        path.clone(),
-        ropey::Rope::from_str(&params.text_document.text),
-    );
-    backend.parse_many_and_publish(vec![path]).await;
 }
 
-pub async fn handle_did_change(backend: &Backend, mut params: DidChangeTextDocumentParams) {
-    debug!("changed: {}", params.text_document.uri.path());
-    if !is_flatbuffer_schema(&params.text_document.uri) {
-        return;
+pub async fn handle_did_change(
+    backend: &Backend,
+    params: DidChangeTextDocumentParams,
+) -> Vec<(Uri, Vec<Diagnostic>)> {
+    if let Some(path) = backend.documents.handle_did_change(params) {
+        backend.analysis.parse_many_and_publish(vec![path]).await
+    } else {
+        vec![]
     }
-
-    let Ok(path) = uri_to_path_buf(&params.text_document.uri) else {
-        return;
-    };
-
-    let content = params.content_changes.remove(0).text;
-    backend
-        .document_map
-        .insert(path.clone(), ropey::Rope::from_str(&content));
-    backend.parse_many_and_publish(vec![path]).await;
 }
 
-pub async fn handle_did_save(backend: &Backend, params: DidSaveTextDocumentParams) {
-    debug!("saved: {}", params.text_document.uri.path());
-    if !is_flatbuffer_schema(&params.text_document.uri) {
-        return;
-    }
-
-    let Ok(path) = uri_to_path_buf(&params.text_document.uri) else {
-        return;
-    };
-
-    if let Some(text) = params.text {
+pub async fn handle_did_save(
+    backend: &Backend,
+    params: DidSaveTextDocumentParams,
+) -> Vec<(Uri, Vec<Diagnostic>)> {
+    if let Some((path, _)) = backend.documents.handle_did_save(params) {
+        let snapshot = backend.analysis.snapshot().await;
+        let mut files_to_reparse = vec![path.clone()];
+        if let Some(includers) = snapshot.dependencies.included_by.get(&path) {
+            files_to_reparse.extend(includers.clone());
+        }
         backend
-            .document_map
-            .insert(path.clone(), ropey::Rope::from_str(&text));
+            .analysis
+            .parse_many_and_publish(files_to_reparse)
+            .await
+    } else {
+        vec![]
     }
-
-    let mut files_to_reparse = vec![path.clone()];
-    if let Some(includers) = backend.workspace.file_included_by.get(&path) {
-        files_to_reparse.extend(includers.value().clone());
-    }
-
-    backend.parse_many_and_publish(files_to_reparse).await;
 }
 
-pub async fn handle_did_close(_: &Backend, params: DidCloseTextDocumentParams) {
-    debug!("closed: {}", params.text_document.uri.path());
-    if !is_flatbuffer_schema(&params.text_document.uri) {
-        return;
-    }
+pub async fn handle_did_close(backend: &Backend, params: DidCloseTextDocumentParams) {
+    backend.documents.handle_did_close(params);
 }
 
 pub async fn handle_initialize(backend: &Backend, params: InitializeParams) {
     for folder in params.workspace_folders.as_deref().unwrap_or_default() {
         if let Ok(path) = uri_to_path_buf(&folder.uri) {
-            backend.workspace_roots.insert(path);
+            backend.search_paths.workspace_roots.insert(path);
         }
     }
 
     if let Some(root_uri) = get_root_uri(&params) {
         if let Ok(path) = uri_to_path_buf(&root_uri) {
-            backend.workspace_roots.insert(path);
+            backend.search_paths.workspace_roots.insert(path);
         }
     }
 }
 
-pub async fn handle_initialized(backend: &Backend) {
+pub async fn handle_initialized(backend: &Backend) -> Vec<(Uri, Vec<Diagnostic>)> {
     let start = Instant::now();
     let roots: Vec<_> = backend
+        .search_paths
         .workspace_roots
         .iter()
         .map(|r| r.key().clone())
         .collect();
     info!("initial workspace roots: {:?}", roots);
 
-    backend.scan_workspace().await;
+    let diagnostics = backend.analysis.scan_workspace().await;
 
+    let snapshot = backend.analysis.snapshot().await;
     debug!(
         "initialized scan in {}: {} files",
         start.elapsed().log_str(),
-        backend.workspace.file_definitions.len()
+        snapshot.symbols.per_file.len()
     );
+    diagnostics
 }
 
 pub async fn handle_did_change_workspace_folders(
     backend: &Backend,
     params: DidChangeWorkspaceFoldersParams,
-) {
+) -> Vec<(Uri, Vec<Diagnostic>)> {
+    let mut diagnostics = Vec::new();
     for folder in params.event.removed {
         if let Ok(path) = uri_to_path_buf(&folder.uri) {
-            backend.workspace_roots.remove(&path);
+            backend.search_paths.workspace_roots.remove(&path);
             info!("removed root folder: {}", path.to_string_lossy());
         }
-        backend.remove_workspace_folder(&folder.uri).await;
+        diagnostics.append(&mut backend.analysis.remove_workspace_folder(&folder.uri).await);
     }
 
     let mut was_folder_added = false;
     for folder in params.event.added {
         if let Ok(path) = uri_to_path_buf(&folder.uri) {
-            if backend.workspace_roots.insert(path.clone()) {
+            if backend.search_paths.workspace_roots.insert(path.clone()) {
                 info!("added root folder: {}", path.to_string_lossy());
                 was_folder_added = true;
             }
@@ -133,8 +114,9 @@ pub async fn handle_did_change_workspace_folders(
     }
 
     if was_folder_added {
-        backend.scan_workspace().await;
+        diagnostics.append(&mut backend.analysis.scan_workspace().await);
     }
+    diagnostics
 }
 
 #[allow(deprecated)]

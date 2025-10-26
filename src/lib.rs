@@ -5,15 +5,16 @@ use tower_lsp_server::{LspService, Server};
 
 pub mod analysis;
 pub mod diagnostics;
+pub mod document_store;
 pub mod ext;
 pub mod ffi;
 pub mod handlers;
 pub mod lsp_logger;
 pub mod parser;
+pub mod search_path_manager;
 pub mod server;
 pub mod symbol_table;
 pub mod utils;
-pub mod workspace;
 
 pub async fn run() {
     let stdin = tokio::io::stdin();

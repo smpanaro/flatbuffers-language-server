@@ -1,6 +1,5 @@
-use crate::analysis::resolve_symbol_at;
+use crate::analysis::WorkspaceSnapshot;
 use crate::ext::duration::DurationFormat;
-use crate::server::Backend;
 use crate::symbol_table;
 use crate::utils::paths::path_buf_to_url;
 use log::debug;
@@ -8,15 +7,15 @@ use std::time::Instant;
 use tower_lsp_server::jsonrpc::Result;
 use tower_lsp_server::lsp_types::{Location, ReferenceParams};
 
-pub async fn handle_references(
-    backend: &Backend,
+pub async fn handle_references<'a>(
+    snapshot: &WorkspaceSnapshot<'a>,
     params: ReferenceParams,
 ) -> Result<Option<Vec<Location>>> {
     let start = Instant::now();
     let uri = params.text_document_position.text_document.uri;
     let position = params.text_document_position.position;
 
-    let Some(resolved) = resolve_symbol_at(&backend.workspace, &uri, position) else {
+    let Some(resolved) = snapshot.resolve_symbol_at(&uri, position) else {
         return Ok(None);
     };
 
@@ -28,8 +27,8 @@ pub async fn handle_references(
     let mut references = Vec::new();
 
     // Find all references to this symbol across all files
-    for entry in backend.workspace.symbols.iter() {
-        let symbol = entry.value();
+    for entry in snapshot.symbols.global.iter() {
+        let symbol = entry.1;
         let Ok(file_uri) = path_buf_to_url(&symbol.info.location.path) else {
             continue;
         };
@@ -64,11 +63,10 @@ pub async fn handle_references(
     }
 
     // Check for root_type declarations
-    for entry in backend.workspace.root_types.iter() {
-        let Ok(uri) = path_buf_to_url(entry.key()) else {
+    for (path, root_type_info) in snapshot.root_types.root_types.iter() {
+        let Ok(uri) = path_buf_to_url(path) else {
             continue;
         };
-        let root_type_info = entry.value();
         if root_type_info.type_name == target_name {
             references.push(Location {
                 uri,
@@ -79,7 +77,7 @@ pub async fn handle_references(
 
     // Include the definition itself if requested
     if params.context.include_declaration {
-        if let Some(def_symbol) = backend.workspace.symbols.get(&target_name) {
+        if let Some(def_symbol) = snapshot.symbols.global.get(&target_name) {
             if !def_symbol.info.builtin {
                 references.push(def_symbol.info.location.clone().into());
             }

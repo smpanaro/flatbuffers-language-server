@@ -1,6 +1,5 @@
-use crate::analysis::resolve_symbol_at;
+use crate::analysis::WorkspaceSnapshot;
 use crate::ext::duration::DurationFormat;
-use crate::server::Backend;
 use crate::utils::paths::uri_to_path_buf;
 use log::debug;
 use ropey::Rope;
@@ -46,7 +45,10 @@ fn is_inside_braces(doc: &Rope, position: Position) -> bool {
     open_braces > close_braces
 }
 
-pub async fn handle_hover(backend: &Backend, params: HoverParams) -> Result<Option<Hover>> {
+pub async fn handle_hover<'a>(
+    snapshot: &WorkspaceSnapshot<'a>,
+    params: HoverParams,
+) -> Result<Option<Hover>> {
     let start = Instant::now();
     let uri = params.text_document_position_params.text_document.uri;
     let pos = params.text_document_position_params.position;
@@ -56,7 +58,7 @@ pub async fn handle_hover(backend: &Backend, params: HoverParams) -> Result<Opti
         return Ok(None);
     };
 
-    if let Some(resolved) = resolve_symbol_at(&backend.workspace, &uri, pos) {
+    if let Some(resolved) = snapshot.resolve_symbol_at(&uri, pos) {
         res = Some(Hover {
             contents: HoverContents::Markup(MarkupContent {
                 kind: MarkupKind::Markdown,
@@ -64,13 +66,13 @@ pub async fn handle_hover(backend: &Backend, params: HoverParams) -> Result<Opti
             }),
             range: Some(resolved.range),
         });
-    } else if let Some(doc) = backend.document_map.get(&path) {
+    } else if let Some(doc) = snapshot.documents.get(&path) {
         if !is_inside_braces(&doc, pos) {
             if let Some(line) = doc.lines().nth(pos.line as usize) {
                 let (start_char, end_char) = find_word_at_pos(&line.to_string(), pos.character);
                 let word = &line.to_string()[start_char..end_char];
 
-                if let Some(doc) = backend.workspace.keywords.get(word) {
+                if let Some(doc) = snapshot.symbols.keywords.get(word) {
                     let range = Range {
                         start: Position {
                             line: pos.line,
@@ -84,7 +86,7 @@ pub async fn handle_hover(backend: &Backend, params: HoverParams) -> Result<Opti
                     res = Some(Hover {
                         contents: HoverContents::Markup(MarkupContent {
                             kind: MarkupKind::Markdown,
-                            value: doc.value().clone(),
+                            value: doc.clone(),
                         }),
                         range: Some(range),
                     });

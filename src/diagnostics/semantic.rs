@@ -5,7 +5,7 @@ use std::path::{Path, PathBuf};
 
 use tower_lsp_server::lsp_types::{Diagnostic, DiagnosticSeverity, DiagnosticTag, Position, Range};
 
-use crate::symbol_table::{SymbolKind, SymbolTable};
+use crate::symbol_table::{RootTypeInfo, SymbolKind, SymbolTable};
 
 pub fn analyze_deprecated_fields(
     st: &SymbolTable,
@@ -49,7 +49,7 @@ pub fn analyze_unused_includes(
     file_contents: &str,
     include_graph: &HashMap<String, Vec<String>>,
     search_paths: &[PathBuf],
-    root_type_info: &Option<crate::symbol_table::RootTypeInfo>,
+    root_type_info: &Option<RootTypeInfo>,
 ) {
     let mut used_types = HashSet::new();
     if let Some(root_type) = root_type_info {
@@ -87,7 +87,7 @@ pub fn analyze_unused_includes(
     }
 
     let mut directly_required_files = HashSet::new();
-    for used_type in used_types {
+    for used_type in &used_types {
         if let Some(symbol) = st.get(&used_type) {
             let path = &symbol.info.location.path;
             directly_required_files.insert(path.to_path_buf());

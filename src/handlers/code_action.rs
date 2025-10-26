@@ -1,5 +1,5 @@
+use crate::analysis::WorkspaceSnapshot;
 use crate::diagnostics::codes::DiagnosticCode;
-use crate::server::Backend;
 use crate::utils::paths::uri_to_path_buf;
 
 use serde_json::Value;
@@ -14,8 +14,8 @@ use tower_lsp_server::lsp_types::{
 ///
 /// This function iterates through diagnostics provided by the client and generates
 /// relevant quick-fix actions based on the diagnostic code.
-pub async fn handle_code_action(
-    backend: &Backend,
+pub async fn handle_code_action<'a>(
+    snapshot: &WorkspaceSnapshot<'a>,
     params: CodeActionParams,
 ) -> Result<Option<CodeActionResponse>> {
     let uri = params.text_document.uri;
@@ -124,7 +124,7 @@ pub async fn handle_code_action(
             }
             DiagnosticCode::UndefinedType => {
                 code_actions.extend(generate_undefined_type_code_actions(
-                    backend,
+                    snapshot,
                     &uri,
                     &diagnostic,
                 ));
@@ -165,7 +165,7 @@ fn create_quickfix(
 /// and suggests actions such as importing the symbol, qualifying the type name,
 /// or setting the file's namespace.
 fn generate_undefined_type_code_actions(
-    backend: &Backend,
+    snapshot: &WorkspaceSnapshot,
     uri: &Uri,
     diagnostic: &Diagnostic,
 ) -> Vec<CodeActionOrCommand> {
@@ -186,18 +186,18 @@ fn generate_undefined_type_code_actions(
         return vec![];
     };
 
-    let Some(doc) = backend.document_map.get(&current_path) else {
+    // This could be tree sitter.
+    let Some(doc) = snapshot.documents.get(&current_path) else {
         return vec![];
     };
 
-    let matching_symbols: Vec<_> = backend
-        .workspace
+    let matching_symbols: Vec<_> = snapshot
         .symbols
+        .global
         .iter()
-        .filter(|s| {
-            s.value().info.qualified_name() == type_name || s.value().info.name == type_name
-        })
-        .map(|s| s.value().clone())
+        .map(|(_, s)| s)
+        .filter(|s| s.info.qualified_name() == type_name || s.info.name == type_name)
+        .map(|s| s.clone())
         .collect();
 
     if matching_symbols.is_empty() {
@@ -231,9 +231,9 @@ fn generate_undefined_type_code_actions(
         let relative_path_str = relative_path.to_str().unwrap_or_default();
 
         let is_already_included =
-            backend
-                .workspace
-                .file_includes
+            snapshot
+                .dependencies
+                .includes
                 .get(&current_path)
                 .map_or(false, |includes| {
                     includes

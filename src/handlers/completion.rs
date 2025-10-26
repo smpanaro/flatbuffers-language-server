@@ -1,6 +1,5 @@
-use crate::analysis::find_enclosing_table;
+use crate::analysis::WorkspaceSnapshot;
 use crate::ext::duration::DurationFormat;
-use crate::server::Backend;
 use crate::symbol_table::SymbolKind;
 use crate::utils::paths::uri_to_path_buf;
 use log::debug;
@@ -18,7 +17,7 @@ use tower_lsp_server::lsp_types::{
 static FIELD_RE: Lazy<Regex> = Lazy::new(|| Regex::new(r"^\s*(\w+)\s*:\s*(\w*)").unwrap());
 
 fn handle_attribute_completion(
-    backend: &Backend,
+    snapshot: &WorkspaceSnapshot,
     path: &PathBuf,
     position: Position,
     line: &str,
@@ -47,7 +46,7 @@ fn handle_attribute_completion(
 
         // ID completion
         if "id".starts_with(last_word) {
-            if let Some(table_symbol) = find_enclosing_table(&backend.workspace, path, position) {
+            if let Some(table_symbol) = snapshot.find_enclosing_table(path, position) {
                 if let SymbolKind::Table(table) = &table_symbol.kind {
                     let mut max_id = -1;
                     let mut style_with_space = true;
@@ -59,8 +58,8 @@ fn handle_attribute_completion(
                                     max_id = f.id;
                                 }
                                 // Check styling
-                                if let Some(line) = backend
-                                    .document_map
+                                if let Some(line) = snapshot
+                                    .documents
                                     .get(path)
                                     .unwrap()
                                     .lines()
@@ -125,8 +124,8 @@ fn handle_attribute_completion(
         // Other attributes
         let attribute_list = &line[start_paren..];
         let value_attributes = ["force_align", "nested_flatbuffer", "hash"]; // attributes that require a value
-        for entry in backend.workspace.builtin_attributes.iter() {
-            let (name, attr) = (entry.key(), entry.value());
+        for entry in snapshot.symbols.builtin_attributes.iter() {
+            let (name, attr) = entry;
 
             if attribute_list.contains(name) {
                 continue;
@@ -166,7 +165,10 @@ fn handle_attribute_completion(
     None
 }
 
-fn handle_field_type_completion(backend: &Backend, line: &str) -> Option<CompletionResponse> {
+fn handle_field_type_completion(
+    snapshot: &WorkspaceSnapshot,
+    line: &str,
+) -> Option<CompletionResponse> {
     let curr_char = line.chars().last();
     let prev_char = line.chars().nth(line.chars().count().saturating_sub(2));
     if curr_char == Some(' ') && prev_char != Some(':') {
@@ -184,8 +186,8 @@ fn handle_field_type_completion(backend: &Backend, line: &str) -> Option<Complet
     // Build a map to detect name collisions
     let mut name_collisions: std::collections::HashMap<String, usize> =
         std::collections::HashMap::new();
-    for entry in backend.workspace.symbols.iter() {
-        let symbol = entry.value();
+    for entry in snapshot.symbols.global.iter() {
+        let symbol = entry.1;
         if let SymbolKind::Field(_) = &symbol.kind {
             continue;
         }
@@ -193,8 +195,8 @@ fn handle_field_type_completion(backend: &Backend, line: &str) -> Option<Complet
     }
 
     // User-defined symbols
-    for entry in backend.workspace.symbols.iter() {
-        let symbol = entry.value();
+    for entry in snapshot.symbols.global.iter() {
+        let symbol = entry.1;
         let kind: CompletionItemKind = (&symbol.kind).into();
         if kind == CompletionItemKind::FIELD {
             continue;
@@ -249,8 +251,8 @@ fn handle_field_type_completion(backend: &Backend, line: &str) -> Option<Complet
     }
 
     // Built-in symbols
-    for item in backend.workspace.builtin_symbols.iter() {
-        let (name, symbol) = (item.key(), item.value());
+    for item in snapshot.symbols.builtins.iter() {
+        let (name, symbol) = item;
         let (is_match, sort_text) =
             field_sort_text(field_name, partial_text, &symbol.info.name, &vec![], true);
 
@@ -342,7 +344,10 @@ fn field_sort_text(
     (is_match, sort_text)
 }
 
-fn handle_root_type_completion(backend: &Backend, line: &str) -> Option<CompletionResponse> {
+fn handle_root_type_completion(
+    snapshot: &WorkspaceSnapshot,
+    line: &str,
+) -> Option<CompletionResponse> {
     let trimmed_line = line.trim();
     if !trimmed_line.starts_with("root_type") {
         return None;
@@ -351,8 +356,8 @@ fn handle_root_type_completion(backend: &Backend, line: &str) -> Option<Completi
     let partial_text = trimmed_line.strip_prefix("root_type").unwrap_or("").trim();
 
     let mut items = Vec::new();
-    for entry in backend.workspace.symbols.iter() {
-        let symbol = entry.value();
+    for entry in snapshot.symbols.global.iter() {
+        let symbol = entry.1;
         if let SymbolKind::Table(_) = &symbol.kind {
             let base_name = &symbol.info.name;
             let qualified_name = symbol.info.qualified_name();
@@ -377,19 +382,22 @@ fn handle_root_type_completion(backend: &Backend, line: &str) -> Option<Completi
     Some(CompletionResponse::Array(items))
 }
 
-fn handle_keyword_completion(backend: &Backend, line: &str) -> Option<CompletionResponse> {
+fn handle_keyword_completion(
+    snapshot: &WorkspaceSnapshot,
+    line: &str,
+) -> Option<CompletionResponse> {
     let partial_keyword = line.trim();
-    let items: Vec<CompletionItem> = backend
-        .workspace
+    let items: Vec<CompletionItem> = snapshot
+        .symbols
         .keywords
         .iter()
-        .filter(|item| item.key().starts_with(partial_keyword))
-        .map(|item| CompletionItem {
-            label: item.key().clone(),
+        .filter(|item| item.0.starts_with(partial_keyword))
+        .map(|(name, item)| CompletionItem {
+            label: name.clone(),
             kind: Some(CompletionItemKind::KEYWORD),
             documentation: Some(Documentation::MarkupContent(MarkupContent {
                 kind: MarkupKind::Markdown,
-                value: item.value().clone(),
+                value: item.clone(),
             })),
             ..Default::default()
         })
@@ -436,8 +444,8 @@ fn should_suppress_completion(doc: &Rope, position: Position) -> bool {
     open_braces > close_braces
 }
 
-pub async fn handle_completion(
-    backend: &Backend,
+pub async fn handle_completion<'a>(
+    snapshot: &WorkspaceSnapshot<'a>,
     params: CompletionParams,
 ) -> Result<Option<CompletionResponse>> {
     let start = Instant::now();
@@ -447,7 +455,7 @@ pub async fn handle_completion(
         return Ok(None);
     };
 
-    let Some(doc) = backend.document_map.get(&path) else {
+    let Some(doc) = snapshot.documents.get(&path) else {
         return Ok(None);
     };
     let Some(line) = doc
@@ -463,14 +471,14 @@ pub async fn handle_completion(
     }
 
     let response =
-        if let Some(response) = handle_attribute_completion(backend, &path, position, &line) {
+        if let Some(response) = handle_attribute_completion(snapshot, &path, position, &line) {
             Some(response)
-        } else if let Some(response) = handle_root_type_completion(backend, &line) {
+        } else if let Some(response) = handle_root_type_completion(snapshot, &line) {
             Some(response)
-        } else if let Some(response) = handle_field_type_completion(backend, &line) {
+        } else if let Some(response) = handle_field_type_completion(snapshot, &line) {
             Some(response)
         } else {
-            handle_keyword_completion(backend, &line)
+            handle_keyword_completion(snapshot, &line)
         };
 
     let elapsed = start.elapsed();

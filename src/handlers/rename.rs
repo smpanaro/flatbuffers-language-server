@@ -1,6 +1,5 @@
-use crate::analysis::resolve_symbol_at;
+use crate::analysis::WorkspaceSnapshot;
 use crate::ext::duration::DurationFormat;
-use crate::server::Backend;
 use log::debug;
 use std::collections::HashMap;
 use std::time::Instant;
@@ -10,14 +9,14 @@ use tower_lsp_server::lsp_types::{
     TextDocumentPositionParams, TextEdit, WorkspaceEdit,
 };
 
-pub async fn prepare_rename(
-    backend: &Backend,
+pub async fn prepare_rename<'a>(
+    snapshot: &WorkspaceSnapshot<'a>,
     params: TextDocumentPositionParams,
 ) -> Result<Option<PrepareRenameResponse>> {
     let uri = &params.text_document.uri;
     let position = params.position;
 
-    let Some(resolved) = resolve_symbol_at(&backend.workspace, uri, position) else {
+    let Some(resolved) = snapshot.resolve_symbol_at(uri, position) else {
         return Ok(None);
     };
 
@@ -28,7 +27,10 @@ pub async fn prepare_rename(
     Ok(Some(PrepareRenameResponse::Range(resolved.range)))
 }
 
-pub async fn rename(backend: &Backend, params: RenameParams) -> Result<Option<WorkspaceEdit>> {
+pub async fn rename<'a>(
+    snapshot: &WorkspaceSnapshot<'a>,
+    params: RenameParams,
+) -> Result<Option<WorkspaceEdit>> {
     let start = Instant::now();
     let uri = &params.text_document_position.text_document.uri;
     let position = params.text_document_position.position;
@@ -42,7 +44,7 @@ pub async fn rename(backend: &Backend, params: RenameParams) -> Result<Option<Wo
         },
     };
 
-    let Some(references) = super::references::handle_references(backend, reference_params).await?
+    let Some(references) = super::references::handle_references(snapshot, reference_params).await?
     else {
         return Ok(None);
     };
