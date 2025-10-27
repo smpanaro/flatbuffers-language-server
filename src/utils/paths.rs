@@ -15,13 +15,22 @@ pub fn is_flatbuffer_schema_path(path: &Path) -> bool {
         .map_or(false, |ext| ext.eq_ignore_ascii_case("fbs"))
 }
 
-pub fn get_intermediate_paths(starting_path: &Path, roots: &[PathBuf]) -> HashSet<PathBuf> {
+pub fn get_intermediate_paths<P, I>(starting_path: &Path, roots: I) -> HashSet<PathBuf>
+where
+    I: IntoIterator<Item = P>,
+    P: AsRef<Path>,
+{
+    let root_set: HashSet<PathBuf> = roots
+        .into_iter()
+        .map(|p| p.as_ref().to_path_buf())
+        .collect();
+
     let mut paths = HashSet::new();
     if let Some(mut current_path) = starting_path.parent() {
         loop {
             paths.insert(current_path.to_path_buf());
 
-            if roots.iter().any(|root| current_path == root.as_path()) {
+            if root_set.contains(current_path) {
                 break;
             }
 
@@ -44,6 +53,6 @@ pub fn uri_to_path_buf(uri: &Uri) -> Result<PathBuf, String> {
         })
 }
 
-pub fn path_buf_to_url(path: &Path) -> Result<Uri, String> {
+pub fn path_buf_to_uri(path: &Path) -> Result<Uri, String> {
     Uri::from_file_path(path).ok_or(format!("Failed to convert path to URL: {:?}", path))
 }

@@ -1,7 +1,7 @@
 use crate::analysis::WorkspaceSnapshot;
 use crate::ext::duration::DurationFormat;
 use crate::symbol_table;
-use crate::utils::paths::path_buf_to_url;
+use crate::utils::paths::path_buf_to_uri;
 use log::debug;
 use std::time::Instant;
 use tower_lsp_server::jsonrpc::Result;
@@ -29,7 +29,7 @@ pub async fn handle_references<'a>(
     // Find all references to this symbol across all files
     for entry in snapshot.symbols.global.iter() {
         let symbol = entry.1;
-        let Ok(file_uri) = path_buf_to_url(&symbol.info.location.path) else {
+        let Ok(file_uri) = path_buf_to_uri(&symbol.info.location.path) else {
             continue;
         };
 
@@ -64,7 +64,7 @@ pub async fn handle_references<'a>(
 
     // Check for root_type declarations
     for (path, root_type_info) in snapshot.root_types.root_types.iter() {
-        let Ok(uri) = path_buf_to_url(path) else {
+        let Ok(uri) = path_buf_to_uri(path) else {
             continue;
         };
         if root_type_info.type_name == target_name {

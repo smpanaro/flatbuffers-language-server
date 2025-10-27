@@ -8,99 +8,31 @@ pub mod workspace_index;
 pub use crate::analysis::snapshot::WorkspaceSnapshot;
 use crate::analysis::workspace_index::WorkspaceIndex;
 use crate::document_store::DocumentStore;
-use crate::ext::duration::DurationFormat;
 use crate::parser::Parser;
-use crate::search_path_manager::SearchPathManager;
-use crate::symbol_table::RootTypeInfo;
-use crate::utils::paths::{
-    get_intermediate_paths, is_flatbuffer_schema, is_flatbuffer_schema_path, path_buf_to_url,
-    uri_to_path_buf,
-};
-use dashmap::DashSet;
-use ignore::{WalkBuilder, WalkState};
-use log::{debug, info};
-use std::collections::HashSet;
-use std::fs;
+use crate::utils::paths::{is_flatbuffer_schema, path_buf_to_uri, uri_to_path_buf};
+use crate::workspace_layout::WorkspaceLayout;
+use log::info;
+use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
 use std::sync::Arc;
-use std::time::Instant;
 use tokio::sync::RwLock;
-use tower_lsp_server::lsp_types::{Diagnostic, FileChangeType, Uri};
+use tower_lsp_server::lsp_types::{Diagnostic, FileChangeType, FileEvent, Uri};
 use tower_lsp_server::UriExt;
 
+/// A semantic analyzer for a workspace.
 #[derive(Debug)]
-pub struct AnalysisEngine {
+pub struct Analyzer {
     index: RwLock<WorkspaceIndex>,
     documents: Arc<DocumentStore>,
-    search_paths: Arc<SearchPathManager>,
+    pub layout: RwLock<WorkspaceLayout>,
 }
 
-impl AnalysisEngine {
-    fn update_symbols(
-        &self,
-        index: &mut WorkspaceIndex,
-        path: &PathBuf,
-        st: crate::symbol_table::SymbolTable,
-        included_files: Vec<PathBuf>,
-        root_type_info: Option<RootTypeInfo>,
-    ) {
-        if let Some(old_symbol_keys) = index.symbols.per_file.remove(path) {
-            for key in old_symbol_keys {
-                index.symbols.global.remove(&key);
-            }
-        }
-        index.root_types.root_types.remove(path);
-
-        self.update_includes(index, path, included_files);
-
-        let symbol_map = st.into_inner();
-        let new_symbol_keys: Vec<String> = symbol_map.keys().cloned().collect();
-        for (key, symbol) in symbol_map {
-            index.symbols.global.insert(key, symbol);
-        }
-        index.symbols.per_file.insert(path.clone(), new_symbol_keys);
-
-        if let Some(rti) = root_type_info {
-            index.root_types.root_types.insert(path.clone(), rti);
-        }
-    }
-
-    fn update_includes(
-        &self,
-        index: &mut WorkspaceIndex,
-        path: &PathBuf,
-        included_paths: Vec<PathBuf>,
-    ) {
-        if let Some(old_included_files) = index.dependencies.includes.remove(path) {
-            for old_included_path in old_included_files {
-                if let Some(included_by) =
-                    index.dependencies.included_by.get_mut(&old_included_path)
-                {
-                    included_by.retain(|x| x != path);
-                }
-            }
-        }
-
-        for included_path in &included_paths {
-            index
-                .dependencies
-                .included_by
-                .entry(included_path.clone())
-                .or_default()
-                .push(path.clone());
-        }
-
-        index
-            .dependencies
-            .includes
-            .insert(path.clone(), included_paths);
-    }
-
-    pub fn new(documents: Arc<DocumentStore>, search_paths: Arc<SearchPathManager>) -> Self {
+impl Analyzer {
+    pub fn new(documents: Arc<DocumentStore>) -> Self {
         Self {
             index: RwLock::new(WorkspaceIndex::new()),
             documents,
-            search_paths,
+            layout: RwLock::new(WorkspaceLayout::new()),
         }
     }
 
@@ -111,120 +43,84 @@ impl AnalysisEngine {
         }
     }
 
-    pub async fn update_search_paths_and_discover_files(&self) -> Vec<PathBuf> {
-        let start = Instant::now();
-        let roots: Vec<_> = self
-            .search_paths
-            .workspace_roots
-            .iter()
-            .map(|r| r.key().clone())
-            .collect();
+    pub async fn handle_workspace_folder_changes(
+        &self,
+        added: Vec<Uri>,
+        removed: Vec<Uri>,
+    ) -> Vec<(Uri, Vec<Diagnostic>)> {
+        let mut diagnostics: HashMap<Uri, Vec<Diagnostic>> = HashMap::new();
 
-        if roots.is_empty() {
-            let mut search_paths_guard = self.search_paths.search_paths.write().await;
-            *search_paths_guard = vec![];
-            return vec![];
+        let added_paths = added
+            .iter()
+            .filter_map(|u| uri_to_path_buf(&u).ok())
+            .collect::<Vec<_>>();
+        for addition in &added_paths {
+            self.add_workspace_folder(addition.clone()).await;
+            info!("added root folder: {}", addition.display());
         }
 
-        let search_paths = DashSet::new();
-        let fbs_files = DashSet::new();
-
-        let mut builder = WalkBuilder::new(&roots[0]);
-        if roots.len() > 1 {
-            for root in &roots[1..] {
-                builder.add(root);
+        let mut to_parse = HashSet::new();
+        for removed_dir in removed {
+            if let Ok(dir_path) = uri_to_path_buf(&removed_dir) {
+                let result = self.remove_workspace_folder(&dir_path).await;
+                diagnostics.extend(result.diagnostics().into_iter());
+                to_parse.extend(result.affected);
+                info!("removed root folder: {}", dir_path.display());
             }
         }
 
-        let roots_arc = std::sync::Arc::new(roots);
-        builder.build_parallel().run(|| {
-            let search_paths = &search_paths;
-            let fbs_files = &fbs_files;
-            let roots = std::sync::Arc::clone(&roots_arc);
-            Box::new(move |result| {
-                if let Ok(entry) = result {
-                    if is_flatbuffer_schema_path(entry.path()) {
-                        if let Ok(path) = fs::canonicalize(entry.path()) {
-                            fbs_files.insert(path.to_path_buf());
+        // Handling additions is simpler as a full reparse, so we
+        // do that. This also means we can ignore the more targeted
+        // removal parse list in this case.
+        if !added_paths.is_empty() {
+            let mut layout = self.layout.write().await;
+            to_parse = layout.discover_files().into_iter().collect();
+        }
 
-                            let intermediate_paths = get_intermediate_paths(&path, &roots);
-                            for intermediate in intermediate_paths {
-                                search_paths.insert(intermediate);
-                            }
-                        }
-                    }
-                }
-                WalkState::Continue
-            })
-        });
-
-        let search_paths: Vec<PathBuf> = search_paths.into_iter().collect();
-        debug!(
-            "discovered include paths in {}: {:?}",
-            start.elapsed().log_str(),
-            search_paths,
-        );
-
-        let mut search_paths_guard = self.search_paths.search_paths.write().await;
-        *search_paths_guard = search_paths;
-
-        fbs_files.into_iter().collect::<Vec<_>>()
+        diagnostics.extend(self.parse(to_parse).await.into_iter());
+        diagnostics.into_iter().collect()
     }
 
-    pub async fn scan_workspace(&self) -> Vec<(Uri, Vec<Diagnostic>)> {
-        let index = self.index.read().await;
-        let fbs_files = self
-            .update_search_paths_and_discover_files()
-            .await
-            .into_iter()
-            .filter(|uri| !index.symbols.per_file.contains_key(uri))
-            .collect::<Vec<_>>();
-        drop(index);
-        self.parse_many_and_publish(fbs_files).await
+    async fn add_workspace_folder(&self, folder: PathBuf) {
+        let mut layout = self.layout.write().await;
+        layout.add_root(folder);
     }
 
-    pub async fn remove_workspace_folder(&self, folder_uri: &Uri) -> Vec<(Uri, Vec<Diagnostic>)> {
-        let Ok(folder_path) = uri_to_path_buf(folder_uri) else {
-            return vec![];
-        };
-
-        let mut diagnostics_to_publish = Vec::new();
+    /// Remove the given workspace folder and return affected files.
+    async fn remove_workspace_folder(&self, folder: &PathBuf) -> FolderRemoval {
+        let mut diagnostics_to_publish: HashMap<Uri, Vec<Diagnostic>> = HashMap::new();
         let mut files_to_reparse;
 
-        {
-            let mut index = self.index.write().await;
-            let uris_to_remove: HashSet<PathBuf> = index
-                .symbols
-                .per_file
-                .keys()
-                .filter(|path| path.starts_with(&folder_path))
-                .cloned()
-                .collect();
+        let mut layout = self.layout.write().await;
+        let mut index = self.index.write().await;
+        let to_remove = layout.known_matching_files(&folder);
 
-            files_to_reparse = HashSet::new();
-            for path in &uris_to_remove {
-                let affected_files = index.remove_file(path);
-                for f in affected_files {
-                    if !uris_to_remove.contains(&f) {
-                        files_to_reparse.insert(f);
-                    }
-                }
+        files_to_reparse = HashSet::new();
+        for path in &to_remove {
+            let affected_files = index
+                .remove(path)
+                .into_iter()
+                .filter(|p| !to_remove.contains(p))
+                .collect::<Vec<_>>();
+            files_to_reparse.extend(affected_files);
 
-                if let Ok(uri) = path_buf_to_url(path) {
-                    diagnostics_to_publish.push((uri, vec![]));
-                }
+            if let Ok(uri) = path_buf_to_uri(path) {
+                diagnostics_to_publish.entry(uri).or_default();
             }
-
-            let mut search_paths_guard = self.search_paths.search_paths.write().await;
-            search_paths_guard.retain(|path| !path.starts_with(&folder_path));
         }
 
-        let mut reparse_diags = self.parse_many_and_publish(files_to_reparse).await;
-        diagnostics_to_publish.append(&mut reparse_diags);
-        diagnostics_to_publish
+        layout.remove_root(&folder);
+        index.diagnostics.remove_dir(&folder);
+
+        FolderRemoval {
+            removed: to_remove,
+            affected: files_to_reparse.into_iter().collect(),
+        }
     }
 
-    pub async fn parse_many_and_publish(
+    /// Parse a set of files and return the set of new diagnostics
+    /// to publish as a result.
+    pub async fn parse(
         &self,
         paths: impl IntoIterator<Item = PathBuf>,
     ) -> Vec<(Uri, Vec<Diagnostic>)> {
@@ -232,24 +128,23 @@ impl AnalysisEngine {
         let mut all_diagnostics = Vec::new();
         for path in paths {
             if !parsed_in_scan.contains(&path) {
-                let mut diags = self.parse_and_publish(&path, &mut parsed_in_scan).await;
+                let mut diags = self.parse_single(&path, &mut parsed_in_scan).await;
                 all_diagnostics.append(&mut diags);
             }
         }
         all_diagnostics
     }
 
-    async fn parse_and_publish(
+    async fn parse_single(
         &self,
         path: &PathBuf,
         parsed_files: &mut HashSet<PathBuf>,
     ) -> Vec<(Uri, Vec<Diagnostic>)> {
-        let search_paths_guard = self.search_paths.search_paths.read().await;
+        let layout = self.layout.read().await;
         let mut index = self.index.write().await;
 
         let mut files_to_parse = vec![path.clone()];
         let mut newly_parsed_files = HashSet::new();
-        let mut all_diagnostics = std::collections::HashMap::new();
 
         while let Some(path) = files_to_parse.pop() {
             if !parsed_files.insert(path.clone()) {
@@ -275,75 +170,31 @@ impl AnalysisEngine {
             };
 
             log::info!("parsing: {}", path.display());
-            let (diagnostics_map, symbol_table, included_files, root_type_info) =
-                crate::parser::FlatcFFIParser.parse(&path, &content, &search_paths_guard);
+            let result = crate::parser::FlatcFFIParser.parse(&path, &content, &layout.search_paths);
 
-            if let Some(st) = symbol_table {
-                self.update_symbols(
-                    &mut index,
-                    &path,
-                    st,
-                    included_files.clone(),
-                    root_type_info,
-                );
-            } else {
-                // A parse error occurred, but we don't want to clear the old symbol table
-                // as it may be useful to the user while they are editing.
-                // We do want to make sure that we are tracking this file's existence,
-                // in case it needs to be cleaned up later.
-                if !index.symbols.per_file.contains_key(&path) {
-                    index.symbols.per_file.insert(path.clone(), vec![]);
-                }
-                self.update_includes(&mut index, &path, included_files.clone());
-            }
-
-            for (file_path, diagnostics) in diagnostics_map {
-                all_diagnostics.insert(file_path, diagnostics);
-            }
-
-            for included_path in included_files {
-                if !parsed_files.contains(&included_path) {
-                    files_to_parse.push(included_path);
+            for included_path in &result.includes {
+                if !parsed_files.contains(included_path) {
+                    files_to_parse.push(included_path.clone());
                 }
             }
+
+            index.update(&path, result);
         }
 
-        let mut files_to_update = HashSet::new();
-        files_to_update.insert(path.clone());
-        files_to_update.extend(newly_parsed_files);
-
-        let mut diagnostics_to_publish = Vec::new();
-        for file_path in files_to_update {
-            let mut new_diags = all_diagnostics.get(&file_path).cloned().unwrap_or_default();
-
-            new_diags.sort_by(|a, b| {
-                a.message
-                    .cmp(&b.message)
-                    .then_with(|| a.range.start.cmp(&b.range.start))
-            });
-
-            let old_diags = index.diagnostics.published.get(&file_path);
-
-            let has_changed = old_diags.map_or(true, |d| *d != new_diags);
-            if !has_changed {
-                continue;
-            }
-
-            if let Ok(file_uri) = path_buf_to_url(&file_path) {
-                diagnostics_to_publish.push((file_uri, new_diags.clone()));
-                index.diagnostics.published.insert(file_path, new_diags);
-            }
-        }
-
-        diagnostics_to_publish
+        index
+            .diagnostics
+            .mark_published()
+            .into_iter()
+            .filter_map(|(k, v)| path_buf_to_uri(&k).ok().map(|u| (u, v)))
+            .collect()
     }
 
     pub async fn handle_file_changes(
         &self,
-        changes: Vec<tower_lsp_server::lsp_types::FileEvent>,
+        changes: Vec<FileEvent>,
     ) -> Vec<(Uri, Vec<Diagnostic>)> {
         let mut files_to_reparse = HashSet::new();
-        let mut diagnostics_to_publish = Vec::new();
+        let mut diagnostics_to_publish: HashMap<Uri, Vec<Diagnostic>> = HashMap::new();
 
         // What about folders? Watching files is sufficient.
         // New folder created     : empty so can't have .fbs files.
@@ -353,6 +204,7 @@ impl AnalysisEngine {
         // ... except from VSCode. For which we handle folders below.
 
         {
+            let mut layout = self.layout.write().await;
             let mut index = self.index.write().await;
 
             for event in changes {
@@ -370,7 +222,8 @@ impl AnalysisEngine {
 
                 match event.typ {
                     FileChangeType::CREATED => {
-                        files_to_reparse.insert(path);
+                        files_to_reparse.insert(path.clone());
+                        layout.add_file(path);
                     }
                     FileChangeType::CHANGED => {
                         // NOTE: This doubles the work done on save,
@@ -380,18 +233,20 @@ impl AnalysisEngine {
                     }
                     FileChangeType::DELETED => {
                         // VSCode doesn't report the files in a deleted folder, so we do our best.
-                        let deleted_files = index.expand_to_known_files(&path);
-                        for deleted in deleted_files.clone() {
-                            let affected_files = index.remove_file(&deleted);
-                            for uri in affected_files {
-                                if !deleted_files.contains(&uri) {
-                                    files_to_reparse.insert(uri);
-                                }
-                            }
+                        let deleted_files = layout.known_matching_files(&path);
+                        for deleted in &deleted_files {
+                            let affected_files = index
+                                .remove(&deleted)
+                                .into_iter()
+                                .filter(|p| !deleted_files.contains(p))
+                                .collect::<Vec<_>>();
+                            files_to_reparse.extend(affected_files);
+
                             info!("marking {} deleted", deleted.display());
-                            self.documents.document_map.remove(&deleted);
-                            if let Ok(deleted_uri) = path_buf_to_url(&deleted) {
-                                diagnostics_to_publish.push((deleted_uri, vec![]));
+                            self.documents.document_map.remove(deleted);
+                            layout.remove_file(deleted);
+                            if let Ok(deleted_uri) = path_buf_to_uri(deleted) {
+                                diagnostics_to_publish.entry(deleted_uri).or_default();
                             }
                         }
                     }
@@ -400,8 +255,30 @@ impl AnalysisEngine {
             }
         }
 
-        let mut reparse_diags = self.parse_many_and_publish(files_to_reparse).await;
-        diagnostics_to_publish.append(&mut reparse_diags);
-        diagnostics_to_publish
+        let reparse_diags = self.parse(files_to_reparse).await;
+        diagnostics_to_publish.extend(reparse_diags);
+        diagnostics_to_publish.into_iter().collect()
+    }
+}
+
+/// The results of removing a folder.
+struct FolderRemoval {
+    // The removed files.
+    removed: Vec<PathBuf>,
+    // The files indirectly affected by the removal.
+    affected: Vec<PathBuf>,
+}
+
+impl FolderRemoval {
+    /// Generate the empty diagnostics that should be emitted
+    /// to clear any previous diagnostics for removed files.
+    // TODO: Maybe this logic can move into DiagnosticStore
+    //       (Based on known_files?)
+    fn diagnostics(&self) -> HashMap<Uri, Vec<Diagnostic>> {
+        self.removed
+            .iter()
+            .filter_map(|p| path_buf_to_uri(&p).ok())
+            .map(|u| (u, vec![]))
+            .collect()
     }
 }

@@ -1,4 +1,4 @@
-use crate::utils::{parsed_type::ParsedType, paths::path_buf_to_url};
+use crate::utils::{parsed_type::ParsedType, paths::path_buf_to_uri};
 use std::{collections::HashMap, path::PathBuf};
 use tower_lsp_server::lsp_types::{self, CompletionItemKind, Position, Range};
 
@@ -13,7 +13,7 @@ pub struct Location {
 impl From<Location> for lsp_types::Location {
     fn from(val: Location) -> Self {
         lsp_types::Location {
-            uri: path_buf_to_url(&val.path).unwrap(),
+            uri: path_buf_to_uri(&val.path).unwrap(),
             range: val.range,
         }
     }

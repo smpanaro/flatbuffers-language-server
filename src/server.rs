@@ -1,9 +1,8 @@
-use crate::analysis::AnalysisEngine;
+use crate::analysis::Analyzer;
 use crate::document_store::DocumentStore;
 use crate::handlers::{
     code_action, completion, goto_definition, hover, lifecycle, references, rename,
 };
-use crate::search_path_manager::SearchPathManager;
 use log::{error, info};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
@@ -31,8 +30,7 @@ use tower_lsp_server::{Client, LanguageServer};
 pub struct Backend {
     pub client: Client,
     pub documents: Arc<DocumentStore>,
-    pub search_paths: Arc<SearchPathManager>,
-    pub analysis: Arc<AnalysisEngine>,
+    pub analyzer: Arc<Analyzer>,
     // Initialize scan.
     ready: AtomicBool,
     notify_ready: Notify,
@@ -41,16 +39,11 @@ pub struct Backend {
 impl Backend {
     pub fn new(client: Client) -> Self {
         let documents = Arc::new(DocumentStore::new());
-        let search_paths = Arc::new(SearchPathManager::new());
-        let analysis = Arc::new(AnalysisEngine::new(
-            Arc::clone(&documents),
-            Arc::clone(&search_paths),
-        ));
+        let analysis = Arc::new(Analyzer::new(Arc::clone(&documents)));
         Self {
             client,
             documents,
-            search_paths,
-            analysis,
+            analyzer: analysis,
             ready: AtomicBool::new(false),
             notify_ready: Notify::new(),
         }
@@ -217,7 +210,7 @@ impl LanguageServer for Backend {
 
     async fn did_change_watched_files(&self, params: DidChangeWatchedFilesParams) {
         self.wait_until_ready().await;
-        let diagnostics = self.analysis.handle_file_changes(params.changes).await;
+        let diagnostics = self.analyzer.handle_file_changes(params.changes).await;
         for (uri, diags) in diagnostics {
             self.client.publish_diagnostics(uri, diags, None).await;
         }
@@ -233,7 +226,7 @@ impl LanguageServer for Backend {
 
     async fn hover(&self, params: HoverParams) -> Result<Option<Hover>> {
         self.wait_until_ready().await;
-        let snapshot = self.analysis.snapshot().await;
+        let snapshot = self.analyzer.snapshot().await;
         hover::handle_hover(&snapshot, params).await
     }
 
@@ -242,25 +235,25 @@ impl LanguageServer for Backend {
         params: GotoDefinitionParams,
     ) -> Result<Option<GotoDefinitionResponse>> {
         self.wait_until_ready().await;
-        let snapshot = self.analysis.snapshot().await;
+        let snapshot = self.analyzer.snapshot().await;
         goto_definition::handle_goto_definition(&snapshot, params).await
     }
 
     async fn references(&self, params: ReferenceParams) -> Result<Option<Vec<Location>>> {
         self.wait_until_ready().await;
-        let snapshot = self.analysis.snapshot().await;
+        let snapshot = self.analyzer.snapshot().await;
         references::handle_references(&snapshot, params).await
     }
 
     async fn completion(&self, params: CompletionParams) -> Result<Option<CompletionResponse>> {
         self.wait_until_ready().await;
-        let snapshot = self.analysis.snapshot().await;
+        let snapshot = self.analyzer.snapshot().await;
         completion::handle_completion(&snapshot, params).await
     }
 
     async fn code_action(&self, params: CodeActionParams) -> Result<Option<CodeActionResponse>> {
         self.wait_until_ready().await;
-        let snapshot = self.analysis.snapshot().await;
+        let snapshot = self.analyzer.snapshot().await;
         code_action::handle_code_action(&snapshot, params).await
     }
 
@@ -269,13 +262,13 @@ impl LanguageServer for Backend {
         params: TextDocumentPositionParams,
     ) -> Result<Option<PrepareRenameResponse>> {
         self.wait_until_ready().await;
-        let snapshot = self.analysis.snapshot().await;
+        let snapshot = self.analyzer.snapshot().await;
         rename::prepare_rename(&snapshot, params).await
     }
 
     async fn rename(&self, params: RenameParams) -> Result<Option<WorkspaceEdit>> {
         self.wait_until_ready().await;
-        let snapshot = self.analysis.snapshot().await;
+        let snapshot = self.analyzer.snapshot().await;
         rename::rename(&snapshot, params).await
     }
 }

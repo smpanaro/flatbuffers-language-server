@@ -1,6 +1,6 @@
-use crate::symbol_table::{Location, Symbol, SymbolInfo, SymbolKind};
+use crate::symbol_table::{Location, Symbol, SymbolInfo, SymbolKind, SymbolTable};
 use std::collections::HashMap;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use tower_lsp_server::lsp_types::Range;
 
@@ -11,6 +11,7 @@ pub struct Attribute {
     pub restricted_to_types: Option<Vec<String>>,
 }
 
+/// An index of known workspace symbols.
 #[derive(Debug, Clone, Default)]
 pub struct SymbolIndex {
     /// Map from a fully-qualified name to its definition.
@@ -42,6 +43,29 @@ impl SymbolIndex {
             builtins: Arc::new(builtins),
             keywords: Arc::new(keywords),
             builtin_attributes: Arc::new(builtin_attributes),
+        }
+    }
+
+    pub fn update(&mut self, path: &Path, st: SymbolTable) {
+        if let Some(old_symbol_keys) = self.per_file.remove(path) {
+            for key in old_symbol_keys {
+                self.global.remove(&key);
+            }
+        }
+
+        let symbol_map = st.into_inner();
+        let new_symbol_keys: Vec<String> = symbol_map.keys().cloned().collect();
+        for (key, symbol) in symbol_map {
+            self.global.insert(key, symbol);
+        }
+        self.per_file.insert(path.to_path_buf(), new_symbol_keys);
+    }
+
+    pub fn remove(&mut self, path: &Path) {
+        if let Some(old_symbol_keys) = self.per_file.remove(path) {
+            for key in old_symbol_keys {
+                self.global.remove(&key);
+            }
         }
     }
 }

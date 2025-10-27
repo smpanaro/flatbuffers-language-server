@@ -13,39 +13,27 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use tower_lsp_server::lsp_types::{Diagnostic, Position, Range};
 
+#[derive(Default)]
+pub struct ParseResult {
+    pub diagnostics: HashMap<PathBuf, Vec<Diagnostic>>,
+    pub symbol_table: Option<SymbolTable>,
+    pub includes: Vec<PathBuf>,
+    pub root_type_info: Option<RootTypeInfo>,
+}
+
 /// A trait for parsing FlatBuffers schema files.
 pub trait Parser {
-    fn parse(
-        &self,
-        path: &Path,
-        content: &str,
-        search_paths: &[PathBuf],
-    ) -> (
-        HashMap<PathBuf, Vec<Diagnostic>>,
-        Option<SymbolTable>,
-        Vec<PathBuf>,
-        Option<RootTypeInfo>,
-    );
+    fn parse(&self, path: &Path, content: &str, search_paths: &[PathBuf]) -> ParseResult;
 }
 
 #[derive(Debug, Clone, Copy)]
 pub struct FlatcFFIParser;
 
 impl Parser for FlatcFFIParser {
-    fn parse(
-        &self,
-        path: &Path,
-        content: &str,
-        search_paths: &[PathBuf],
-    ) -> (
-        HashMap<PathBuf, Vec<Diagnostic>>,
-        Option<SymbolTable>,
-        Vec<PathBuf>,
-        Option<RootTypeInfo>,
-    ) {
+    fn parse(&self, path: &Path, content: &str, search_paths: &[PathBuf]) -> ParseResult {
         let c_content = match CString::new(content) {
             Ok(s) => s,
-            Err(_) => return (HashMap::new(), None, vec![], None), // Content has null bytes
+            Err(_) => return Default::default(), // Content has null bytes
         };
         let c_filename = CString::new(path.to_str().unwrap_or_default()).unwrap();
 
@@ -65,26 +53,22 @@ impl Parser for FlatcFFIParser {
                 c_path_ptrs.as_mut_ptr(),
             );
             if parser_ptr.is_null() {
-                return (HashMap::new(), None, vec![], None);
+                return Default::default();
             }
 
-            let (diagnostics, symbol_table, included_files, root_type_info) =
-                if ffi::is_parser_success(parser_ptr) {
-                    let (st, included, root_info, diags) =
-                        parse_success_case(parser_ptr, path, content, search_paths);
-                    (diags, Some(st), included, root_info)
-                } else {
-                    (
-                        parse_error_messages(parser_ptr, path, content),
-                        None,
-                        extract_all_included_files(parser_ptr),
-                        None,
-                    )
-                };
+            let result = if ffi::is_parser_success(parser_ptr) {
+                parse_success_case(parser_ptr, path, content, search_paths)
+            } else {
+                ParseResult {
+                    diagnostics: parse_error_messages(parser_ptr, path, content),
+                    includes: extract_all_included_files(parser_ptr),
+                    ..Default::default()
+                }
+            };
 
             ffi::delete_parser(parser_ptr);
 
-            (diagnostics, symbol_table, included_files, root_type_info)
+            result
         }
     }
 }
@@ -95,12 +79,7 @@ unsafe fn parse_success_case(
     path: &Path,
     content: &str,
     search_paths: &[PathBuf],
-) -> (
-    SymbolTable,
-    Vec<PathBuf>,
-    Option<RootTypeInfo>,
-    HashMap<PathBuf, Vec<Diagnostic>>,
-) {
+) -> ParseResult {
     let mut st = SymbolTable::new(path.to_path_buf());
     extract_structs_and_tables(parser_ptr, &mut st);
     extract_enums_and_unions(parser_ptr, &mut st);
@@ -120,7 +99,12 @@ unsafe fn parse_success_case(
     );
     diagnostics::semantic::analyze_deprecated_fields(&st, &mut diagnostics);
 
-    (st, included_files, root_type_info, diagnostics)
+    ParseResult {
+        diagnostics,
+        symbol_table: Some(st),
+        includes: included_files,
+        root_type_info,
+    }
 }
 
 /// Parse flatc's error messages (in the error case) or warnings (in the success case).

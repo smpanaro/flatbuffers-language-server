@@ -1,7 +1,7 @@
 use std::{fs, path::PathBuf};
 
 use crate::diagnostics::ErrorDiagnosticHandler;
-use crate::{diagnostics::codes::DiagnosticCode, utils::paths::path_buf_to_url};
+use crate::{diagnostics::codes::DiagnosticCode, utils::paths::path_buf_to_uri};
 use log::error;
 use once_cell::sync::Lazy;
 use regex::Regex;
@@ -25,7 +25,7 @@ impl ErrorDiagnosticHandler for ExpectingTokenHandler {
                 error!("failed to canonicalize file: {}", file_path);
                 return None;
             };
-            let Ok(file_url) = path_buf_to_url(&file_path) else {
+            let Ok(file_url) = path_buf_to_uri(&file_path) else {
                 return None;
             };
 

@@ -11,10 +11,10 @@ pub mod ffi;
 pub mod handlers;
 pub mod lsp_logger;
 pub mod parser;
-pub mod search_path_manager;
 pub mod server;
 pub mod symbol_table;
 pub mod utils;
+pub mod workspace_layout;
 
 pub async fn run() {
     let stdin = tokio::io::stdin();

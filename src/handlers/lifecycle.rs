@@ -1,13 +1,12 @@
+use std::{fs, iter::once, path::PathBuf};
+
 use crate::{ext::duration::DurationFormat, server::Backend, utils::paths::uri_to_path_buf};
 use log::{debug, info};
 use tokio::time::Instant;
-use tower_lsp_server::{
-    lsp_types::{
-        Diagnostic, DidChangeTextDocumentParams, DidChangeWorkspaceFoldersParams,
-        DidCloseTextDocumentParams, DidOpenTextDocumentParams, DidSaveTextDocumentParams,
-        InitializeParams, Uri,
-    },
-    UriExt,
+use tower_lsp_server::lsp_types::{
+    Diagnostic, DidChangeTextDocumentParams, DidChangeWorkspaceFoldersParams,
+    DidCloseTextDocumentParams, DidOpenTextDocumentParams, DidSaveTextDocumentParams,
+    InitializeParams, Uri,
 };
 
 pub async fn handle_did_open(
@@ -15,7 +14,7 @@ pub async fn handle_did_open(
     params: DidOpenTextDocumentParams,
 ) -> Vec<(Uri, Vec<Diagnostic>)> {
     if let Some(path) = backend.documents.handle_did_open(params) {
-        backend.analysis.parse_many_and_publish(vec![path]).await
+        backend.analyzer.parse(vec![path]).await
     } else {
         vec![]
     }
@@ -26,7 +25,7 @@ pub async fn handle_did_change(
     params: DidChangeTextDocumentParams,
 ) -> Vec<(Uri, Vec<Diagnostic>)> {
     if let Some(path) = backend.documents.handle_did_change(params) {
-        backend.analysis.parse_many_and_publish(vec![path]).await
+        backend.analyzer.parse(vec![path]).await
     } else {
         vec![]
     }
@@ -37,15 +36,12 @@ pub async fn handle_did_save(
     params: DidSaveTextDocumentParams,
 ) -> Vec<(Uri, Vec<Diagnostic>)> {
     if let Some((path, _)) = backend.documents.handle_did_save(params) {
-        let snapshot = backend.analysis.snapshot().await;
+        let snapshot = backend.analyzer.snapshot().await;
         let mut files_to_reparse = vec![path.clone()];
         if let Some(includers) = snapshot.dependencies.included_by.get(&path) {
             files_to_reparse.extend(includers.clone());
         }
-        backend
-            .analysis
-            .parse_many_and_publish(files_to_reparse)
-            .await
+        backend.analyzer.parse(files_to_reparse).await
     } else {
         vec![]
     }
@@ -56,32 +52,32 @@ pub async fn handle_did_close(backend: &Backend, params: DidCloseTextDocumentPar
 }
 
 pub async fn handle_initialize(backend: &Backend, params: InitializeParams) {
-    for folder in params.workspace_folders.as_deref().unwrap_or_default() {
-        if let Ok(path) = uri_to_path_buf(&folder.uri) {
-            backend.search_paths.workspace_roots.insert(path);
-        }
-    }
-
-    if let Some(root_uri) = get_root_uri(&params) {
-        if let Ok(path) = uri_to_path_buf(&root_uri) {
-            backend.search_paths.workspace_roots.insert(path);
-        }
-    }
+    let roots = params
+        .workspace_folders
+        .as_deref()
+        .unwrap_or_default()
+        .iter()
+        .map(|f| uri_to_path_buf(&f.uri).ok())
+        .chain(once(get_root_path(&params)))
+        .filter_map(|p| p)
+        .collect::<Vec<_>>();
+    // Important: do not trigger a parse until the client is initialized.
+    let mut layout = backend.analyzer.layout.write().await;
+    layout.add_roots(roots);
 }
 
 pub async fn handle_initialized(backend: &Backend) -> Vec<(Uri, Vec<Diagnostic>)> {
     let start = Instant::now();
-    let roots: Vec<_> = backend
-        .search_paths
-        .workspace_roots
-        .iter()
-        .map(|r| r.key().clone())
-        .collect();
-    info!("initial workspace roots: {:?}", roots);
 
-    let diagnostics = backend.analysis.scan_workspace().await;
+    let files = {
+        let mut layout = backend.analyzer.layout.write().await;
+        info!("initial workspace roots: {:?}", layout.workspace_roots);
 
-    let snapshot = backend.analysis.snapshot().await;
+        layout.discover_files()
+    };
+    let diagnostics = backend.analyzer.parse(files).await;
+
+    let snapshot = backend.analyzer.snapshot().await;
     debug!(
         "initialized scan in {}: {} files",
         start.elapsed().log_str(),
@@ -94,38 +90,24 @@ pub async fn handle_did_change_workspace_folders(
     backend: &Backend,
     params: DidChangeWorkspaceFoldersParams,
 ) -> Vec<(Uri, Vec<Diagnostic>)> {
-    let mut diagnostics = Vec::new();
-    for folder in params.event.removed {
-        if let Ok(path) = uri_to_path_buf(&folder.uri) {
-            backend.search_paths.workspace_roots.remove(&path);
-            info!("removed root folder: {}", path.to_string_lossy());
-        }
-        diagnostics.append(&mut backend.analysis.remove_workspace_folder(&folder.uri).await);
-    }
-
-    let mut was_folder_added = false;
-    for folder in params.event.added {
-        if let Ok(path) = uri_to_path_buf(&folder.uri) {
-            if backend.search_paths.workspace_roots.insert(path.clone()) {
-                info!("added root folder: {}", path.to_string_lossy());
-                was_folder_added = true;
-            }
-        }
-    }
-
-    if was_folder_added {
-        diagnostics.append(&mut backend.analysis.scan_workspace().await);
-    }
-    diagnostics
+    let added = params.event.added.into_iter().map(|e| e.uri).collect();
+    let removed = params.event.removed.into_iter().map(|e| e.uri).collect();
+    backend
+        .analyzer
+        .handle_workspace_folder_changes(added, removed)
+        .await
 }
 
 #[allow(deprecated)]
-fn get_root_uri(params: &InitializeParams) -> Option<Uri> {
+fn get_root_path(params: &InitializeParams) -> Option<PathBuf> {
     // root_path is deprecated in favor of root_uri
-    params.root_uri.clone().or_else(|| {
-        params
-            .root_path
-            .as_ref()
-            .and_then(|p| Uri::from_file_path(p))
-    })
+    params.root_uri.as_ref().map_or_else(
+        || {
+            params
+                .root_path
+                .as_ref()
+                .and_then(|p| fs::canonicalize(p).ok())
+        },
+        |u| uri_to_path_buf(u).ok(),
+    )
 }
