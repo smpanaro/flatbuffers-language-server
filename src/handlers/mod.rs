@@ -5,3 +5,4 @@ pub mod hover;
 pub mod lifecycle;
 pub mod references;
 pub mod rename;
+pub mod workspace_symbol;

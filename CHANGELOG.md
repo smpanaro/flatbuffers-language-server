@@ -1,5 +1,8 @@
 ## Unreleased
 
+- Fuzzy search across all project types (tables, structs, enums etc).
+  - VSCode calls this "Go to Symbol in Workspace". Zed, "project symbols".
+
 ## 0.0.1 - October 19, 2025
 
 This is the initial release!

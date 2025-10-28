@@ -2,6 +2,7 @@ use crate::analysis::Analyzer;
 use crate::document_store::DocumentStore;
 use crate::handlers::{
     code_action, completion, goto_definition, hover, lifecycle, references, rename,
+    workspace_symbol,
 };
 use log::{error, info};
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -19,10 +20,11 @@ use tower_lsp_server::lsp_types::{
     HoverParams, HoverProviderCapability, InitializeParams, InitializeResult, InitializedParams,
     Location, NumberOrString, OneOf, PrepareRenameResponse, ProgressParams, ProgressParamsValue,
     ReferenceParams, Registration, RenameOptions, RenameParams, ServerCapabilities, ServerInfo,
-    TextDocumentPositionParams, TextDocumentSyncCapability, TextDocumentSyncKind,
-    TextDocumentSyncOptions, WorkDoneProgress, WorkDoneProgressBegin, WorkDoneProgressCreateParams,
-    WorkDoneProgressEnd, WorkspaceEdit, WorkspaceFoldersServerCapabilities,
-    WorkspaceServerCapabilities,
+    SymbolInformation, TextDocumentPositionParams, TextDocumentSyncCapability,
+    TextDocumentSyncKind, TextDocumentSyncOptions, WorkDoneProgress, WorkDoneProgressBegin,
+    WorkDoneProgressCreateParams, WorkDoneProgressEnd, WorkspaceEdit,
+    WorkspaceFoldersServerCapabilities, WorkspaceServerCapabilities, WorkspaceSymbol,
+    WorkspaceSymbolParams,
 };
 use tower_lsp_server::{Client, LanguageServer};
 
@@ -106,6 +108,7 @@ impl LanguageServer for Backend {
                     prepare_provider: Some(true),
                     work_done_progress_options: Default::default(),
                 })),
+                workspace_symbol_provider: Some(OneOf::Left(true)),
                 ..ServerCapabilities::default()
             },
         })
@@ -270,6 +273,16 @@ impl LanguageServer for Backend {
         self.wait_until_ready().await;
         let snapshot = self.analyzer.snapshot().await;
         rename::rename(&snapshot, params).await
+    }
+
+    async fn symbol(
+        &self,
+        params: WorkspaceSymbolParams,
+    ) -> Result<Option<OneOf<Vec<SymbolInformation>, Vec<WorkspaceSymbol>>>> {
+        self.wait_until_ready().await;
+        let snapshot = self.analyzer.snapshot().await;
+        let result = workspace_symbol::handle_workspace_symbol(&snapshot, params).await?;
+        Ok(result.map(OneOf::Right))
     }
 }
 

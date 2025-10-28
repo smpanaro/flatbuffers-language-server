@@ -14,6 +14,7 @@ mod scenarios;
 mod test_logger;
 mod workspace;
 mod workspace_layout;
+mod workspace_symbol;
 
 #[tokio::test]
 async fn initialize_server_test() {

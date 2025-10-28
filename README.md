@@ -13,6 +13,7 @@ A language server implementation for [Google FlatBuffers](https://flatbuffers.de
 - Real `flatc` errors and warnings in your editor.
 - Quick fixes for some errors.
 - Rename custom types across files.
+- Fuzzy search across all type names in your project.
 
 # Usage
 

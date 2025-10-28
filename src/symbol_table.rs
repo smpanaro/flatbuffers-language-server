@@ -325,6 +325,20 @@ impl From<&SymbolKind> for CompletionItemKind {
     }
 }
 
+impl From<&SymbolKind> for lsp_types::SymbolKind {
+    fn from(kind: &SymbolKind) -> Self {
+        use lsp_types::SymbolKind as LspSymbolKind;
+        match kind {
+            SymbolKind::Table(_) => LspSymbolKind::CLASS,
+            SymbolKind::Struct(_) => LspSymbolKind::STRUCT,
+            SymbolKind::Enum(_) => LspSymbolKind::ENUM,
+            SymbolKind::Union(_) => LspSymbolKind::ENUM,
+            SymbolKind::Field(_) => LspSymbolKind::FIELD,
+            SymbolKind::Scalar => LspSymbolKind::VARIABLE,
+        }
+    }
+}
+
 impl SymbolInfo {
     pub fn qualified_name(&self) -> String {
         if self.namespace.is_empty() {
