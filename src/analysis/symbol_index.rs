@@ -4,7 +4,7 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use tower_lsp_server::lsp_types::Range;
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct Attribute {
     pub name: String,
     pub doc: String,
@@ -12,7 +12,7 @@ pub struct Attribute {
 }
 
 /// An index of known workspace symbols.
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone, Default, PartialEq)]
 pub struct SymbolIndex {
     /// Map from a fully-qualified name to its definition.
     pub global: HashMap<String, Symbol>,
@@ -54,7 +54,13 @@ impl SymbolIndex {
         }
 
         let symbol_map = st.into_inner();
-        let new_symbol_keys: Vec<String> = symbol_map.keys().cloned().collect();
+        let new_symbol_keys: Vec<String> = symbol_map
+            .iter()
+            .filter(|(_, v)| v.info.location.path == path)
+            .map(|(k, _)| k)
+            .cloned()
+            .collect();
+
         for (key, symbol) in symbol_map {
             self.global.insert(key, symbol);
         }
@@ -292,5 +298,68 @@ fn populate_builtin_attributes(attributes: &mut HashMap<String, Attribute>) {
 
     for attr in attributes_data {
         attributes.insert(attr.name.clone(), attr);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::symbol_table::{Location, Symbol, SymbolInfo, SymbolKind};
+    use tower_lsp_server::lsp_types::{Position, Range};
+
+    fn make_symbol(name: &str, path: &Path) -> Symbol {
+        Symbol {
+            info: SymbolInfo {
+                name: name.to_string(),
+                namespace: vec![],
+                location: Location {
+                    path: path.to_path_buf(),
+                    range: Range::new(Position::new(0, 0), Position::new(0, 0)),
+                },
+                documentation: None,
+                builtin: false,
+            },
+            kind: SymbolKind::Table(Default::default()),
+        }
+    }
+
+    #[test]
+    fn test_update() {
+        let mut index = SymbolIndex::new();
+        let path_a = PathBuf::from("a.fbs");
+        let path_b = PathBuf::from("b.fbs");
+
+        let mut st1 = SymbolTable::new(path_a.clone());
+        st1.insert("A".to_string(), make_symbol("A", &path_a));
+
+        index.update(&path_a, st1);
+        assert_eq!(index.global.len(), 1);
+        assert_eq!(index.per_file.get(&path_a).unwrap().len(), 1);
+
+        let mut st2 = SymbolTable::new(path_a.clone());
+        st2.insert("B".to_string(), make_symbol("B", &path_b));
+        index.update(&path_a, st2);
+
+        assert_eq!(index.global.len(), 1);
+        assert!(index.global.contains_key("B"));
+        assert!(!index.global.contains_key("A"));
+        assert!(index.per_file.get(&path_a).unwrap().is_empty());
+    }
+
+    #[test]
+    fn test_remove() {
+        let mut index = SymbolIndex::new();
+        let path_a = PathBuf::from("a.fbs");
+
+        let mut st = SymbolTable::new(path_a.clone());
+        st.insert("A".to_string(), make_symbol("A", &path_a));
+        index.update(&path_a, st);
+
+        assert_eq!(index.global.len(), 1);
+        assert_eq!(index.per_file.len(), 1);
+
+        index.remove(&path_a);
+        assert!(index.global.is_empty());
+        assert!(index.per_file.is_empty());
     }
 }

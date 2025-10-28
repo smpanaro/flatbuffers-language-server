@@ -166,3 +166,184 @@ impl<'a> WorkspaceSnapshot<'a> {
         None
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::analysis::Analyzer;
+    use crate::document_store::DocumentStore;
+    use crate::utils::paths::path_buf_to_uri;
+    use crate::workspace_layout::WorkspaceLayout;
+    use std::fs;
+    use tempfile::{tempdir, TempDir};
+
+    async fn setup_snapshot(schema: &str) -> (Analyzer, PathBuf, TempDir) {
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("test.fbs");
+        fs::write(&path, schema).unwrap();
+
+        let document_store = DocumentStore::new();
+        let canonical_path = fs::canonicalize(&path).unwrap();
+        document_store
+            .document_map
+            .insert(canonical_path.clone(), schema.into());
+
+        let mut layout = WorkspaceLayout::new();
+        layout.add_root(fs::canonicalize(dir.path()).unwrap());
+        let files_to_parse = layout.discover_files();
+
+        let analyzer = Analyzer::new(Arc::new(document_store));
+        analyzer.parse(files_to_parse).await;
+
+        (analyzer, canonical_path, dir)
+    }
+
+    #[tokio::test]
+    async fn test_resolve_symbol_at_table() {
+        let schema = "namespace MyNamespace;\n\ntable MyTable {}\n";
+        let (analyzer, path, _dir) = setup_snapshot(schema).await;
+        let snapshot = analyzer.snapshot().await;
+        let uri = path_buf_to_uri(&path).unwrap();
+        let position = Position::new(2, 8);
+        let symbol = snapshot.resolve_symbol_at(&uri, position).unwrap();
+        assert_eq!(symbol.target.info.name, "MyTable");
+        assert!(matches!(symbol.target.kind, SymbolKind::Table(_)));
+    }
+
+    #[tokio::test]
+    async fn test_resolve_symbol_at_struct() {
+        let schema = "namespace MyNamespace;\n\nstruct MyStruct { x: int; }\n";
+        let (analyzer, path, _dir) = setup_snapshot(schema).await;
+        let snapshot = analyzer.snapshot().await;
+        let uri = path_buf_to_uri(&path).unwrap();
+        let position = Position::new(2, 9);
+        let symbol = snapshot.resolve_symbol_at(&uri, position).unwrap();
+        assert_eq!(symbol.target.info.name, "MyStruct");
+        assert!(matches!(symbol.target.kind, SymbolKind::Struct(_)));
+    }
+
+    #[tokio::test]
+    async fn test_resolve_symbol_at_enum() {
+        let schema = "namespace MyNamespace;\n\nenum MyEnum: byte { A, B }\n";
+        let (analyzer, path, _dir) = setup_snapshot(schema).await;
+        let snapshot = analyzer.snapshot().await;
+        let uri = path_buf_to_uri(&path).unwrap();
+        let position = Position::new(2, 7);
+        let symbol = snapshot.resolve_symbol_at(&uri, position).unwrap();
+        assert_eq!(symbol.target.info.name, "MyEnum");
+        assert!(matches!(symbol.target.kind, SymbolKind::Enum(_)));
+    }
+
+    #[tokio::test]
+    async fn test_resolve_symbol_at_union() {
+        let schema = "namespace MyNamespace;\n\ntable MyTable {}\nunion MyUnion { MyTable }\n";
+        let (analyzer, path, _dir) = setup_snapshot(schema).await;
+        let snapshot = analyzer.snapshot().await;
+        let uri = path_buf_to_uri(&path).unwrap();
+        let position = Position::new(3, 8);
+        let symbol = snapshot.resolve_symbol_at(&uri, position).unwrap();
+        assert_eq!(symbol.target.info.name, "MyUnion");
+        assert!(matches!(symbol.target.kind, SymbolKind::Union(_)));
+    }
+
+    #[tokio::test]
+    async fn test_resolve_symbol_at_field_type() {
+        let schema = "namespace MyNamespace;\n\nstruct MyStruct { x: int; }\ntable MyTable { my_struct: MyStruct; }\n";
+        let (analyzer, path, _dir) = setup_snapshot(schema).await;
+        let snapshot = analyzer.snapshot().await;
+        let uri = path_buf_to_uri(&path).unwrap();
+        let position = Position::new(3, 28);
+        let symbol = snapshot.resolve_symbol_at(&uri, position).unwrap();
+        assert_eq!(symbol.target.info.name, "MyStruct");
+        assert!(matches!(symbol.target.kind, SymbolKind::Struct(_)));
+    }
+
+    #[tokio::test]
+    async fn test_resolve_symbol_at_struct_field() {
+        let schema = "namespace MyNamespace;\n\nstruct MyStruct { my_field: int; }\n";
+        let (analyzer, path, _dir) = setup_snapshot(schema).await;
+        let snapshot = analyzer.snapshot().await;
+        let uri = path_buf_to_uri(&path).unwrap();
+        let position = Position::new(2, 29);
+        let symbol = snapshot.resolve_symbol_at(&uri, position).unwrap();
+        assert_eq!(symbol.target.info.name, "int");
+        assert!(matches!(symbol.target.kind, SymbolKind::Scalar));
+    }
+
+    #[tokio::test]
+    async fn test_resolve_symbol_at_union_variant() {
+        let schema = "namespace MyNamespace;\n\ntable MyTable {}\nunion MyUnion { MyTable }\n";
+        let (analyzer, path, _dir) = setup_snapshot(schema).await;
+        let snapshot = analyzer.snapshot().await;
+        let uri = path_buf_to_uri(&path).unwrap();
+        let position = Position::new(3, 18);
+        let symbol = snapshot.resolve_symbol_at(&uri, position).unwrap();
+        assert_eq!(symbol.target.info.name, "MyTable");
+        assert!(matches!(symbol.target.kind, SymbolKind::Table(_)));
+    }
+
+    #[tokio::test]
+    async fn test_resolve_symbol_at_root_type() {
+        let schema = "namespace MyNamespace;\n\ntable MyTable {}\nroot_type MyTable;\n";
+        let (analyzer, path, _dir) = setup_snapshot(schema).await;
+        let snapshot = analyzer.snapshot().await;
+        let uri = path_buf_to_uri(&path).unwrap();
+        let position = Position::new(3, 12);
+        let symbol = snapshot.resolve_symbol_at(&uri, position).unwrap();
+        assert_eq!(symbol.target.info.name, "MyTable");
+        assert!(matches!(symbol.target.kind, SymbolKind::Table(_)));
+    }
+
+    #[tokio::test]
+    async fn test_resolve_symbol_at_builtin_type() {
+        let schema = "namespace MyNamespace;\n\ntable MyTable { my_field: int; }\n";
+        let (analyzer, path, _dir) = setup_snapshot(schema).await;
+        let snapshot = analyzer.snapshot().await;
+        let uri = path_buf_to_uri(&path).unwrap();
+        let position = Position::new(2, 27);
+        let symbol = snapshot.resolve_symbol_at(&uri, position).unwrap();
+        assert_eq!(symbol.target.info.name, "int");
+        assert!(matches!(symbol.target.kind, SymbolKind::Scalar));
+    }
+
+    #[tokio::test]
+    async fn test_find_enclosing_table_inside() {
+        let schema = "table MyTable {\n  my_field: int;\n}\n";
+        let (analyzer, path, _dir) = setup_snapshot(schema).await;
+        let snapshot = analyzer.snapshot().await;
+        let position = Position::new(1, 5);
+        let symbol = snapshot.find_enclosing_table(&path, position).unwrap();
+        assert_eq!(symbol.info.name, "MyTable");
+    }
+
+    #[tokio::test]
+    async fn test_find_enclosing_table_outside() {
+        let schema = "table MyTable {}\n\nstruct MyStruct {}\n";
+        let (analyzer, path, _dir) = setup_snapshot(schema).await;
+        let snapshot = analyzer.snapshot().await;
+        let position = Position::new(2, 5);
+        let symbol = snapshot.find_enclosing_table(&path, position);
+        assert!(symbol.is_none());
+    }
+
+    #[tokio::test]
+    async fn test_find_enclosing_table_between() {
+        let schema = "table MyTable1 {}\n\ntable MyTable2 {}\n";
+        let (analyzer, path, _dir) = setup_snapshot(schema).await;
+        let snapshot = analyzer.snapshot().await;
+        let position = Position::new(1, 5);
+        let symbol = snapshot.find_enclosing_table(&path, position).unwrap();
+        // TODO: Handle this better (parse brackets?)
+        assert_eq!(symbol.info.name, "MyTable1");
+    }
+
+    #[tokio::test]
+    async fn test_find_enclosing_table_on_definition() {
+        let schema = "table MyTable {}\n";
+        let (analyzer, path, _dir) = setup_snapshot(schema).await;
+        let snapshot = analyzer.snapshot().await;
+        let position = Position::new(0, 5);
+        let symbol = snapshot.find_enclosing_table(&path, position);
+        assert!(symbol.is_none());
+    }
+}

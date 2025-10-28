@@ -19,7 +19,7 @@ impl From<Location> for lsp_types::Location {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RootTypeInfo {
     pub location: Location,
     pub type_name: String,
@@ -34,14 +34,14 @@ pub struct SymbolTable {
 }
 
 // Represents a single symbol in the source code
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct Symbol {
     pub info: SymbolInfo,
     pub kind: SymbolKind,
 }
 
 // The kind of a symbol
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum SymbolKind {
     Table(Table),
     Struct(Struct),
@@ -52,7 +52,7 @@ pub enum SymbolKind {
 }
 
 // Common information for all symbols
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct SymbolInfo {
     pub name: String,
     pub namespace: Vec<String>,
@@ -61,43 +61,43 @@ pub struct SymbolInfo {
     pub builtin: bool,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Default)]
 pub struct Table {
     pub fields: Vec<Symbol>,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct Struct {
     pub fields: Vec<Symbol>,
     pub size: usize,
     pub alignment: usize,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct EnumVariant {
     pub name: String,
     pub value: i64,
     pub documentation: Option<String>,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct Enum {
     pub variants: Vec<EnumVariant>,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct UnionVariant {
     pub name: String,
     pub location: Location,
     pub parsed_type: ParsedType,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct Union {
     pub variants: Vec<UnionVariant>,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct Field {
     pub type_name: String, // The name of the field's underlying type, e.g., "string" or "Vec3" (excludes vector/array tokens)
     pub type_display_name: String, // The fully-qualified name of the type, including vector and array tokens

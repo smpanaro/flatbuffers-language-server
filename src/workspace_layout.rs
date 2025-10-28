@@ -17,7 +17,7 @@ use crate::{
 #[derive(Debug)]
 pub struct WorkspaceLayout {
     /// Paths that have a known_file as a descendant.
-    pub search_paths: Vec<PathBuf>,
+    pub search_paths: HashSet<PathBuf>,
     pub workspace_roots: HashSet<PathBuf>,
     /// Known FlatBuffers schema files.
     known_files: HashSet<PathBuf>,
@@ -26,16 +26,22 @@ pub struct WorkspaceLayout {
 impl WorkspaceLayout {
     pub fn new() -> Self {
         Self {
-            search_paths: Vec::new(),
+            search_paths: HashSet::new(),
             workspace_roots: HashSet::new(),
             known_files: HashSet::new(),
         }
     }
 
+    /// Add a new workspace root directory.
+    /// Note: you must call [`discover_files()`] at some
+    /// point to populate derived state for the new root.
     pub fn add_root(&mut self, root: PathBuf) -> bool {
         self.workspace_roots.insert(root)
     }
 
+    /// Add new workspace root directories.
+    /// Note: you must call [`discover_files()`] at some
+    /// point to populate derived state for the new roots.
     pub fn add_roots(&mut self, roots: impl IntoIterator<Item = PathBuf>) {
         for root in roots {
             self.add_root(root);

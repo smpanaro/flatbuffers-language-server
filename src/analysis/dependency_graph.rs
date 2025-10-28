@@ -2,10 +2,12 @@ use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
 /// A graph of the include statement relationships between files.
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct DependencyGraph {
     // TODO: These include transitive dependencies. Should they?
+    // Key includes values.
     pub includes: HashMap<PathBuf, Vec<PathBuf>>,
+    // Key is included by values.
     pub included_by: HashMap<PathBuf, Vec<PathBuf>>,
 }
 
@@ -43,5 +45,65 @@ impl DependencyGraph {
         }
 
         return vec![];
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::path::PathBuf;
+
+    #[test]
+    fn test_update() {
+        let mut graph = DependencyGraph::default();
+        let path_a = PathBuf::from("a.fbs");
+        let path_b = PathBuf::from("b.fbs");
+        let path_c = PathBuf::from("c.fbs");
+
+        graph.update(&path_a, vec![path_b.clone(), path_c.clone()]);
+
+        assert_eq!(
+            graph.includes.get(&path_a).unwrap(),
+            &vec![path_b.clone(), path_c.clone()]
+        );
+        assert_eq!(
+            graph.included_by.get(&path_b).unwrap(),
+            &vec![path_a.clone()]
+        );
+        assert_eq!(
+            graph.included_by.get(&path_c).unwrap(),
+            &vec![path_a.clone()]
+        );
+
+        graph.update(&path_b, vec![path_c.clone()]);
+
+        assert_eq!(
+            graph.includes.get(&path_a).unwrap(),
+            &vec![path_b.clone(), path_c.clone()]
+        );
+        assert_eq!(graph.includes.get(&path_b).unwrap(), &vec![path_c.clone()]);
+        assert_eq!(
+            graph.included_by.get(&path_b).unwrap(),
+            &vec![path_a.clone()]
+        );
+        assert_eq!(
+            graph.included_by.get(&path_c).unwrap(),
+            &vec![path_a.clone(), path_b.clone()]
+        );
+    }
+
+    #[test]
+    fn test_update_and_remove() {
+        let mut graph = DependencyGraph::default();
+        let path_a = PathBuf::from("a.fbs");
+        let path_b = PathBuf::from("b.fbs");
+
+        graph.update(&path_a, vec![path_b.clone()]);
+        assert_eq!(graph.includes.len(), 1);
+        assert_eq!(graph.included_by.len(), 1);
+
+        graph.remove(&path_a);
+        assert!(graph.includes.is_empty());
+        assert!(graph.included_by.get(&path_b).unwrap().is_empty());
     }
 }

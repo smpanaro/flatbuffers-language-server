@@ -142,6 +142,7 @@ impl Analyzer {
     ) -> Vec<(Uri, Vec<Diagnostic>)> {
         let layout = self.layout.read().await;
         let mut index = self.index.write().await;
+        let search_paths: Vec<_> = layout.search_paths.iter().map(PathBuf::from).collect();
 
         let mut files_to_parse = vec![path.clone()];
         let mut newly_parsed_files = HashSet::new();
@@ -170,7 +171,7 @@ impl Analyzer {
             };
 
             log::info!("parsing: {}", path.display());
-            let result = crate::parser::FlatcFFIParser.parse(&path, &content, &layout.search_paths);
+            let result = crate::parser::FlatcFFIParser.parse(&path, &content, &search_paths);
 
             for included_path in &result.includes {
                 if !parsed_files.contains(included_path) {
