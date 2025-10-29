@@ -311,6 +311,21 @@ impl TestHarness {
         self.send_request(req).await;
     }
 
+    pub async fn save_file(&mut self, identifier: TextDocumentIdentifier, content: &str) {
+        if let Some(path) = identifier.uri.to_file_path() {
+            fs::write(path, content).unwrap();
+        }
+
+        let params = DidSaveTextDocumentParams {
+            text_document: identifier,
+            text: Some(content.to_string()),
+        };
+        let req = Request::build("textDocument/didSave")
+            .params(serde_json::to_value(params).unwrap())
+            .finish();
+        self.send_request(req).await;
+    }
+
     pub async fn close_file(&mut self, uri: Uri) {
         let params = DidCloseTextDocumentParams {
             text_document: TextDocumentIdentifier { uri },

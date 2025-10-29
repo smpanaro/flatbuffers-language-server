@@ -162,3 +162,65 @@ root_type T;
         assert_eq!(params.diagnostics.len(), 1);
     }
 }
+
+#[tokio::test]
+async fn saving_included_file_clears_diagnostic() {
+    let includer = r#"
+include "included.fbs";
+
+table T { i: I; } // Diagnostic here: I is referenced but not defined
+"#;
+
+    let included_before = r#"
+table X {}
+"#;
+
+    let included_after = r#"
+table I {} // Change so that I is now defined.
+"#;
+
+    let mut harness = TestHarness::new();
+    harness
+        .initialize_and_open_some(
+            &[
+                ("includer.fbs", includer),
+                ("included.fbs", included_before),
+            ],
+            &[],
+        )
+        .await;
+
+    let includer_uri = harness.file_uri("includer.fbs");
+    let diagnostics = loop {
+        let params = harness
+            .notification::<notification::PublishDiagnostics>()
+            .await;
+        if params.uri == includer_uri {
+            break params.diagnostics;
+        } else {
+            assert_eq!(params.diagnostics.len(), 0)
+        }
+    };
+
+    // Diagnostic in includer.fbs since I is not found.
+    assert_eq!(diagnostics.len(), 1);
+
+    let included_uri = harness.file_uri("included.fbs");
+    harness
+        .save_file(TextDocumentIdentifier { uri: included_uri }, included_after)
+        .await;
+
+    let diagnostics = loop {
+        let params = harness
+            .notification::<notification::PublishDiagnostics>()
+            .await;
+        if params.uri == includer_uri {
+            break params.diagnostics;
+        } else {
+            assert_eq!(params.diagnostics.len(), 0)
+        }
+    };
+
+    // No more diagnostic now that I is defined.
+    assert_eq!(diagnostics.len(), 0);
+}

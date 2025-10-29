@@ -55,6 +55,7 @@ impl Backend {
 impl LanguageServer for Backend {
     async fn initialize(&self, params: InitializeParams) -> Result<InitializeResult> {
         info!("Initializing server...");
+        info!("PID: {}", std::process::id());
         lifecycle::handle_initialize(self, params).await;
 
         Ok(InitializeResult {

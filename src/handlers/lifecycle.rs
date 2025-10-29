@@ -36,10 +36,12 @@ pub async fn handle_did_save(
     params: DidSaveTextDocumentParams,
 ) -> Vec<(Uri, Vec<Diagnostic>)> {
     if let Some((path, _)) = backend.documents.handle_did_save(params) {
-        let snapshot = backend.analyzer.snapshot().await;
         let mut files_to_reparse = vec![path.clone()];
-        if let Some(includers) = snapshot.dependencies.included_by.get(&path) {
-            files_to_reparse.extend(includers.clone());
+        {
+            let snapshot = backend.analyzer.snapshot().await;
+            if let Some(includers) = snapshot.dependencies.included_by.get(&path) {
+                files_to_reparse.extend(includers.clone());
+            }
         }
         backend.analyzer.parse(files_to_reparse).await
     } else {
