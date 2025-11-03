@@ -288,6 +288,8 @@ unsafe fn extract_enums_and_unions(parser_ptr: *mut ffi::FlatbuffersParser, st: 
             variants.push((val_name, val_info));
         }
 
+        let underlying_type = c_str_to_string(def_info.underlying_type);
+
         let symbol_kind = if def_info.is_union {
             SymbolKind::Union(Union {
                 variants: variants
@@ -325,6 +327,7 @@ unsafe fn extract_enums_and_unions(parser_ptr: *mut ffi::FlatbuffersParser, st: 
                         }
                     })
                     .collect(),
+                underlying_type: underlying_type,
             })
         };
 

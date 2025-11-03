@@ -135,6 +135,19 @@ struct MyStruct {
 }
 
 #[tokio::test]
+async fn hover_on_field_enum_type() {
+    let fixture = r#"
+enum Color: short { Red=1, Blue=2, Green=3 }
+table MyStruct {
+    c: Co$0lor = Red;
+}
+"#;
+    let mut harness = TestHarness::new();
+    let response = get_hover_response(&mut harness, fixture, &[]).await;
+    assert_snapshot!(serde_json::to_string_pretty(&response).unwrap());
+}
+
+#[tokio::test]
 async fn hover_on_union_member() {
     let fixture = r#"
 /// A table with b.

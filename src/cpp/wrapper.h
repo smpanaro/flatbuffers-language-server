@@ -36,6 +36,7 @@ struct EnumDefinitionInfo {
     const char* file;
     const char* namespace_;
     const char* documentation;
+    const char* underlying_type;
     bool is_union;
     unsigned line;
     unsigned col;

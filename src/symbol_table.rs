@@ -83,6 +83,7 @@ pub struct EnumVariant {
 #[derive(Debug, Clone, PartialEq)]
 pub struct Enum {
     pub variants: Vec<EnumVariant>,
+    pub underlying_type: String,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -172,7 +173,12 @@ impl Symbol {
             SymbolKind::Struct(s) => {
                 format!("struct {} {{{}}}", self.info.name, s.fields_markdown())
             }
-            SymbolKind::Enum(e) => format!("enum {} {{{}}}", self.info.name, e.variants_markdown()),
+            SymbolKind::Enum(e) => format!(
+                "enum {} : {} {{{}}}",
+                self.info.name,
+                e.underlying_type,
+                e.variants_markdown()
+            ),
             SymbolKind::Union(u) => {
                 format!("union {} {{{}}}", self.info.name, u.variants_markdown())
             }
@@ -291,7 +297,7 @@ impl Enum {
                     s
                 })
                 .collect::<Vec<String>>()
-                .join("\n")
+                .join(",\n")
         )
     }
 }
@@ -307,7 +313,7 @@ impl Union {
                 .iter()
                 .map(|v| format!("  {}", v.name))
                 .collect::<Vec<String>>()
-                .join("\n")
+                .join(",\n")
         )
     }
 }

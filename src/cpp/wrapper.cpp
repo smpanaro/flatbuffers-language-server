@@ -159,7 +159,7 @@ int get_num_enums(struct FlatbuffersParser* parser) {
 }
 
 struct EnumDefinitionInfo get_enum_info(struct FlatbuffersParser* parser, int index) {
-    struct EnumDefinitionInfo info = { nullptr, nullptr, nullptr, nullptr, false, 0, 0 };
+    struct EnumDefinitionInfo info = { nullptr, nullptr, nullptr, nullptr, nullptr, false, 0, 0 };
     if (!parser || index < 0 || static_cast<size_t>(index) >= parser->impl.enums_.vec.size()) {
         return info;
     }
@@ -177,6 +177,12 @@ struct EnumDefinitionInfo get_enum_info(struct FlatbuffersParser* parser, int in
         }
         auto result = parser->string_cache.insert(ns);
         info.namespace_ = result.first->c_str();
+    }
+
+    {
+        std::string underlying = flatbuffers::TypeName(enum_def->underlying_type.base_type);
+        auto result = parser->string_cache.insert(underlying);
+        info.underlying_type = result.first->c_str();
     }
 
     info.documentation = join_doc_comments(enum_def->doc_comment, parser->string_cache);

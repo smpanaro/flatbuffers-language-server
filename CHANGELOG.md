@@ -2,6 +2,7 @@
 
 - Fuzzy search across all project types (tables, structs, enums etc).
   - VSCode calls this "Go to Symbol in Workspace". Zed, "project symbols".
+- Fixes invalid syntax in enum and union hovers. This resulted in incorrect highlighting in some editors.
 
 ## 0.0.1 - October 19, 2025
 
