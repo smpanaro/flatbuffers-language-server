@@ -287,17 +287,31 @@ impl Enum {
             "\n{}\n",
             self.variants
                 .iter()
-                .map(|v| {
-                    let mut s = format!("  {} = {}", v.name, v.value);
-                    if let Some(doc) = &v.documentation {
-                        if !doc.is_empty() {
-                            s.push_str(&format!("\n  /// {}", doc.replace('\n', "\n  /// ")));
-                        }
-                    }
-                    s
+                .enumerate()
+                .map(|(idx, v)| {
+                    let doc = v
+                        .documentation
+                        .as_ref()
+                        .filter(|d| !d.is_empty())
+                        .map(|d| {
+                            d.split('\n')
+                                .map(|l| format!("  /// {}", l.trim()))
+                                .collect::<Vec<String>>()
+                                .join("\n")
+                        })
+                        .map(|doc_lines| format!("{doc_lines}\n"))
+                        .unwrap_or_default();
+
+                    let is_last = self.variants.len() - 1 == idx;
+                    format!(
+                        "{doc}  {} = {}{}",
+                        v.name,
+                        v.value,
+                        if !is_last { "," } else { "" }
+                    )
                 })
                 .collect::<Vec<String>>()
-                .join(",\n")
+                .join("\n")
         )
     }
 }
