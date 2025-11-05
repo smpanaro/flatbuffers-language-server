@@ -324,7 +324,7 @@ impl From<&SymbolKind> for CompletionItemKind {
             SymbolKind::Table(_) => CompletionItemKind::CLASS,
             SymbolKind::Struct(_) => CompletionItemKind::STRUCT,
             SymbolKind::Enum(_) => CompletionItemKind::ENUM,
-            SymbolKind::Union(_) => CompletionItemKind::ENUM, // No specific kind for Union, Enum is close.
+            SymbolKind::Union(_) => CompletionItemKind::INTERFACE, // No specific kind for Union, Interface is close and makes all kinds unique.
             SymbolKind::Field(_) => CompletionItemKind::FIELD,
             SymbolKind::Scalar => CompletionItemKind::KEYWORD,
         }
@@ -338,7 +338,7 @@ impl From<&SymbolKind> for lsp_types::SymbolKind {
             SymbolKind::Table(_) => LspSymbolKind::CLASS,
             SymbolKind::Struct(_) => LspSymbolKind::STRUCT,
             SymbolKind::Enum(_) => LspSymbolKind::ENUM,
-            SymbolKind::Union(_) => LspSymbolKind::ENUM,
+            SymbolKind::Union(_) => LspSymbolKind::INTERFACE, // No specific kind for Union, Interface is close and makes all kinds unique.
             SymbolKind::Field(_) => LspSymbolKind::FIELD,
             SymbolKind::Scalar => LspSymbolKind::VARIABLE,
         }

@@ -56,7 +56,7 @@ expression: response
   },
   {
     "name": "MyUnion",
-    "kind": 10,
+    "kind": 11,
     "location": {
       "uri": "[ROOT_URI]/schema.fbs",
       "range": {
