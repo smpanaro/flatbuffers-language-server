@@ -1,4 +1,9 @@
-use std::{collections::HashMap, path::PathBuf};
+use std::{
+    borrow::Cow,
+    collections::HashMap,
+    fs,
+    path::{Path, PathBuf},
+};
 use tower_lsp_server::lsp_types::Diagnostic;
 
 pub mod codes;
@@ -15,7 +20,8 @@ pub trait ErrorDiagnosticHandler {
 
 pub fn generate_diagnostics_from_error_string(
     error_str: &str,
-    content: &str,
+    root_path: &Path,
+    root_content: &str,
 ) -> HashMap<PathBuf, Vec<Diagnostic>> {
     let mut diagnostics_map: HashMap<PathBuf, Vec<Diagnostic>> = HashMap::new();
     let handlers: Vec<Box<dyn ErrorDiagnosticHandler>> = vec![
@@ -26,9 +32,30 @@ pub fn generate_diagnostics_from_error_string(
         Box::new(generic::GenericDiagnosticHandler),
     ];
 
+    let mut file_cache: HashMap<PathBuf, String> = HashMap::new();
+
     for line in error_str.lines() {
+        let Some(file_path_str) = line.split(':').next() else {
+            continue;
+        };
+
+        let Ok(canonical_path) = fs::canonicalize(file_path_str) else {
+            continue;
+        };
+
+        let content = if canonical_path == root_path {
+            Cow::Borrowed(root_content)
+        } else {
+            Cow::Owned(
+                file_cache
+                    .entry(canonical_path)
+                    .or_insert_with(|| fs::read_to_string(file_path_str).unwrap_or_default())
+                    .clone(),
+            )
+        };
+
         for handler in &handlers {
-            if let Some((path, diagnostic)) = handler.handle(line, content) {
+            if let Some((path, diagnostic)) = handler.handle(line, &content) {
                 diagnostics_map.entry(path).or_default().push(diagnostic);
                 break;
             }

@@ -217,7 +217,6 @@ table I {} // Change so that I is now defined.
 }
 
 #[tokio::test]
-#[ignore = "Known bug in file content-dependent diagnostics."]
 async fn saving_included_file_with_error() {
     let includer = r#"
 include "included.fbs";

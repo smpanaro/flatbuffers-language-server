@@ -116,7 +116,7 @@ unsafe fn parse_error_messages(
     let error_str_ptr = ffi::get_parser_error(parser_ptr);
     if let Some(error_str) = c_str_to_optional_string(error_str_ptr).take_if(|s| !s.is_empty()) {
         debug!("flatc error parsing {}: {}", path.display(), error_str);
-        diagnostics::generate_diagnostics_from_error_string(&error_str, content)
+        diagnostics::generate_diagnostics_from_error_string(&error_str, path, content)
     } else {
         HashMap::new()
     }
