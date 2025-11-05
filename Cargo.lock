@@ -280,6 +280,7 @@ dependencies = [
  "bindgen",
  "cc",
  "dashmap 5.5.3",
+ "flatbuffers-language-server",
  "heck",
  "ignore",
  "insta",

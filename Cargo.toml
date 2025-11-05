@@ -3,6 +3,9 @@ name = "flatbuffers-language-server"
 version = "0.0.1"
 edition = "2021"
 
+[features]
+test-harness = []
+
 [dependencies]
 tokio = { version = "1", features = ["full"] }
 tower-lsp-server = "0.22.1"
@@ -25,6 +28,7 @@ bindgen = "0.60"
 
 [dev-dependencies]
 insta = { version = "1.34.0", features = ["serde"] }
+flatbuffers-language-server = { path = ".", features = ["test-harness"] }
 
 [[test]]
 name = "integration"

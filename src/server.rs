@@ -300,3 +300,11 @@ impl Backend {
         self.notify_ready.notify_waiters();
     }
 }
+
+#[cfg(any(test, feature = "test-harness"))]
+impl Backend {
+    pub async fn did_save_sync(&self, params: DidSaveTextDocumentParams) -> Result<i32> {
+        self.did_save(params).await;
+        Ok(0)
+    }
+}

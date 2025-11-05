@@ -6,9 +6,12 @@ use std::path::{Path, PathBuf};
 use tempfile::TempDir;
 use tokio::io::{self, AsyncReadExt, AsyncWriteExt, DuplexStream};
 use tower_lsp_server::jsonrpc::{Id, Request, Response};
-use tower_lsp_server::lsp_types::notification::Notification;
+use tower_lsp_server::lsp_types::notification::{
+    DidChangeTextDocument, DidCloseTextDocument, DidOpenTextDocument, DidSaveTextDocument,
+    Initialized, Notification,
+};
 use tower_lsp_server::lsp_types::request::{
-    RegisterCapability, Request as LspRequest, WorkDoneProgressCreate,
+    Initialize, RegisterCapability, Request as LspRequest, WorkDoneProgressCreate,
 };
 use tower_lsp_server::{lsp_types::*, UriExt};
 use tower_lsp_server::{LspService, Server};
@@ -43,7 +46,9 @@ impl TestHarness {
         let (req_client, req_server) = io::duplex(1024);
         let (res_server, res_client) = io::duplex(1024);
 
-        let (service, socket) = LspService::new(Backend::new);
+        let (service, socket) = LspService::build(Backend::new)
+            .custom_method(DidSaveSync::METHOD, Backend::did_save_sync)
+            .finish();
 
         tokio::spawn(Server::new(req_server, res_server, socket).serve(service));
 
@@ -178,7 +183,7 @@ impl TestHarness {
         }
 
         let id = self.next_request_id();
-        let req = Request::build("initialize")
+        let req = Request::build(Initialize::METHOD)
             .params(serde_json::to_value(params).unwrap())
             .id(id)
             .finish();
@@ -213,7 +218,7 @@ impl TestHarness {
                     text: content.to_string(),
                 };
                 let params = DidOpenTextDocumentParams { text_document };
-                let req = Request::build("textDocument/didOpen")
+                let req = Request::build(DidOpenTextDocument::METHOD)
                     .params(serde_json::to_value(params).unwrap())
                     .finish();
                 self.send_request(req).await;
@@ -251,7 +256,7 @@ impl TestHarness {
         params.workspace_folders = Some(workspace_folders);
 
         let id = self.next_request_id();
-        let req = Request::build("initialize")
+        let req = Request::build(Initialize::METHOD)
             .params(serde_json::to_value(params).unwrap())
             .id(id)
             .finish();
@@ -263,7 +268,7 @@ impl TestHarness {
         assert!(res.is_ok());
 
         let params = InitializedParams {};
-        let req = Request::build("initialized")
+        let req = Request::build(Initialized::METHOD)
             .params(serde_json::to_value(params).unwrap())
             .finish();
         self.send_request(req).await;
@@ -280,7 +285,7 @@ impl TestHarness {
                     text: content.to_string(),
                 };
                 let params = DidOpenTextDocumentParams { text_document };
-                let req = Request::build("textDocument/didOpen")
+                let req = Request::build(DidOpenTextDocument::METHOD)
                     .params(serde_json::to_value(params).unwrap())
                     .finish();
                 self.send_request(req).await;
@@ -305,7 +310,7 @@ impl TestHarness {
                 text: content.to_string(),
             }],
         };
-        let req = Request::build("textDocument/didChange")
+        let req = Request::build(DidChangeTextDocument::METHOD)
             .params(serde_json::to_value(params).unwrap())
             .finish();
         self.send_request(req).await;
@@ -320,17 +325,30 @@ impl TestHarness {
             text_document: identifier,
             text: Some(content.to_string()),
         };
-        let req = Request::build("textDocument/didSave")
+        let req = Request::build(DidSaveTextDocument::METHOD)
             .params(serde_json::to_value(params).unwrap())
             .finish();
         self.send_request(req).await;
+    }
+
+    /// Test-only method to save a document and block until the server returns a response.
+    pub async fn save_file_sync(&mut self, identifier: TextDocumentIdentifier, content: &str) {
+        if let Some(path) = identifier.uri.to_file_path() {
+            fs::write(path, content).unwrap();
+        }
+
+        let params = DidSaveTextDocumentParams {
+            text_document: identifier,
+            text: Some(content.to_string()),
+        };
+        self.call::<DidSaveSync>(params).await;
     }
 
     pub async fn close_file(&mut self, uri: Uri) {
         let params = DidCloseTextDocumentParams {
             text_document: TextDocumentIdentifier { uri },
         };
-        let req = Request::build("textDocument/didClose")
+        let req = Request::build(DidCloseTextDocument::METHOD)
             .params(serde_json::to_value(params).unwrap())
             .finish();
         self.send_request(req).await;
@@ -430,6 +448,28 @@ impl TestHarness {
         }
     }
 
+    /// Non-blocking method to return any notifications that were received but not yet handled.
+    pub fn pending_notifications<N: Notification>(&mut self) -> Vec<N::Params>
+    where
+        N::Params: DeserializeOwned,
+    {
+        let mut matches = Vec::new();
+        self.unhandled_notifications.retain_mut(|req| {
+            if req.method() == N::METHOD {
+                let params = req.params().expect("Notification missing params").clone();
+                matches.push(
+                    serde_json::from_value(params)
+                        .expect("Failed to deserialize notification params"),
+                );
+                false
+            } else {
+                true
+            }
+        });
+
+        matches
+    }
+
     async fn fill_buffer(&mut self) -> io::Result<()> {
         // Only read from the stream if our internal buffer of messages is empty.
         if !self.responses.is_empty() {
@@ -508,4 +548,13 @@ impl TestHarness {
             }
         }
     }
+}
+
+#[derive(Debug)]
+pub enum DidSaveSync {}
+
+impl LspRequest for DidSaveSync {
+    type Params = DidSaveTextDocumentParams;
+    type Result = i32; // Can't be empty otherwise it will be treated as a notification.
+    const METHOD: &'static str = "test/didSaveSync";
 }
