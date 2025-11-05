@@ -353,4 +353,12 @@ impl SymbolInfo {
             format!("{}.{}", self.namespace.join("."), self.name)
         }
     }
+
+    pub fn namespace_str(&self) -> Option<String> {
+        if self.namespace.is_empty() {
+            None
+        } else {
+            Some(self.namespace.join("."))
+        }
+    }
 }

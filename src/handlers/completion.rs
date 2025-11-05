@@ -10,8 +10,8 @@ use std::path::PathBuf;
 use std::time::Instant;
 use tower_lsp_server::jsonrpc::Result;
 use tower_lsp_server::lsp_types::{
-    CompletionItem, CompletionItemKind, CompletionParams, CompletionResponse, Documentation,
-    MarkupContent, MarkupKind, Position, Range, TextEdit,
+    CompletionItem, CompletionItemKind, CompletionItemLabelDetails, CompletionParams,
+    CompletionResponse, Documentation, MarkupContent, MarkupKind, Position, Range, TextEdit,
 };
 
 static FIELD_RE: Lazy<Regex> = Lazy::new(|| Regex::new(r"^\s*(\w+)\s*:\s*(\w*)").unwrap());
@@ -216,15 +216,10 @@ fn handle_field_type_completion(
         if is_match {
             let has_collision = name_collisions.get(base_name).map_or(false, |&c| c > 1);
 
-            let detail = if symbol.info.namespace.is_empty() {
-                symbol.type_name().to_string()
-            } else {
-                format!(
-                    "{} in {}",
-                    symbol.type_name(),
-                    symbol.info.namespace.join(".")
-                )
-            };
+            let detail = symbol.info.namespace_str().map_or_else(
+                || symbol.type_name().to_string(),
+                |ns| format!("{} in {}", symbol.type_name(), ns),
+            );
 
             let insert_text = if has_collision {
                 Some(qualified_name.clone())
@@ -239,6 +234,10 @@ fn handle_field_type_completion(
                 sort_text: Some(sort_text),
                 kind: Some(kind),
                 detail: Some(detail),
+                label_details: Some(CompletionItemLabelDetails {
+                    detail: None, // for function signatures or type annotations, neither of which are relevant for us.
+                    description: symbol.info.namespace_str(), // for fully qualified name or file path. TODO: support extra edit for include
+                }),
                 documentation: symbol.info.documentation.as_ref().map(|doc| {
                     Documentation::MarkupContent(MarkupContent {
                         kind: MarkupKind::Markdown,
@@ -367,6 +366,10 @@ fn handle_root_type_completion(
                     label: base_name.clone(),
                     kind: Some(CompletionItemKind::CLASS),
                     detail: Some(symbol.type_name().to_string()),
+                    label_details: Some(CompletionItemLabelDetails {
+                        detail: None,
+                        description: symbol.info.namespace_str(),
+                    }),
                     documentation: symbol.info.documentation.as_ref().map(|doc| {
                         Documentation::MarkupContent(MarkupContent {
                             kind: MarkupKind::Markdown,
