@@ -288,7 +288,7 @@ table WithError {
             }
         };
         assert_eq!(diagnostics.len(), 1);
-        assert_eq!(diagnostics[0].range.start, Position::new(12, 10))
+        assert_eq!(diagnostics[0].range.start, Position::new(12, 10));
     }
 
     {

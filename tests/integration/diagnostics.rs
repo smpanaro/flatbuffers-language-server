@@ -1,4 +1,5 @@
 use crate::harness::TestHarness;
+use flatbuffers_language_server::ext::all_diagnostics::AllDiagnostics;
 use tower_lsp_server::lsp_types::{
     notification, request, CodeActionContext, CodeActionOrCommand, CodeActionParams,
     DiagnosticSeverity, DiagnosticTag, Position, Range, TextDocumentIdentifier,
@@ -27,6 +28,9 @@ async fn diagnostic_error_has_correct_range() {
     let diagnostic = &params.diagnostics[0];
     let expected_range = Range::new(Position::new(0, 19), Position::new(0, 31)); // "invalid_type"
     assert_eq!(diagnostic.range, expected_range);
+
+    let all = harness.call::<AllDiagnostics>(()).await;
+    assert_eq!(all.len(), 1);
 }
 
 #[tokio::test]
@@ -69,6 +73,10 @@ union Whichever { One }
         params_b.unwrap().diagnostics[0].range,
         Range::new(Position::new(2, 18), Position::new(2, 21))
     );
+
+    let all = harness.call::<AllDiagnostics>(()).await;
+    assert_eq!(all.len(), 2);
+    assert!(all.iter().all(|(_, ds)| ds.len() == 1))
 }
 
 #[tokio::test]
@@ -85,6 +93,7 @@ enum MyEnum: byte { C, D }
     let params = harness
         .notification::<notification::PublishDiagnostics>()
         .await;
+    assert_eq!(params.diagnostics.len(), 1);
     let diagnostic = &params.diagnostics[0];
     assert_eq!(
         diagnostic.range,
@@ -109,6 +118,7 @@ async fn duplicate_enum_variant() {
     let params = harness
         .notification::<notification::PublishDiagnostics>()
         .await;
+    assert_eq!(params.diagnostics.len(), 1);
     let diagnostic = &params.diagnostics[0];
     assert_eq!(
         diagnostic.range,
@@ -146,6 +156,8 @@ table Foo {
             assert_eq!(params.diagnostics.len(), 0)
         }
     };
+    assert_eq!(harness.call::<AllDiagnostics>(()).await.len(), 2);
+
     assert_eq!(diagnostics.len(), 1);
     let diagnostic = diagnostics[0].clone();
     assert_eq!(
@@ -202,6 +214,7 @@ async fn undefined_vector_type() {
     let params = harness
         .notification::<notification::PublishDiagnostics>()
         .await;
+    assert_eq!(params.diagnostics.len(), 1);
     let diagnostic = &params.diagnostics[0];
     assert_eq!(
         diagnostic.range,
@@ -226,6 +239,7 @@ table Foo {
     let params = harness
         .notification::<notification::PublishDiagnostics>()
         .await;
+    assert_eq!(params.diagnostics.len(), 1);
     let diagnostic = &params.diagnostics[0];
     assert_eq!(
         diagnostic.range,
@@ -262,6 +276,7 @@ include "pastries.fbs";
             assert!(param.diagnostics.is_empty());
         }
     };
+    assert_eq!(harness.call::<AllDiagnostics>(()).await.len(), 3);
     assert_eq!(diagnostics.len(), 1);
 
     let diagnostic = &diagnostics[0];
@@ -307,6 +322,7 @@ table Coffee {
     let params = harness
         .notification::<notification::PublishDiagnostics>()
         .await;
+    assert_eq!(params.diagnostics.len(), 1);
     let diagnostic = &params.diagnostics[0];
     assert_eq!(
         diagnostic.range,
@@ -348,6 +364,7 @@ root_type Coffee
     let params = harness
         .notification::<notification::PublishDiagnostics>()
         .await;
+    assert_eq!(params.diagnostics.len(), 1);
     let diagnostic = &params.diagnostics[0];
     assert_eq!(
         diagnostic.range,
@@ -381,6 +398,7 @@ table ids {
     let params = harness
         .notification::<notification::PublishDiagnostics>()
         .await;
+    assert_eq!(params.diagnostics.len(), 1);
     let diagnostic = &params.diagnostics[0];
     assert_eq!(
         diagnostic.range,
@@ -422,6 +440,7 @@ table Foo {
     let params = harness
         .notification::<notification::PublishDiagnostics>()
         .await;
+    assert_eq!(params.diagnostics.len(), 1);
     let diagnostic = &params.diagnostics[0];
     assert_eq!(
         diagnostic.range,
@@ -463,6 +482,7 @@ table Foo {
     let params = harness
         .notification::<notification::PublishDiagnostics>()
         .await;
+    assert_eq!(params.diagnostics.len(), 1);
     let diagnostic = &params.diagnostics[0];
     assert_eq!(
         diagnostic.range,
@@ -503,6 +523,7 @@ table Foo
     let params = harness
         .notification::<notification::PublishDiagnostics>()
         .await;
+    assert_eq!(params.diagnostics.len(), 1);
     let diagnostic = &params.diagnostics[0];
     assert_eq!(
         diagnostic.range,
@@ -542,6 +563,7 @@ table MyTable { furryWombat:string; }"#;
     let params = harness
         .notification::<notification::PublishDiagnostics>()
         .await;
+    assert_eq!(params.diagnostics.len(), 1);
     let diagnostic = &params.diagnostics[0];
     assert_eq!(
         diagnostic.range,
@@ -588,6 +610,7 @@ root_type Pen;
             other_diagnostics_count += 1;
         }
     }
+    assert_eq!(harness.call::<AllDiagnostics>(()).await.len(), 2);
     assert_eq!(diagnostics.len(), 1);
     assert_eq!(other_diagnostics_count, 1);
 
@@ -632,6 +655,7 @@ root_type Pen;
             other_diagnostics_count += 1;
         }
     }
+    assert_eq!(harness.call::<AllDiagnostics>(()).await.len(), 2);
     assert_eq!(diagnostics.len(), 1);
     assert_eq!(other_diagnostics_count, 1);
 
@@ -667,4 +691,5 @@ table MyTable {
             .await;
         assert!(param.diagnostics.is_empty());
     }
+    assert_eq!(harness.call::<AllDiagnostics>(()).await.len(), 2);
 }

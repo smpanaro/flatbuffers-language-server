@@ -1,4 +1,5 @@
 use crate::harness::TestHarness;
+use flatbuffers_language_server::ext::all_diagnostics::AllDiagnostics;
 use tower_lsp_server::lsp_types::notification;
 
 #[tokio::test]
@@ -24,8 +25,8 @@ root_type ApiRequest;
     let api_uri = harness.file_uri("services/api.fbs");
     let common_uri = harness.file_uri("schemas/common.fbs");
 
-    // The server will send three `PublishDiagnostics` notifications,
-    // two for api.fbs and one for common.fbs. We need to check all of them.
+    // The server will send two `PublishDiagnostics` notifications,
+    // one each for api.fbs and common.fbs. We need to check both.
     for _ in 0..2 {
         let params = harness
             .notification::<notification::PublishDiagnostics>()
@@ -47,4 +48,5 @@ root_type ApiRequest;
             );
         }
     }
+    assert_eq!(harness.call::<AllDiagnostics>(()).await.len(), 2);
 }

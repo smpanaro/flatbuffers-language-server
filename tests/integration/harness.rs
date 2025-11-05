@@ -1,3 +1,5 @@
+use flatbuffers_language_server::ext::all_diagnostics::AllDiagnostics;
+use flatbuffers_language_server::ext::did_save_sync::DidSaveSync;
 use flatbuffers_language_server::server::Backend;
 use serde::de::DeserializeOwned;
 use std::collections::VecDeque;
@@ -48,6 +50,7 @@ impl TestHarness {
 
         let (service, socket) = LspService::build(Backend::new)
             .custom_method(DidSaveSync::METHOD, Backend::did_save_sync)
+            .custom_method(AllDiagnostics::METHOD, Backend::all_diagnostics)
             .finish();
 
         tokio::spawn(Server::new(req_server, res_server, socket).serve(service));
@@ -548,13 +551,4 @@ impl TestHarness {
             }
         }
     }
-}
-
-#[derive(Debug)]
-pub enum DidSaveSync {}
-
-impl LspRequest for DidSaveSync {
-    type Params = DidSaveTextDocumentParams;
-    type Result = i32; // Can't be empty otherwise it will be treated as a notification.
-    const METHOD: &'static str = "test/didSaveSync";
 }

@@ -1,5 +1,6 @@
 use crate::harness::TestHarness;
 use crate::helpers::parse_fixture;
+use flatbuffers_language_server::ext::all_diagnostics::AllDiagnostics;
 use insta::assert_snapshot;
 use tower_lsp_server::lsp_types::{
     notification, request, CompletionContext, CompletionParams, CompletionTriggerKind,
@@ -37,6 +38,10 @@ async fn get_completion_list(
         // the initial symbols from being loaded.
         assert_eq!(diags.diagnostics.len(), 0, "unexpected diagnostics");
     }
+    assert_eq!(
+        harness.call::<AllDiagnostics>(()).await.len(),
+        initial_workspace.len()
+    );
 
     harness
         .change_file(

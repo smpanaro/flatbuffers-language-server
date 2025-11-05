@@ -1,14 +1,20 @@
 use crate::analysis::Analyzer;
 use crate::document_store::DocumentStore;
+#[cfg(any(test, feature = "test-harness"))]
+use crate::ext::all_diagnostics::AllDiagnostics;
 use crate::handlers::{
     code_action, completion, goto_definition, hover, lifecycle, references, rename,
     workspace_symbol,
 };
+#[cfg(any(test, feature = "test-harness"))]
+use crate::utils::paths::path_buf_to_uri;
 use log::{error, info};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use tokio::sync::Notify;
 use tower_lsp_server::jsonrpc::Result;
+#[cfg(any(test, feature = "test-harness"))]
+use tower_lsp_server::lsp_types::request::Request;
 use tower_lsp_server::lsp_types::request::WorkDoneProgressCreate;
 use tower_lsp_server::lsp_types::{
     notification, CodeActionKind, CodeActionOptions, CodeActionParams,
@@ -306,5 +312,18 @@ impl Backend {
     pub async fn did_save_sync(&self, params: DidSaveTextDocumentParams) -> Result<i32> {
         self.did_save(params).await;
         Ok(0)
+    }
+
+    pub async fn all_diagnostics(
+        &self,
+        _: <AllDiagnostics as Request>::Params,
+    ) -> Result<<AllDiagnostics as Request>::Result> {
+        let snapshot = self.analyzer.snapshot().await;
+        let diagnostics = snapshot.diagnostics.all();
+        let result = diagnostics
+            .iter()
+            .filter_map(|(path, diags)| path_buf_to_uri(path).ok().map(|uri| (uri, diags.clone())))
+            .collect();
+        Ok(result)
     }
 }

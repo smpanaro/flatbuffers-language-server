@@ -39,6 +39,10 @@ impl DiagnosticStore {
             .collect()
     }
 
+    pub fn all(&self) -> &HashMap<PathBuf, Vec<Diagnostic>> {
+        &self.per_file
+    }
+
     pub fn remove(&mut self, path: &Path) {
         self.per_file.remove(path);
         self.unpublished.remove(path);
