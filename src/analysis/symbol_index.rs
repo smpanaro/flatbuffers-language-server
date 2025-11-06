@@ -1,5 +1,5 @@
 use crate::symbol_table::{Location, Symbol, SymbolInfo, SymbolKind, SymbolTable};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use tower_lsp_server::lsp_types::Range;
@@ -73,6 +73,15 @@ impl SymbolIndex {
                 self.global.remove(&key);
             }
         }
+    }
+
+    pub fn namespaces(&self) -> HashSet<String> {
+        self.global
+            .values()
+            .map(|s| &s.info.namespace)
+            .filter(|ns| !ns.is_empty())
+            .map(|ns| ns.join("."))
+            .collect()
     }
 }
 
@@ -308,10 +317,12 @@ mod tests {
     use tower_lsp_server::lsp_types::{Position, Range};
 
     fn make_symbol(name: &str, path: &Path) -> Symbol {
+        let mut namespace = name.split(".").map(|s| s.to_string()).collect::<Vec<_>>();
+        namespace.pop();
         Symbol {
             info: SymbolInfo {
                 name: name.to_string(),
-                namespace: vec![],
+                namespace,
                 location: Location {
                     path: path.to_path_buf(),
                     range: Range::new(Position::new(0, 0), Position::new(0, 0)),
@@ -361,5 +372,28 @@ mod tests {
         index.remove(&path_a);
         assert!(index.global.is_empty());
         assert!(index.per_file.is_empty());
+    }
+
+    #[test]
+    fn test_namespaces() {
+        let mut index = SymbolIndex::new();
+        let path_a = PathBuf::from("a.fbs");
+
+        let mut st = SymbolTable::new(path_a.clone());
+        st.insert("A".to_string(), make_symbol("com.foo.bar.A", &path_a));
+        st.insert("B".to_string(), make_symbol("com.foo.bar.B", &path_a));
+        st.insert("C".to_string(), make_symbol("com.foo.C", &path_a));
+        st.insert("D".to_string(), make_symbol("single.D", &path_a));
+
+        index.update(&path_a, st);
+
+        assert_eq!(
+            HashSet::from_iter(vec![
+                "com.foo.bar".to_string(),
+                "com.foo".to_string(),
+                "single".to_string()
+            ]),
+            index.namespaces()
+        )
     }
 }

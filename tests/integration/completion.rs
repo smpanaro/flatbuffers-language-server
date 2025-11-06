@@ -297,3 +297,67 @@ table MyTable {
     let response = get_completion_list(&mut harness, fixture, &[]).await;
     assert_snapshot!(response);
 }
+
+#[tokio::test]
+async fn completion_for_field_namespace_partial() {
+    let fixture = r#"
+namespace one.two.three;
+
+table Tree {}
+
+table Forest {
+    oak: on$0
+}
+"#;
+    let mut harness = TestHarness::new();
+    let response = get_completion_list(&mut harness, fixture, &[]).await;
+    assert_snapshot!(response);
+}
+
+#[tokio::test]
+async fn completion_for_field_namespace_partial_with_dot() {
+    let fixture = r#"
+namespace one.two.three;
+
+table Tree {}
+
+table Forest {
+    oak: one.two.$0
+}
+"#;
+    let mut harness = TestHarness::new();
+    let response = get_completion_list(&mut harness, fixture, &[]).await;
+    assert_snapshot!(response);
+}
+
+#[tokio::test]
+async fn completion_for_field_namespace_partial_with_dot_no_type() {
+    let fixture = r#"
+namespace one.two.three;
+
+table Tree {}
+
+table Forest {
+    oak: one.two.three.$0
+}
+"#;
+    let mut harness = TestHarness::new();
+    let response = get_completion_list(&mut harness, fixture, &[]).await;
+    assert_snapshot!(response);
+}
+
+#[tokio::test]
+async fn completion_for_field_namespace_partial_with_dot_and_type_part() {
+    let fixture = r#"
+namespace one.two.three;
+
+table Tree {}
+
+table Forest {
+    oak: one.two.three.T$0
+}
+"#;
+    let mut harness = TestHarness::new();
+    let response = get_completion_list(&mut harness, fixture, &[]).await;
+    assert_snapshot!(response);
+}

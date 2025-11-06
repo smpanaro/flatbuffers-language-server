@@ -3,7 +3,9 @@ source: tests/integration/completion.rs
 expression: response
 ---
 [
-  "AnotherTable",
-  "MyNamespace",
-  "MyTable"
+  "long",
+  "ulong",
+  "one.two.three",
+  "Forest",
+  "Tree"
 ]

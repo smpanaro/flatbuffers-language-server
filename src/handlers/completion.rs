@@ -6,6 +6,7 @@ use log::debug;
 use once_cell::sync::Lazy;
 use regex::Regex;
 use ropey::Rope;
+use std::iter::once;
 use std::path::PathBuf;
 use std::time::Instant;
 use tower_lsp_server::jsonrpc::Result;
@@ -14,7 +15,7 @@ use tower_lsp_server::lsp_types::{
     CompletionResponse, Documentation, MarkupContent, MarkupKind, Position, Range, TextEdit,
 };
 
-static FIELD_RE: Lazy<Regex> = Lazy::new(|| Regex::new(r"^\s*(\w+)\s*:\s*(\w*)").unwrap());
+static FIELD_RE: Lazy<Regex> = Lazy::new(|| Regex::new(r"^\s*(\w+)\s*:\s*([\w\.]*)").unwrap());
 
 fn handle_attribute_completion(
     snapshot: &WorkspaceSnapshot,
@@ -208,8 +209,13 @@ fn handle_field_type_completion(
         let (is_match, sort_text) = field_sort_text(
             field_name,
             partial_text,
-            &symbol.info.name,
-            &symbol.info.namespace,
+            Some(&symbol.info.name),
+            &symbol
+                .info
+                .namespace
+                .iter()
+                .map(AsRef::as_ref)
+                .collect::<Vec<_>>(),
             false,
         );
 
@@ -222,7 +228,7 @@ fn handle_field_type_completion(
             );
 
             let insert_text = if has_collision {
-                Some(qualified_name.clone())
+                qualified_name_insert_text(partial_text, &qualified_name).map(|s| s.to_owned())
             } else {
                 None // Let LSP client use the label
             };
@@ -252,8 +258,13 @@ fn handle_field_type_completion(
     // Built-in symbols
     for item in snapshot.symbols.builtins.iter() {
         let (name, symbol) = item;
-        let (is_match, sort_text) =
-            field_sort_text(field_name, partial_text, &symbol.info.name, &vec![], true);
+        let (is_match, sort_text) = field_sort_text(
+            field_name,
+            partial_text,
+            Some(&symbol.info.name),
+            &vec![],
+            true,
+        );
 
         if is_match {
             items.push(CompletionItem {
@@ -271,13 +282,37 @@ fn handle_field_type_completion(
         }
     }
 
+    // Namespaces
+    for ns in snapshot.symbols.namespaces() {
+        let (is_match, sort_text) = field_sort_text(
+            field_name,
+            partial_text,
+            None,
+            &ns.split(".").collect::<Vec<_>>(),
+            false,
+        );
+
+        let insert_text = qualified_name_insert_text(partial_text, &ns).map(|s| s.to_owned());
+
+        if is_match {
+            items.push(CompletionItem {
+                label: ns,
+                insert_text,
+                sort_text: Some(sort_text),
+                kind: Some(CompletionItemKind::MODULE),
+                detail: Some("namespace".to_string()),
+                ..Default::default()
+            });
+        }
+    }
+
     Some(CompletionResponse::Array(items))
 }
 
 /// Determines if a symbol is a relevant completion and calculates its sort order.
 ///
 /// The sorting logic prioritizes matches in the following order:
-/// 1.  **Exact Namespace and Type Prefix Match**: `my.thing: My.Th` -> `My.Thing`
+/// 1.  **Exact Namespace and Type Prefix Match**: `my_thing: My.Th` -> `My.Thing`
 /// 2.  **Type Name in Field Name**: `my_widget: ` -> `Widget`
 /// 3.  **Type Prefix Match**: `my_field: Wi` -> `Widget`
 /// 4.  **Substring Match**: `my_field: dget` -> `Widget`
@@ -290,37 +325,45 @@ fn handle_field_type_completion(
 fn field_sort_text(
     field_name: &str,
     partial_text: &str,
-    symbol_name: &str,
-    symbol_namespace: &[String],
+    symbol_name: Option<&str>,
+    symbol_namespace: &[&str],
     is_builtin: bool,
 ) -> (bool, String) {
-    let qualified_name = if symbol_namespace.is_empty() {
-        symbol_name.to_string()
-    } else {
-        format!("{}.{}", symbol_namespace.join("."), symbol_name)
-    };
+    let qualified_name = symbol_namespace
+        .iter()
+        .map(|&s| Some(s))
+        .chain(once(symbol_name))
+        .filter_map(|p| p)
+        .filter(|p| !p.is_empty())
+        .collect::<Vec<_>>()
+        .join(".");
+
+    // Don't suggest a namespace if it is complete.
+    if symbol_name.is_none() && partial_text == format!("{qualified_name}.") {
+        return (false, "".to_string());
+    }
 
     let (is_match, sort_prefix) = if let Some((ns_part, type_part)) = partial_text.rsplit_once('.')
     {
         // Case 1: User is typing a qualified name (e.g., "My.Api.")
         let is_ns_match = symbol_namespace.join(".").starts_with(ns_part);
-        let is_type_match = symbol_name.starts_with(type_part);
+        let is_type_match = symbol_name.map_or(true, |sn| sn.starts_with(type_part));
         let is_a_match = is_ns_match && is_type_match;
         (is_a_match, if is_a_match { "0" } else { "4" })
     } else {
         // Case 2: User is typing a type name or namespace directly
-        let is_type_match = symbol_name
-            .to_lowercase()
-            .contains(&partial_text.to_lowercase());
-        let is_type_prefix_match = symbol_name
-            .to_lowercase()
-            .starts_with(&partial_text.to_lowercase());
+        let is_type_match = symbol_name.map_or(false, |sn| {
+            sn.to_lowercase().contains(&partial_text.to_lowercase())
+        });
+        let is_type_prefix_match = symbol_name.map_or(false, |sn| {
+            sn.to_lowercase().starts_with(&partial_text.to_lowercase())
+        });
         let is_ns_match = symbol_namespace
             .iter()
             .any(|ns| ns.starts_with(partial_text));
-        let field_name_contains_type = field_name
-            .to_lowercase()
-            .contains(&symbol_name.to_lowercase());
+        let field_name_contains_type = symbol_name.map_or(false, |sn| {
+            field_name.to_lowercase().contains(&sn.to_lowercase())
+        });
 
         if is_type_match {
             if field_name_contains_type {
@@ -361,9 +404,16 @@ fn handle_root_type_completion(
             let base_name = &symbol.info.name;
             let qualified_name = symbol.info.qualified_name();
 
-            if qualified_name.starts_with(partial_text) {
+            let base_match = base_name.starts_with(partial_text);
+            let qualified_match = qualified_name.starts_with(partial_text);
+
+            let insert_text =
+                qualified_name_insert_text(partial_text, &qualified_name).map(|s| s.to_owned());
+
+            if base_match || qualified_match {
                 items.push(CompletionItem {
                     label: base_name.clone(),
+                    insert_text,
                     kind: Some(CompletionItemKind::CLASS),
                     detail: Some(symbol.type_name().to_string()),
                     label_details: Some(CompletionItemLabelDetails {
@@ -380,6 +430,22 @@ fn handle_root_type_completion(
                 });
             }
         }
+    }
+
+    for ns in snapshot.symbols.namespaces() {
+        if !ns.starts_with(partial_text) {
+            continue;
+        }
+
+        let insert_text = qualified_name_insert_text(partial_text, &ns).map(|s| s.to_owned());
+
+        items.push(CompletionItem {
+            label: ns,
+            insert_text,
+            kind: Some(CompletionItemKind::MODULE),
+            detail: Some("namespace".to_string()),
+            ..Default::default()
+        });
     }
 
     Some(CompletionResponse::Array(items))
@@ -498,4 +564,86 @@ pub async fn handle_completion<'a>(
     );
 
     Ok(response)
+}
+
+// insert_text usually breaks on non-word characters so provide the portion
+// after the last period (including a period if needed).
+// TODO: Should definitely switch to text_edits. There are occasional weird replacements with this method.
+fn qualified_name_insert_text<'a>(partial: &str, full: &'a str) -> Option<&'a str> {
+    if !partial.contains(".") {
+        return Some(full);
+    }
+    full.strip_prefix(partial)
+        .map(|s| s.trim_start_matches('.'))
+        .map(|s| {
+            if partial.ends_with('.') {
+                s
+            } else {
+                &full[full.len() - s.len() - 1..]
+            }
+        })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_qualified_name_insert_text() {
+        assert_eq!(
+            qualified_name_insert_text("one.two", "one.two.foo"),
+            Some(".foo")
+        );
+        assert_eq!(
+            qualified_name_insert_text("one.two.", "one.two.foo"),
+            Some("foo")
+        );
+        assert_eq!(
+            qualified_name_insert_text("one.two.f", "one.two.foo"),
+            Some("foo")
+        );
+        assert_eq!(
+            qualified_name_insert_text("one.t", "one.two.foo"),
+            Some("two.foo")
+        );
+        assert_eq!(
+            qualified_name_insert_text("on", "one.two.foo"),
+            Some("one.two.foo")
+        )
+    }
+
+    #[test]
+    fn test_field_sort_text() {
+        assert_eq!(
+            field_sort_text("bean", "pastries.", Some("Bean"), &["pastries"], false).0,
+            true
+        );
+        assert_eq!(
+            field_sort_text(
+                "bean",
+                "pastri",
+                Some("Bean"),
+                &["pastries", "vanilla"],
+                false
+            )
+            .0,
+            true
+        );
+        assert_eq!(
+            field_sort_text("bean", "Be", Some("Bean"), &["pastries"], false).0,
+            true
+        );
+        assert_eq!(
+            field_sort_text("bean", "pastries", None, &["pastries"], false).0,
+            true // Helpful to see extra metadata for what was selected.
+        );
+        assert_eq!(
+            field_sort_text("bean", "pastries.", None, &["pastries"], false).0,
+            false // Should not insert pastries.pastries again.
+        );
+        assert_eq!(
+            field_sort_text("bean", "one.two.", None, &["one", "two", "three"], false).0,
+            true // Should suggest `one.two.three`.
+        );
+    }
 }
