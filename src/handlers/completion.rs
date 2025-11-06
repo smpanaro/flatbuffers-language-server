@@ -12,10 +12,12 @@ use std::time::Instant;
 use tower_lsp_server::jsonrpc::Result;
 use tower_lsp_server::lsp_types::{
     CompletionItem, CompletionItemKind, CompletionItemLabelDetails, CompletionParams,
-    CompletionResponse, Documentation, MarkupContent, MarkupKind, Position, Range, TextEdit,
+    CompletionResponse, CompletionTextEdit, Documentation, MarkupContent, MarkupKind, Position,
+    Range, TextEdit,
 };
 
 static FIELD_RE: Lazy<Regex> = Lazy::new(|| Regex::new(r"^\s*(\w+)\s*:\s*([\w\.]*)").unwrap());
+static ROOT_TYPE_RE: Lazy<Regex> = Lazy::new(|| Regex::new(r"^\s*root_type\s+([\w\.]*)").unwrap());
 
 fn handle_attribute_completion(
     snapshot: &WorkspaceSnapshot,
@@ -105,7 +107,7 @@ fn handle_attribute_completion(
                                 value: "The next available field id for this table. IDs must be contiguous and start at 0.".to_string(),
                             })),
                             sort_text: Some("00".to_string()),
-                            text_edit: Some(tower_lsp_server::lsp_types::CompletionTextEdit::Edit(
+                            text_edit: Some(CompletionTextEdit::Edit(
                                 TextEdit {
                                     range,
                                     new_text: if style_with_space {
@@ -169,18 +171,18 @@ fn handle_attribute_completion(
 fn handle_field_type_completion(
     snapshot: &WorkspaceSnapshot,
     line: &str,
+    position: Position,
 ) -> Option<CompletionResponse> {
     let curr_char = line.chars().last();
     let prev_char = line.chars().nth(line.chars().count().saturating_sub(2));
     if curr_char == Some(' ') && prev_char != Some(':') {
         return None;
     }
-
+    let (range, partial_text) = get_field_type_completion_context(line, position)?;
     let Some(captures) = FIELD_RE.captures(line) else {
         return None;
     };
     let field_name = captures.get(1).map_or("", |m| m.as_str());
-    let partial_text = captures.get(2).map_or("", |m| m.as_str());
 
     let mut items = Vec::new();
 
@@ -208,7 +210,7 @@ fn handle_field_type_completion(
 
         let (is_match, sort_text) = field_sort_text(
             field_name,
-            partial_text,
+            &partial_text,
             Some(&symbol.info.name),
             &symbol
                 .info
@@ -227,15 +229,16 @@ fn handle_field_type_completion(
                 |ns| format!("{} in {}", symbol.type_name(), ns),
             );
 
-            let insert_text = if has_collision {
-                qualified_name_insert_text(partial_text, &qualified_name).map(|s| s.to_owned())
+            let use_qualified = partial_text.contains('.') || has_collision;
+            let new_text = if use_qualified {
+                qualified_name.clone()
             } else {
-                None // Let LSP client use the label
+                base_name.clone()
             };
 
             items.push(CompletionItem {
                 label: base_name.clone(),
-                insert_text,
+                text_edit: Some(CompletionTextEdit::Edit(TextEdit { range, new_text })),
                 filter_text: Some(qualified_name.clone()),
                 sort_text: Some(sort_text),
                 kind: Some(kind),
@@ -260,7 +263,7 @@ fn handle_field_type_completion(
         let (name, symbol) = item;
         let (is_match, sort_text) = field_sort_text(
             field_name,
-            partial_text,
+            &partial_text,
             Some(&symbol.info.name),
             &vec![],
             true,
@@ -286,18 +289,19 @@ fn handle_field_type_completion(
     for ns in snapshot.symbols.namespaces() {
         let (is_match, sort_text) = field_sort_text(
             field_name,
-            partial_text,
+            &partial_text,
             None,
             &ns.split(".").collect::<Vec<_>>(),
             false,
         );
 
-        let insert_text = qualified_name_insert_text(partial_text, &ns).map(|s| s.to_owned());
-
         if is_match {
             items.push(CompletionItem {
-                label: ns,
-                insert_text,
+                label: ns.clone(),
+                text_edit: Some(CompletionTextEdit::Edit(TextEdit {
+                    range,
+                    new_text: ns.clone(),
+                })),
                 sort_text: Some(sort_text),
                 kind: Some(CompletionItemKind::MODULE),
                 detail: Some("namespace".to_string()),
@@ -389,31 +393,33 @@ fn field_sort_text(
 fn handle_root_type_completion(
     snapshot: &WorkspaceSnapshot,
     line: &str,
+    position: Position,
 ) -> Option<CompletionResponse> {
-    let trimmed_line = line.trim();
-    if !trimmed_line.starts_with("root_type") {
-        return None;
-    }
-
-    let partial_text = trimmed_line.strip_prefix("root_type").unwrap_or("").trim();
+    let (range, partial_text) = get_root_type_completion_context(line, position)?;
 
     let mut items = Vec::new();
     for entry in snapshot.symbols.global.iter() {
         let symbol = entry.1;
         if let SymbolKind::Table(_) = &symbol.kind {
+            let symbol = entry.1;
             let base_name = &symbol.info.name;
             let qualified_name = symbol.info.qualified_name();
 
-            let base_match = base_name.starts_with(partial_text);
-            let qualified_match = qualified_name.starts_with(partial_text);
-
-            let insert_text =
-                qualified_name_insert_text(partial_text, &qualified_name).map(|s| s.to_owned());
+            let base_match = base_name.starts_with(&partial_text);
+            let qualified_match = qualified_name.starts_with(&partial_text);
 
             if base_match || qualified_match {
+                // TODO: Handle name collisions here as well.
+                let use_qualified = partial_text.contains('.');
+                let new_text = if use_qualified {
+                    qualified_name.clone()
+                } else {
+                    base_name.clone()
+                };
+
                 items.push(CompletionItem {
                     label: base_name.clone(),
-                    insert_text,
+                    text_edit: Some(CompletionTextEdit::Edit(TextEdit { range, new_text })),
                     kind: Some(CompletionItemKind::CLASS),
                     detail: Some(symbol.type_name().to_string()),
                     label_details: Some(CompletionItemLabelDetails {
@@ -433,15 +439,16 @@ fn handle_root_type_completion(
     }
 
     for ns in snapshot.symbols.namespaces() {
-        if !ns.starts_with(partial_text) {
+        if !ns.starts_with(&partial_text) {
             continue;
         }
 
-        let insert_text = qualified_name_insert_text(partial_text, &ns).map(|s| s.to_owned());
-
         items.push(CompletionItem {
-            label: ns,
-            insert_text,
+            label: ns.clone(),
+            text_edit: Some(CompletionTextEdit::Edit(TextEdit {
+                range,
+                new_text: ns.clone(),
+            })),
             kind: Some(CompletionItemKind::MODULE),
             detail: Some("namespace".to_string()),
             ..Default::default()
@@ -513,6 +520,44 @@ fn should_suppress_completion(doc: &Rope, position: Position) -> bool {
     open_braces > close_braces
 }
 
+fn get_field_type_completion_context(line: &str, position: Position) -> Option<(Range, String)> {
+    let line_upto_cursor = &line[..position.character as usize];
+    FIELD_RE.captures(line_upto_cursor).and_then(|captures| {
+        captures.get(2).map(|partial_match| {
+            let start_char = line_upto_cursor[..partial_match.start()].chars().count() as u32;
+            let range = Range {
+                start: Position {
+                    line: position.line,
+                    character: start_char,
+                },
+                end: position,
+            };
+            let partial_text = partial_match.as_str().to_string();
+            (range, partial_text)
+        })
+    })
+}
+
+fn get_root_type_completion_context(line: &str, position: Position) -> Option<(Range, String)> {
+    let line_upto_cursor = &line[..position.character as usize];
+    ROOT_TYPE_RE
+        .captures(line_upto_cursor)
+        .and_then(|captures| {
+            captures.get(1).map(|partial_match| {
+                let start_char = line_upto_cursor[..partial_match.start()].chars().count() as u32;
+                let range = Range {
+                    start: Position {
+                        line: position.line,
+                        character: start_char,
+                    },
+                    end: position,
+                };
+                let partial_text = partial_match.as_str().to_string();
+                (range, partial_text)
+            })
+        })
+}
+
 pub async fn handle_completion<'a>(
     snapshot: &WorkspaceSnapshot<'a>,
     params: CompletionParams,
@@ -542,9 +587,9 @@ pub async fn handle_completion<'a>(
     let response =
         if let Some(response) = handle_attribute_completion(snapshot, &path, position, &line) {
             Some(response)
-        } else if let Some(response) = handle_root_type_completion(snapshot, &line) {
+        } else if let Some(response) = handle_root_type_completion(snapshot, &line, position) {
             Some(response)
-        } else if let Some(response) = handle_field_type_completion(snapshot, &line) {
+        } else if let Some(response) = handle_field_type_completion(snapshot, &line, position) {
             Some(response)
         } else {
             handle_keyword_completion(snapshot, &line)
@@ -566,50 +611,62 @@ pub async fn handle_completion<'a>(
     Ok(response)
 }
 
-// insert_text usually breaks on non-word characters so provide the portion
-// after the last period (including a period if needed).
-// TODO: Should definitely switch to text_edits. There are occasional weird replacements with this method.
-fn qualified_name_insert_text<'a>(partial: &str, full: &'a str) -> Option<&'a str> {
-    if !partial.contains(".") {
-        return Some(full);
-    }
-    full.strip_prefix(partial)
-        .map(|s| s.trim_start_matches('.'))
-        .map(|s| {
-            if partial.ends_with('.') {
-                s
-            } else {
-                &full[full.len() - s.len() - 1..]
-            }
-        })
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
 
     #[test]
-    fn test_qualified_name_insert_text() {
-        assert_eq!(
-            qualified_name_insert_text("one.two", "one.two.foo"),
-            Some(".foo")
-        );
-        assert_eq!(
-            qualified_name_insert_text("one.two.", "one.two.foo"),
-            Some("foo")
-        );
-        assert_eq!(
-            qualified_name_insert_text("one.two.f", "one.two.foo"),
-            Some("foo")
-        );
-        assert_eq!(
-            qualified_name_insert_text("one.t", "one.two.foo"),
-            Some("two.foo")
-        );
-        assert_eq!(
-            qualified_name_insert_text("on", "one.two.foo"),
-            Some("one.two.foo")
-        )
+    fn test_get_field_type_completion_context() {
+        let line = "  field: My.Namespace.T";
+        let pos = |character| Position { line: 0, character };
+
+        // Cursor at the end
+        let (range, partial) = get_field_type_completion_context(line, pos(23)).unwrap();
+        assert_eq!(partial, "My.Namespace.T");
+        assert_eq!(range.start.character, 9);
+        assert_eq!(range.end.character, 23);
+
+        // Cursor in the middle
+        let (range, partial) = get_field_type_completion_context(line, pos(15)).unwrap();
+        assert_eq!(partial, "My.Nam");
+        assert_eq!(range.start.character, 9);
+        assert_eq!(range.end.character, 15);
+
+        let line2 = "field:T";
+        let (range2, partial2) = get_field_type_completion_context(line2, pos(7)).unwrap();
+        assert_eq!(partial2, "T");
+        assert_eq!(range2.start.character, 6);
+        assert_eq!(range2.end.character, 7);
+    }
+
+    #[test]
+    fn test_get_root_type_completion_context() {
+        let line = "root_type My.Namespace.T";
+        let pos = |character| Position { line: 0, character };
+
+        // Cursor at the end
+        let (range, partial) = get_root_type_completion_context(line, pos(24)).unwrap();
+        assert_eq!(partial, "My.Namespace.T");
+        assert_eq!(range.start.character, 10);
+        assert_eq!(range.end.character, 24);
+
+        // Cursor in the middle
+        let (range, partial) = get_root_type_completion_context(line, pos(16)).unwrap();
+        assert_eq!(partial, "My.Nam");
+        assert_eq!(range.start.character, 10);
+        assert_eq!(range.end.character, 16);
+
+        let line2 = "root_type T";
+        let (range2, partial2) = get_root_type_completion_context(line2, pos(11)).unwrap();
+        assert_eq!(partial2, "T");
+        assert_eq!(range2.start.character, 10);
+        assert_eq!(range2.end.character, 11);
+
+        let line3 = "  root_type T";
+        let (range3, partial3) = get_root_type_completion_context(line3, pos(13)).unwrap();
+        assert_eq!(partial3, "T");
+        assert_eq!(range3.start.character, 12);
+        assert_eq!(range3.end.character, 13);
     }
 
     #[test]
