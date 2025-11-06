@@ -1,6 +1,6 @@
 use crate::analysis::WorkspaceSnapshot;
 use crate::ext::duration::DurationFormat;
-use crate::symbol_table::SymbolKind;
+use crate::symbol_table::{Symbol, SymbolKind};
 use crate::utils::paths::uri_to_path_buf;
 use log::debug;
 use once_cell::sync::Lazy;
@@ -170,6 +170,7 @@ fn handle_attribute_completion(
 
 fn handle_field_type_completion(
     snapshot: &WorkspaceSnapshot,
+    path: &PathBuf,
     line: &str,
     position: Position,
 ) -> Option<CompletionResponse> {
@@ -236,16 +237,20 @@ fn handle_field_type_completion(
                 base_name.clone()
             };
 
+            let (additional_text_edits, preview_text) =
+                generate_include_text_edit(snapshot, path, symbol);
+
             items.push(CompletionItem {
                 label: base_name.clone(),
                 text_edit: Some(CompletionTextEdit::Edit(TextEdit { range, new_text })),
+                additional_text_edits,
                 filter_text: Some(qualified_name.clone()),
                 sort_text: Some(sort_text),
                 kind: Some(kind),
                 detail: Some(detail),
                 label_details: Some(CompletionItemLabelDetails {
                     detail: None, // for function signatures or type annotations, neither of which are relevant for us.
-                    description: symbol.info.namespace_str(), // for fully qualified name or file path. TODO: support extra edit for include
+                    description: preview_text.or(symbol.info.namespace_str()), // for fully qualified name or file path.
                 }),
                 documentation: symbol.info.documentation.as_ref().map(|doc| {
                     Documentation::MarkupContent(MarkupContent {
@@ -392,6 +397,7 @@ fn field_sort_text(
 
 fn handle_root_type_completion(
     snapshot: &WorkspaceSnapshot,
+    path: &PathBuf,
     line: &str,
     position: Position,
 ) -> Option<CompletionResponse> {
@@ -417,14 +423,18 @@ fn handle_root_type_completion(
                     base_name.clone()
                 };
 
+                let (additional_text_edits, preview_text) =
+                    generate_include_text_edit(snapshot, path, symbol);
+
                 items.push(CompletionItem {
                     label: base_name.clone(),
                     text_edit: Some(CompletionTextEdit::Edit(TextEdit { range, new_text })),
+                    additional_text_edits,
                     kind: Some(CompletionItemKind::CLASS),
                     detail: Some(symbol.type_name().to_string()),
                     label_details: Some(CompletionItemLabelDetails {
                         detail: None,
-                        description: symbol.info.namespace_str(),
+                        description: preview_text.or(symbol.info.namespace_str()), // for fully qualified name or file path.
                     }),
                     documentation: symbol.info.documentation.as_ref().map(|doc| {
                         Documentation::MarkupContent(MarkupContent {
@@ -584,16 +594,17 @@ pub async fn handle_completion<'a>(
         return Ok(None);
     }
 
-    let response =
-        if let Some(response) = handle_attribute_completion(snapshot, &path, position, &line) {
-            Some(response)
-        } else if let Some(response) = handle_root_type_completion(snapshot, &line, position) {
-            Some(response)
-        } else if let Some(response) = handle_field_type_completion(snapshot, &line, position) {
-            Some(response)
-        } else {
-            handle_keyword_completion(snapshot, &line)
-        };
+    let response = if let Some(response) =
+        handle_attribute_completion(snapshot, &path, position, &line)
+    {
+        Some(response)
+    } else if let Some(response) = handle_root_type_completion(snapshot, &path, &line, position) {
+        Some(response)
+    } else if let Some(response) = handle_field_type_completion(snapshot, &path, &line, position) {
+        Some(response)
+    } else {
+        handle_keyword_completion(snapshot, &line)
+    };
 
     let elapsed = start.elapsed();
     debug!(
@@ -611,9 +622,64 @@ pub async fn handle_completion<'a>(
     Ok(response)
 }
 
+fn generate_include_text_edit(
+    snapshot: &WorkspaceSnapshot,
+    path: &PathBuf,
+    symbol: &Symbol,
+) -> (Option<Vec<TextEdit>>, Option<String>) {
+    if symbol.info.location.path != *path {
+        let is_already_included = snapshot
+            .dependencies
+            .includes
+            .get(path)
+            .map_or(false, |includes| {
+                includes.iter().any(|p| p == &symbol.info.location.path)
+            });
+
+        if !is_already_included {
+            if let Some(relative_path) =
+                pathdiff::diff_paths(&symbol.info.location.path, path.parent().unwrap())
+            {
+                if let Some(doc) = snapshot.documents.get(path) {
+                    let edit = generate_include_edit(&doc, &relative_path.to_string_lossy());
+                    let preview = edit.new_text.trim().strip_suffix(";").map(String::from);
+                    return (Some(vec![edit]), preview);
+                }
+            }
+        }
+    }
+    (None, None)
+}
+
+fn generate_include_edit(doc: &Rope, relative_path: &str) -> TextEdit {
+    let last_include_line = doc
+        .lines()
+        .enumerate()
+        .filter(|(_, line)| line.to_string().trim().starts_with("include "))
+        .last()
+        .map(|(i, _)| i as u32);
+
+    let include_insert_line = last_include_line.map_or(0, |line| line + 1);
+    let include_insert_pos = Position::new(include_insert_line, 0);
+
+    let mut new_text = format!("include \"{}\";\n", relative_path);
+
+    if let Some(line_after) = doc.lines().nth(include_insert_line as usize) {
+        if !line_after.to_string().trim().is_empty() {
+            new_text.push('\n');
+        }
+    }
+
+    TextEdit {
+        range: Range::new(include_insert_pos, include_insert_pos),
+        new_text,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    use ropey::Rope;
 
     #[test]
     fn test_get_field_type_completion_context() {
@@ -702,5 +768,37 @@ mod tests {
             field_sort_text("bean", "one.two.", None, &["one", "two", "three"], false).0,
             true // Should suggest `one.two.three`.
         );
+    }
+
+    #[test]
+    fn test_generate_include_edit_no_includes_no_namespace() {
+        let doc = Rope::from_str("table MyTable {}");
+        let edit = generate_include_edit(&doc, "a.fbs");
+        assert_eq!(edit.new_text, "include \"a.fbs\";\n\n");
+        assert_eq!(edit.range.start.line, 0);
+    }
+
+    #[test]
+    fn test_generate_include_edit_no_includes_with_namespace() {
+        let doc = Rope::from_str("namespace MyNamespace;\n\ntable MyTable {}");
+        let edit = generate_include_edit(&doc, "a.fbs");
+        assert_eq!(edit.new_text, "include \"a.fbs\";\n\n");
+        assert_eq!(edit.range.start.line, 0);
+    }
+
+    #[test]
+    fn test_generate_include_edit_with_includes() {
+        let doc = Rope::from_str("include \"b.fbs\";\n\nnamespace MyNamespace;");
+        let edit = generate_include_edit(&doc, "a.fbs");
+        assert_eq!(edit.new_text, "include \"a.fbs\";\n");
+        assert_eq!(edit.range.start.line, 1);
+    }
+
+    #[test]
+    fn test_generate_include_edit_with_includes_no_gap() {
+        let doc = Rope::from_str("include \"b.fbs\";\nnamespace MyNamespace;");
+        let edit = generate_include_edit(&doc, "a.fbs");
+        assert_eq!(edit.new_text, "include \"a.fbs\";\n\n");
+        assert_eq!(edit.range.start.line, 1);
     }
 }
