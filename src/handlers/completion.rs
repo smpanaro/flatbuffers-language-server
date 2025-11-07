@@ -3,7 +3,6 @@ use crate::ext::duration::DurationFormat;
 use crate::symbol_table::{Symbol, SymbolKind};
 use crate::utils::paths::uri_to_path_buf;
 use log::debug;
-use once_cell::sync::Lazy;
 use regex::Regex;
 use ropey::Rope;
 use std::iter::once;
@@ -16,8 +15,8 @@ use tower_lsp_server::lsp_types::{
     Range, TextEdit,
 };
 
-static FIELD_RE: Lazy<Regex> = Lazy::new(|| Regex::new(r"^\s*(\w+)\s*:\s*([\w\.]*)").unwrap());
-static ROOT_TYPE_RE: Lazy<Regex> = Lazy::new(|| Regex::new(r"^\s*root_type\s+([\w\.]*)").unwrap());
+static FIELD_RE: std::sync::LazyLock<Regex> = std::sync::LazyLock::new(|| Regex::new(r"^\s*(\w+)\s*:\s*([\w\.]*)").unwrap());
+static ROOT_TYPE_RE: std::sync::LazyLock<Regex> = std::sync::LazyLock::new(|| Regex::new(r"^\s*root_type\s+([\w\.]*)").unwrap());
 
 fn handle_attribute_completion(
     snapshot: &WorkspaceSnapshot,
@@ -36,7 +35,7 @@ fn handle_attribute_completion(
         let trigger_text = &line[start_paren + 1..position.character as usize];
         let last_word = trigger_text
             .split(|c: char| c.is_whitespace() || c == ',' || c == ':')
-            .last()
+            .next_back()
             .unwrap_or("");
 
         let mut items = Vec::new();
@@ -79,13 +78,13 @@ fn handle_attribute_completion(
                         }
                     }
 
-                    let has_id_attribute = line.find("id:") != None;
+                    let has_id_attribute = line.contains("id:");
                     if !has_id_attribute {
                         let next_id = max_id + 1;
                         let label = if style_with_space {
-                            format!("id: {}", next_id)
+                            format!("id: {next_id}")
                         } else {
-                            format!("id:{}", next_id)
+                            format!("id:{next_id}")
                         };
 
                         let range = Range {
@@ -99,7 +98,7 @@ fn handle_attribute_completion(
                         let insert_text = Some(attribute_prefix.to_string() + &label);
                         items.push(CompletionItem {
                             label,
-                            insert_text: insert_text,
+                            insert_text,
                             kind: Some(CompletionItemKind::PROPERTY),
                             detail: Some("next available id".to_string()),
                             documentation: Some(Documentation::MarkupContent(MarkupContent {
@@ -111,9 +110,9 @@ fn handle_attribute_completion(
                                 TextEdit {
                                     range,
                                     new_text: if style_with_space {
-                                        format!("id: {}", next_id)
+                                        format!("id: {next_id}")
                                     } else {
-                                        format!("id:{}", next_id)
+                                        format!("id:{next_id}")
                                     },
                                 },
                             )),
@@ -141,9 +140,9 @@ fn handle_attribute_completion(
 
             if name.starts_with(last_word) {
                 let sort_text = if common_attributes.contains(&name.as_str()) {
-                    format!("0_{}", name)
+                    format!("0_{name}")
                 } else {
-                    format!("1_{}", name)
+                    format!("1_{name}")
                 };
                 let insert_suffix = if value_attributes.contains(&name.as_str()) {
                     ":"
@@ -152,7 +151,7 @@ fn handle_attribute_completion(
                 };
                 items.push(CompletionItem {
                     label: name.clone(),
-                    insert_text: Some(attribute_prefix.to_string() + &name + insert_suffix),
+                    insert_text: Some(attribute_prefix.to_string() + name + insert_suffix),
                     kind: Some(CompletionItemKind::PROPERTY),
                     documentation: Some(Documentation::MarkupContent(MarkupContent {
                         kind: MarkupKind::Markdown,
@@ -190,7 +189,7 @@ fn handle_field_type_completion(
     // Build a map to detect name collisions
     let mut name_collisions: std::collections::HashMap<String, usize> =
         std::collections::HashMap::new();
-    for entry in snapshot.symbols.global.iter() {
+    for entry in &snapshot.symbols.global {
         let symbol = entry.1;
         if let SymbolKind::Field(_) = &symbol.kind {
             continue;
@@ -199,7 +198,7 @@ fn handle_field_type_completion(
     }
 
     // User-defined symbols
-    for entry in snapshot.symbols.global.iter() {
+    for entry in &snapshot.symbols.global {
         let symbol = entry.1;
         let kind: CompletionItemKind = (&symbol.kind).into();
         if kind == CompletionItemKind::FIELD {
@@ -223,7 +222,7 @@ fn handle_field_type_completion(
         );
 
         if is_match {
-            let has_collision = name_collisions.get(base_name).map_or(false, |&c| c > 1);
+            let has_collision = name_collisions.get(base_name).is_some_and(|&c| c > 1);
 
             let detail = symbol.info.namespace_str().map_or_else(
                 || symbol.type_name().to_string(),
@@ -270,7 +269,7 @@ fn handle_field_type_completion(
             field_name,
             &partial_text,
             Some(&symbol.info.name),
-            &vec![],
+            &[],
             true,
         );
 
@@ -296,7 +295,7 @@ fn handle_field_type_completion(
             field_name,
             &partial_text,
             None,
-            &ns.split(".").collect::<Vec<_>>(),
+            &ns.split('.').collect::<Vec<_>>(),
             false,
         );
 
@@ -342,35 +341,35 @@ fn field_sort_text(
         .iter()
         .map(|&s| Some(s))
         .chain(once(symbol_name))
-        .filter_map(|p| p)
+        .flatten()
         .filter(|p| !p.is_empty())
         .collect::<Vec<_>>()
         .join(".");
 
     // Don't suggest a namespace if it is complete.
     if symbol_name.is_none() && partial_text == format!("{qualified_name}.") {
-        return (false, "".to_string());
+        return (false, String::new());
     }
 
     let (is_match, sort_prefix) = if let Some((ns_part, type_part)) = partial_text.rsplit_once('.')
     {
         // Case 1: User is typing a qualified name (e.g., "My.Api.")
         let is_ns_match = symbol_namespace.join(".").starts_with(ns_part);
-        let is_type_match = symbol_name.map_or(true, |sn| sn.starts_with(type_part));
+        let is_type_match = symbol_name.is_none_or(|sn| sn.starts_with(type_part));
         let is_a_match = is_ns_match && is_type_match;
         (is_a_match, if is_a_match { "0" } else { "4" })
     } else {
         // Case 2: User is typing a type name or namespace directly
-        let is_type_match = symbol_name.map_or(false, |sn| {
+        let is_type_match = symbol_name.is_some_and(|sn| {
             sn.to_lowercase().contains(&partial_text.to_lowercase())
         });
-        let is_type_prefix_match = symbol_name.map_or(false, |sn| {
+        let is_type_prefix_match = symbol_name.is_some_and(|sn| {
             sn.to_lowercase().starts_with(&partial_text.to_lowercase())
         });
         let is_ns_match = symbol_namespace
             .iter()
             .any(|ns| ns.starts_with(partial_text));
-        let field_name_contains_type = symbol_name.map_or(false, |sn| {
+        let field_name_contains_type = symbol_name.is_some_and(|sn| {
             field_name.to_lowercase().contains(&sn.to_lowercase())
         });
 
@@ -391,7 +390,7 @@ fn field_sort_text(
         }
     };
 
-    let sort_text = format!("{}_{}", sort_prefix, qualified_name);
+    let sort_text = format!("{sort_prefix}_{qualified_name}");
     (is_match, sort_text)
 }
 
@@ -404,7 +403,7 @@ fn handle_root_type_completion(
     let (range, partial_text) = get_root_type_completion_context(line, position)?;
 
     let mut items = Vec::new();
-    for entry in snapshot.symbols.global.iter() {
+    for entry in &snapshot.symbols.global {
         let symbol = entry.1;
         if let SymbolKind::Table(_) = &symbol.kind {
             let symbol = entry.1;
@@ -590,7 +589,7 @@ pub async fn handle_completion<'a>(
         return Ok(None);
     };
 
-    if should_suppress_completion(&*doc, position) {
+    if should_suppress_completion(&doc, position) {
         return Ok(None);
     }
 
@@ -632,7 +631,7 @@ fn generate_include_text_edit(
             .dependencies
             .includes
             .get(path)
-            .map_or(false, |includes| {
+            .is_some_and(|includes| {
                 includes.iter().any(|p| p == &symbol.info.location.path)
             });
 
@@ -662,7 +661,7 @@ fn generate_include_edit(doc: &Rope, relative_path: &str) -> TextEdit {
     let include_insert_line = last_include_line.map_or(0, |line| line + 1);
     let include_insert_pos = Position::new(include_insert_line, 0);
 
-    let mut new_text = format!("include \"{}\";\n", relative_path);
+    let mut new_text = format!("include \"{relative_path}\";\n");
 
     if let Some(line_after) = doc.lines().nth(include_insert_line as usize) {
         if !line_after.to_string().trim().is_empty() {

@@ -110,7 +110,7 @@ pub struct Field {
 }
 
 impl Symbol {
-    pub fn type_name(&self) -> &str {
+    #[must_use] pub fn type_name(&self) -> &str {
         match &self.kind {
             SymbolKind::Enum(_) => "enum",
             SymbolKind::Union(_) => "union",
@@ -121,7 +121,7 @@ impl Symbol {
         }
     }
 
-    pub fn find_symbol<'a>(&'a self, path: &PathBuf, pos: Position) -> Option<&'a Symbol> {
+    #[must_use] pub fn find_symbol<'a>(&'a self, path: &PathBuf, pos: Position) -> Option<&'a Symbol> {
         if self.info.location.path != *path {
             return None;
         }
@@ -162,7 +162,7 @@ impl Symbol {
         None
     }
 
-    pub fn hover_markdown(&self) -> String {
+    #[must_use] pub fn hover_markdown(&self) -> String {
         let mut code_content = String::new();
         if !self.info.namespace.is_empty() {
             code_content.push_str(&format!("namespace {};\n\n", self.info.namespace.join(".")));
@@ -189,7 +189,7 @@ impl Symbol {
         };
         code_content.push_str(&definition);
 
-        let mut markdown = format!("```flatbuffers\n{}\n```", code_content);
+        let mut markdown = format!("```flatbuffers\n{code_content}\n```");
 
         if let Some(doc) = &self.info.documentation {
             if !doc.is_empty() {
@@ -214,9 +214,9 @@ impl Symbol {
 
 impl SymbolTable {
     /// Create a new token map.
-    pub fn new(path: PathBuf) -> SymbolTable {
+    #[must_use] pub fn new(path: PathBuf) -> SymbolTable {
         SymbolTable {
-            path: path,
+            path,
             table: HashMap::with_capacity(2048),
         }
     }
@@ -225,11 +225,11 @@ impl SymbolTable {
         self.table.insert(key, symbol);
     }
 
-    pub fn contains_key(&self, key: &str) -> bool {
+    #[must_use] pub fn contains_key(&self, key: &str) -> bool {
         self.table.contains_key(key)
     }
 
-    pub fn get(&self, key: &str) -> Option<&Symbol> {
+    #[must_use] pub fn get(&self, key: &str) -> Option<&Symbol> {
         self.table.get(key)
     }
 
@@ -237,14 +237,14 @@ impl SymbolTable {
         self.table.values()
     }
 
-    pub fn into_inner(self) -> HashMap<String, Symbol> {
+    #[must_use] pub fn into_inner(self) -> HashMap<String, Symbol> {
         self.table
     }
 }
 
 fn fields_markdown(fields: &[Symbol]) -> String {
     if fields.is_empty() {
-        return "".to_string();
+        return String::new();
     }
     format!(
         "\n{}\n",
@@ -267,21 +267,21 @@ fn fields_markdown(fields: &[Symbol]) -> String {
 }
 
 impl Table {
-    pub fn fields_markdown(&self) -> String {
+    #[must_use] pub fn fields_markdown(&self) -> String {
         fields_markdown(&self.fields)
     }
 }
 
 impl Struct {
-    pub fn fields_markdown(&self) -> String {
+    #[must_use] pub fn fields_markdown(&self) -> String {
         fields_markdown(&self.fields)
     }
 }
 
 impl Enum {
-    pub fn variants_markdown(&self) -> String {
+    #[must_use] pub fn variants_markdown(&self) -> String {
         if self.variants.is_empty() {
-            return "".to_string();
+            return String::new();
         }
         format!(
             "\n{}\n",
@@ -307,7 +307,7 @@ impl Enum {
                         "{doc}  {} = {}{}",
                         v.name,
                         v.value,
-                        if !is_last { "," } else { "" }
+                        if is_last { "" } else { "," }
                     )
                 })
                 .collect::<Vec<String>>()
@@ -317,9 +317,9 @@ impl Enum {
 }
 
 impl Union {
-    pub fn variants_markdown(&self) -> String {
+    #[must_use] pub fn variants_markdown(&self) -> String {
         if self.variants.is_empty() {
-            return "".to_string();
+            return String::new();
         }
         format!(
             "\n{}\n",
@@ -360,7 +360,7 @@ impl From<&SymbolKind> for lsp_types::SymbolKind {
 }
 
 impl SymbolInfo {
-    pub fn qualified_name(&self) -> String {
+    #[must_use] pub fn qualified_name(&self) -> String {
         if self.namespace.is_empty() {
             self.name.clone()
         } else {
@@ -368,7 +368,7 @@ impl SymbolInfo {
         }
     }
 
-    pub fn namespace_str(&self) -> Option<String> {
+    #[must_use] pub fn namespace_str(&self) -> Option<String> {
         if self.namespace.is_empty() {
             None
         } else {

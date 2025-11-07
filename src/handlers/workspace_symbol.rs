@@ -51,7 +51,7 @@ pub async fn handle_workspace_symbol<'a>(
             symbol: &'a WorkspaceSymbol,
         }
 
-        impl<'a> AsRef<str> for SymbolWrapper<'a> {
+        impl AsRef<str> for SymbolWrapper<'_> {
             fn as_ref(&self) -> &str {
                 &self.symbol.name
             }

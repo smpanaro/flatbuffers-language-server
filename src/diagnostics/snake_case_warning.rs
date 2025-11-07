@@ -4,7 +4,6 @@ use crate::diagnostics::codes::DiagnosticCode;
 use crate::diagnostics::ErrorDiagnosticHandler;
 use heck::ToSnakeCase;
 use log::error;
-use once_cell::sync::Lazy;
 use regex::Regex;
 use tower_lsp_server::lsp_types::{
     CodeDescription, Diagnostic, DiagnosticSeverity, NumberOrString, Position, Range, Uri,
@@ -12,7 +11,7 @@ use tower_lsp_server::lsp_types::{
 
 // Regex to capture snake_case warnings:
 // <1file>:<2line>: <3col>: warning: field names should be lowercase snake_case, got: <4name>
-static SNAKE_CASE_RE: Lazy<Regex> = Lazy::new(|| {
+static SNAKE_CASE_RE: std::sync::LazyLock<Regex> = std::sync::LazyLock::new(|| {
     Regex::new(
         r"^(.+?):(\d+): (\d+): warning: field names should be lowercase snake_case, got: (.+)$",
     )
@@ -28,7 +27,7 @@ impl ErrorDiagnosticHandler for SnakeCaseWarningHandler {
         };
         let file_path = captures[1].trim();
         let Ok(file_path) = fs::canonicalize(file_path) else {
-            error!("failed to canonicalize file: {}", file_path);
+            error!("failed to canonicalize file: {file_path}");
             return None;
         };
 
@@ -39,8 +38,7 @@ impl ErrorDiagnosticHandler for SnakeCaseWarningHandler {
 
         let replacement = name.to_snake_case();
         let message = format!(
-            "field `{}` should be in snake_case e.g. `{}`",
-            name, replacement
+            "field `{name}` should be in snake_case e.g. `{replacement}`"
         );
 
         let range = Range {

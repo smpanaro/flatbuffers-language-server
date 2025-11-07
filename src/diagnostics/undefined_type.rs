@@ -3,17 +3,16 @@ use std::{fs, path::PathBuf};
 use crate::diagnostics::codes::DiagnosticCode;
 use crate::diagnostics::ErrorDiagnosticHandler;
 use log::error;
-use once_cell::sync::Lazy;
 use regex::Regex;
 use serde_json::json;
 use tower_lsp_server::lsp_types::{Diagnostic, DiagnosticSeverity, Position, Range};
 
-static RE: Lazy<Regex> = Lazy::new(|| {
+static RE: std::sync::LazyLock<Regex> = std::sync::LazyLock::new(|| {
     Regex::new(r"^.+?:(\d+):\s*(\d+):\s+(error|warning):\s+(.+?)(?:, originally at: (.+?):(\d+)(?::(\d+)-(\d+):(\d+))?)?$")
         .unwrap()
 });
 
-static UNDEFINED_TYPE_RE: Lazy<Regex> = Lazy::new(|| {
+static UNDEFINED_TYPE_RE: std::sync::LazyLock<Regex> = std::sync::LazyLock::new(|| {
     Regex::new(r"type referenced but not defined \(check namespace\): ((?:\w+\.?)*)").unwrap()
 });
 
@@ -111,7 +110,7 @@ impl ErrorDiagnosticHandler for UndefinedTypeHandler {
                 }
 
                 let Ok(file_path) = fs::canonicalize(file_path) else {
-                    error!("failed to canonicalize file: {}", file_path);
+                    error!("failed to canonicalize file: {file_path}");
                     return None;
                 };
 

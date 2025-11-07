@@ -10,7 +10,7 @@ pub enum DiagnosticCode {
 }
 
 impl DiagnosticCode {
-    pub fn as_str(&self) -> &'static str {
+    #[must_use] pub fn as_str(&self) -> &'static str {
         match self {
             DiagnosticCode::ExpectingToken => "expecting-token",
             DiagnosticCode::NonSnakeCase => "non-snake-case",

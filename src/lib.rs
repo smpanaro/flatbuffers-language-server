@@ -23,7 +23,7 @@ pub async fn run() {
     let (service, socket) = LspService::new(|client| {
         let logger = LspLogger::new(client.clone());
         if let Err(e) = log::set_boxed_logger(Box::new(logger)) {
-            eprintln!("Error setting logger: {}", e);
+            eprintln!("Error setting logger: {e}");
         }
         log::set_max_level(log::LevelFilter::Debug);
 

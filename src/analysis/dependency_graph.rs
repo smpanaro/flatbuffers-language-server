@@ -44,7 +44,7 @@ impl DependencyGraph {
             return included_by_files;
         }
 
-        return vec![];
+        vec![]
     }
 }
 

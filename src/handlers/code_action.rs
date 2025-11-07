@@ -4,6 +4,7 @@ use crate::utils::paths::uri_to_path_buf;
 
 use serde_json::Value;
 use std::collections::HashMap;
+use std::string::ToString;
 use tower_lsp_server::jsonrpc::Result;
 use tower_lsp_server::lsp_types::{
     CodeAction, CodeActionKind, CodeActionOrCommand, CodeActionParams, CodeActionResponse,
@@ -36,8 +37,10 @@ pub async fn handle_code_action<'a>(
                 }
                 if let Some(data) = &diagnostic.data {
                     if let Some(expected) = data.get("expected").and_then(|v| v.as_str()) {
-                        let end_of_line =
-                            data.get("eol").and_then(|v| v.as_bool()).unwrap_or(false);
+                        let end_of_line = data
+                            .get("eol")
+                            .and_then(serde_json::Value::as_bool)
+                            .unwrap_or(false);
                         if expected != "identifier" {
                             let start = diagnostic.range.start;
                             let insertion_pos = Position::new(
@@ -53,7 +56,7 @@ pub async fn handle_code_action<'a>(
                             let mut changes = HashMap::new();
                             changes.insert(uri.clone(), vec![text_edit]);
                             let code_action = CodeAction {
-                                title: format!("Add missing `{}`", expected),
+                                title: format!("Add missing `{expected}`"),
                                 kind: Some(CodeActionKind::QUICKFIX),
                                 diagnostics: Some(vec![diagnostic.clone()]),
                                 edit: Some(WorkspaceEdit {
@@ -85,7 +88,7 @@ pub async fn handle_code_action<'a>(
                             ..Default::default()
                         };
                         let code_action = CodeAction {
-                            title: format!("Rename `{}` to `{}`", original_name, replacement_name),
+                            title: format!("Rename `{original_name}` to `{replacement_name}`"),
                             kind: Some(CodeActionKind::QUICKFIX),
                             diagnostics: Some(vec![diagnostic.clone()]),
                             edit: Some(edit),
@@ -106,7 +109,7 @@ pub async fn handle_code_action<'a>(
                             character: 0,
                         },
                     },
-                    new_text: "".to_string(),
+                    new_text: String::new(),
                 };
                 let mut changes = HashMap::new();
                 changes.insert(uri.clone(), vec![text_edit]);
@@ -134,7 +137,7 @@ pub async fn handle_code_action<'a>(
     Ok(Some(code_actions))
 }
 
-/// Creates a CodeActionOrCommand representing a quick fix.
+/// Creates a `CodeActionOrCommand` representing a quick fix.
 fn create_quickfix(
     uri: &Uri,
     diagnostic: &Diagnostic,
@@ -159,7 +162,7 @@ fn create_quickfix(
     CodeActionOrCommand::CodeAction(code_action)
 }
 
-/// Generates a list of code actions for an "UndefinedType" diagnostic.
+/// Generates a list of code actions for an "`UndefinedType`" diagnostic.
 ///
 /// This function searches the workspace for symbols that match the undefined type
 /// and suggests actions such as importing the symbol, qualifying the type name,
@@ -194,10 +197,9 @@ fn generate_undefined_type_code_actions(
     let matching_symbols: Vec<_> = snapshot
         .symbols
         .global
-        .iter()
-        .map(|(_, s)| s)
+        .values()
         .filter(|s| s.info.qualified_name() == type_name || s.info.name == type_name)
-        .map(|s| s.clone())
+        .cloned()
         .collect();
 
     if matching_symbols.is_empty() {
@@ -209,7 +211,7 @@ fn generate_undefined_type_code_actions(
             .trim()
             .strip_prefix("namespace ")
             .and_then(|ns| ns.strip_suffix(';'))
-            .map(|ns| ns.trim().split('.').map(|s| s.to_string()).collect())
+            .map(|ns| ns.trim().split('.').map(ToString::to_string).collect())
     });
 
     let last_include_line = doc
@@ -224,37 +226,36 @@ fn generate_undefined_type_code_actions(
     let mut code_actions = Vec::new();
 
     for symbol in matching_symbols {
-        let symbol_path = symbol.info.location.path.to_path_buf();
+        let symbol_path = symbol.info.location.path.clone();
         let Some(relative_path) = pathdiff::diff_paths(&symbol_path, current_dir) else {
             continue;
         };
         let relative_path_str = relative_path.to_str().unwrap_or_default();
 
-        let is_already_included =
-            snapshot
-                .dependencies
-                .includes
-                .get(&current_path)
-                .map_or(false, |includes| {
-                    includes
-                        .iter()
-                        .any(|include_path| include_path == &symbol_path)
-                });
+        let is_already_included = snapshot
+            .dependencies
+            .includes
+            .get(&current_path)
+            .is_some_and(|includes| {
+                includes
+                    .iter()
+                    .any(|include_path| include_path == &symbol_path)
+            });
 
         let has_existing_includes = last_include_line.is_some();
-        let include_line = format!("include \"{}\";\n", relative_path_str);
-        let include_edit = if !is_already_included {
+        let include_line = format!("include \"{relative_path_str}\";\n");
+        let include_edit = if is_already_included {
+            None
+        } else {
             Some(TextEdit {
                 range: Range::new(include_insert_pos, include_insert_pos),
-                new_text: if !has_existing_includes {
+                new_text: if has_existing_includes {
+                    include_line.clone()
+                } else {
                     // Add a gap after the first include.
                     format!("{}\n", include_line.clone())
-                } else {
-                    include_line.clone()
                 },
             })
-        } else {
-            None
         };
 
         // type_name is the token from the file, as parsed.
@@ -287,10 +288,10 @@ fn generate_undefined_type_code_actions(
                 }
                 Some(_) => {
                     // File namespace exists but is different. Only offer to qualify.
-                    let import_suffix = if !is_already_included {
-                        format!(" and import from `{}`", relative_path_str)
+                    let import_suffix = if is_already_included {
+                        String::new()
                     } else {
-                        "".to_string()
+                        format!(" and import from `{relative_path_str}`")
                     };
                     let mut qualify_edits = include_edit.clone().into_iter().collect::<Vec<_>>();
                     qualify_edits.push(TextEdit {
@@ -306,10 +307,10 @@ fn generate_undefined_type_code_actions(
                 }
                 None => {
                     // No file namespace. Offer both qualification and setting the namespace.
-                    let import_suffix = if !is_already_included {
-                        format!(" and import from `{}`", relative_path_str)
+                    let import_suffix = if is_already_included {
+                        String::new()
                     } else {
-                        "".to_string()
+                        format!(" and import from `{relative_path_str}`")
                     };
 
                     // Action 1: Qualify the type.
@@ -338,18 +339,18 @@ fn generate_undefined_type_code_actions(
                             // Add gap between includes and namespace.
                             if has_existing_includes {
                                 // Maintain # of lines between includes and next declaration.
-                                format!("{}\n{}", include_line, namespace_line)
+                                format!("{include_line}\n{namespace_line}")
                             } else {
                                 // Add a gap for between namespace and next declaration.
-                                format!("{}\n{}\n", include_line, namespace_line)
+                                format!("{include_line}\n{namespace_line}\n")
                             }
                         } else if has_existing_includes {
                             // Add gap between includes and namespace.
                             // Maintain # of lines between includes and next declaration.
-                            format!("\n{}", namespace_line)
+                            format!("\n{namespace_line}")
                         } else {
                             // Add gap between namespace and next declaration.
-                            format!("{}\n", namespace_line)
+                            format!("{namespace_line}\n")
                         };
 
                         let namespace_edits = vec![TextEdit {

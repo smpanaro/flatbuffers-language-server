@@ -28,7 +28,7 @@ pub fn analyze_deprecated_fields(
             if let SymbolKind::Field(field_def) = &field.kind {
                 if field_def.deprecated {
                     diagnostics
-                        .entry(field.info.location.path.to_path_buf())
+                        .entry(field.info.location.path.clone())
                         .or_default()
                         .push(Diagnostic {
                             range: Range {
@@ -103,7 +103,7 @@ pub fn analyze_unused_includes(
     // Need to get from the file's includes to each of these.
     let mut symbol_defining_files = HashSet::new();
     for used_type in &used_types {
-        if let Some(symbol) = st.get(&used_type) {
+        if let Some(symbol) = st.get(used_type) {
             let path = &symbol.info.location.path;
             // TODO: Make everything PathBuf.
             if let Some(path_str) = path.to_str() {
@@ -122,11 +122,10 @@ pub fn analyze_unused_includes(
     let include_statements: Vec<_> = file_contents
         .lines()
         .enumerate()
-        .into_iter()
         .filter(|(_, line)| line.trim().starts_with("include"))
-        .filter_map(|(idx, line)| line.split("\"").nth(1).map(|path| (idx, line, path))) // contents inside the quotes
+        .filter_map(|(idx, line)| line.split('"').nth(1).map(|path| (idx, line, path))) // contents inside the quotes
         .filter_map(|(idx, line, path)| {
-            resolve_include(&current_dir, path, search_paths)
+            resolve_include(current_dir, path, search_paths)
                 .map(|abs_path| (idx, line, path, abs_path))
         })
         .map(|(idx, line, path, abs_path)| IncludeStatement {
@@ -150,7 +149,7 @@ pub fn analyze_unused_includes(
 
         let provides_directly =
             symbol_defining_files.contains(include.canonical.to_str().unwrap_or_default());
-        if provides_directly || provides_transitively.len() > 0 {
+        if provides_directly || !provides_transitively.is_empty() {
             continue;
         }
 
@@ -182,7 +181,7 @@ fn resolve_include(
 ) -> Option<PathBuf> {
     // 1. Check against search paths
     for search_path in search_paths {
-        if let Some(canon) = fs::canonicalize(search_path.join(include_path)).ok() {
+        if let Ok(canon) = fs::canonicalize(search_path.join(include_path)) {
             if canon.exists() {
                 return Some(canon);
             }
@@ -190,7 +189,7 @@ fn resolve_include(
     }
 
     // 2. Check relative to current file's directory
-    if let Some(canon) = fs::canonicalize(current_dir.join(include_path)).ok() {
+    if let Ok(canon) = fs::canonicalize(current_dir.join(include_path)) {
         if canon.exists() {
             return Some(canon);
         }
@@ -199,9 +198,9 @@ fn resolve_include(
     None
 }
 
-fn transitive_include_graph<'a>(
-    direct_include_graph: &'a HashMap<String, Vec<String>>,
-) -> HashMap<&'a str, HashSet<&'a str>> {
+fn transitive_include_graph(
+    direct_include_graph: &HashMap<String, Vec<String>>,
+) -> HashMap<&str, HashSet<&str>> {
     fn dfs<'a>(
         node: &'a str,
         graph: &'a HashMap<String, Vec<String>>,

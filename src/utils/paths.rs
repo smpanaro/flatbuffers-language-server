@@ -6,13 +6,13 @@ use tower_lsp_server::UriExt;
 
 pub fn is_flatbuffer_schema(uri: &Uri) -> bool {
     uri.to_file_path()
-        .map_or(false, |p| is_flatbuffer_schema_path(&p))
+        .is_some_and(|p| is_flatbuffer_schema_path(&p))
 }
 
-pub fn is_flatbuffer_schema_path(path: &Path) -> bool {
+#[must_use] pub fn is_flatbuffer_schema_path(path: &Path) -> bool {
     path.extension()
         .and_then(|ext| ext.to_str())
-        .map_or(false, |ext| ext.eq_ignore_ascii_case("fbs"))
+        .is_some_and(|ext| ext.eq_ignore_ascii_case("fbs"))
 }
 
 pub fn get_intermediate_paths<P, I>(starting_path: &Path, roots: I) -> HashSet<PathBuf>
@@ -49,10 +49,10 @@ pub fn uri_to_path_buf(uri: &Uri) -> Result<PathBuf, String> {
         .ok_or(format!("URL is not a file path: {uri:?}"))
         .and_then(|p| {
             fs::canonicalize(&p)
-                .map_err(|err| format!("Failed to canonicalize path '{:?}': {}", p, err))
+                .map_err(|err| format!("Failed to canonicalize path '{p:?}': {err}"))
         })
 }
 
 pub fn path_buf_to_uri(path: &Path) -> Result<Uri, String> {
-    Uri::from_file_path(path).ok_or(format!("Failed to convert path to URL: {:?}", path))
+    Uri::from_file_path(path).ok_or(format!("Failed to convert path to URL: {path:?}"))
 }

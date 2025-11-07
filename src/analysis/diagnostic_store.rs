@@ -21,7 +21,7 @@ impl DiagnosticStore {
             });
 
             let old_diags = self.per_file.get(&path);
-            let has_changed = old_diags.map_or(true, |d| *d != new_diags);
+            let has_changed = old_diags.is_none_or(|d| *d != new_diags);
             if has_changed {
                 self.unpublished.insert(path.clone());
             }
@@ -39,7 +39,7 @@ impl DiagnosticStore {
             .collect()
     }
 
-    pub fn all(&self) -> &HashMap<PathBuf, Vec<Diagnostic>> {
+    #[must_use] pub fn all(&self) -> &HashMap<PathBuf, Vec<Diagnostic>> {
         &self.per_file
     }
 

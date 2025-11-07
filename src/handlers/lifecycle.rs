@@ -61,7 +61,7 @@ pub async fn handle_initialize(backend: &Backend, params: InitializeParams) {
         .iter()
         .map(|f| uri_to_path_buf(&f.uri).ok())
         .chain(once(get_root_path(&params)))
-        .filter_map(|p| p)
+        .flatten()
         .collect::<Vec<_>>();
     // Important: do not trigger a parse until the client is initialized.
     let mut layout = backend.analyzer.layout.write().await;

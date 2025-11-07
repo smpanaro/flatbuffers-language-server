@@ -17,7 +17,7 @@ pub struct WorkspaceSnapshot<'a> {
     pub documents: Arc<DashMap<PathBuf, Rope>>,
 }
 
-impl<'a> Deref for WorkspaceSnapshot<'a> {
+impl Deref for WorkspaceSnapshot<'_> {
     type Target = WorkspaceIndex;
 
     fn deref(&self) -> &Self::Target {
@@ -139,7 +139,7 @@ impl<'a> WorkspaceSnapshot<'a> {
         })
     }
 
-    pub fn find_enclosing_table(&self, path: &PathBuf, position: Position) -> Option<&Symbol> {
+    #[must_use] pub fn find_enclosing_table(&self, path: &PathBuf, position: Position) -> Option<&Symbol> {
         let mut symbols_before_cursor: Vec<_> = self
             .symbols
             .global

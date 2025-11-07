@@ -27,7 +27,7 @@ pub async fn handle_references<'a>(
     let mut references = Vec::new();
 
     // Find all references to this symbol across all files
-    for entry in snapshot.symbols.global.iter() {
+    for entry in &snapshot.symbols.global {
         let symbol = entry.1;
         let Ok(file_uri) = path_buf_to_uri(&symbol.info.location.path) else {
             continue;
@@ -63,7 +63,7 @@ pub async fn handle_references<'a>(
     }
 
     // Check for root_type declarations
-    for (path, root_type_info) in snapshot.root_types.root_types.iter() {
+    for (path, root_type_info) in &snapshot.root_types.root_types {
         let Ok(uri) = path_buf_to_uri(path) else {
             continue;
         };

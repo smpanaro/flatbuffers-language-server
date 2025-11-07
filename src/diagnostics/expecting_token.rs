@@ -3,14 +3,13 @@ use std::{fs, path::PathBuf};
 use crate::diagnostics::ErrorDiagnosticHandler;
 use crate::{diagnostics::codes::DiagnosticCode, utils::paths::path_buf_to_uri};
 use log::error;
-use once_cell::sync::Lazy;
 use regex::Regex;
 use serde_json;
 use tower_lsp_server::lsp_types::{
     Diagnostic, DiagnosticRelatedInformation, DiagnosticSeverity, Location, Position, Range,
 };
 
-static RE: Lazy<Regex> = Lazy::new(|| {
+static RE: std::sync::LazyLock<Regex> = std::sync::LazyLock::new(|| {
     Regex::new(r"^(.+?):\s*(\d+):\s*(\d+):\s*error:\s*expecting: (.+) instead got:\s*(.+)$")
         .unwrap()
 });
@@ -22,7 +21,7 @@ impl ErrorDiagnosticHandler for ExpectingTokenHandler {
         if let Some(captures) = RE.captures(line) {
             let file_path = captures[1].trim();
             let Ok(file_path) = fs::canonicalize(file_path) else {
-                error!("failed to canonicalize file: {}", file_path);
+                error!("failed to canonicalize file: {file_path}");
                 return None;
             };
             let Ok(file_url) = path_buf_to_uri(&file_path) else {
@@ -35,11 +34,10 @@ impl ErrorDiagnosticHandler for ExpectingTokenHandler {
             let unexpected_token = captures[5].trim().to_string();
 
             let message = if unexpected_token == "end of file" {
-                format!("expected `{}`, found `end of file`", expected_token)
+                format!("expected `{expected_token}`, found `end of file`")
             } else {
                 format!(
-                    "expected `{}`, found `{}`",
-                    expected_token, unexpected_token
+                    "expected `{expected_token}`, found `{unexpected_token}`"
                 )
             };
 
@@ -47,8 +45,7 @@ impl ErrorDiagnosticHandler for ExpectingTokenHandler {
             let cleaned_token = unexpected_token.replace('`', "");
             let adjusted_col = line_content
                 .find(&cleaned_token)
-                .map(|v| v as u32)
-                .unwrap_or(error_col_num);
+                .map_or(error_col_num, |v| v as u32);
 
             let line_before_error = &line_content[..adjusted_col as usize];
 
@@ -64,7 +61,7 @@ impl ErrorDiagnosticHandler for ExpectingTokenHandler {
 
                     loop {
                         let is_empty_or_comment =
-                            content.lines().nth(line as usize).map_or(true, |l| {
+                            content.lines().nth(line as usize).is_none_or(|l| {
                                 let trimmed = l.trim();
                                 trimmed.is_empty() || trimmed.starts_with("//")
                             });
@@ -111,8 +108,7 @@ impl ErrorDiagnosticHandler for ExpectingTokenHandler {
                 let cleaned_token = unexpected_token.replace('`', "");
                 let adjusted_col = line_content
                     .find(&cleaned_token)
-                    .map(|v| v as u32)
-                    .unwrap_or(error_col_num);
+                    .map_or(error_col_num, |v| v as u32);
 
                 let unexpected_token_range = Range::new(
                     Position::new(error_line_num, adjusted_col),
@@ -132,7 +128,7 @@ impl ErrorDiagnosticHandler for ExpectingTokenHandler {
                     uri: file_url.clone(),
                     range,
                 },
-                message: format!("add `{}` here", expected_token),
+                message: format!("add `{expected_token}` here"),
             });
 
             return Some((

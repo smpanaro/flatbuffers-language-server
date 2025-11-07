@@ -2,7 +2,6 @@ use std::{fs, path::PathBuf};
 
 use crate::diagnostics::ErrorDiagnosticHandler;
 use log::error;
-use once_cell::sync::Lazy;
 use regex::Regex;
 use tower_lsp_server::{
     lsp_types::{
@@ -14,7 +13,7 @@ use tower_lsp_server::{
 
 // Regex to captures duplicate definitions:
 // <1file>:<2line>: <3col>: error: <4type_name> already exists: <5name> previously defined at <6original_file>:<7original_line>:<8original_col>
-static DUPLICATE_RE: Lazy<Regex> = Lazy::new(|| {
+static DUPLICATE_RE: std::sync::LazyLock<Regex> = std::sync::LazyLock::new(|| {
     Regex::new(r"^(.+?):(\d+): (\d+): error: (.+?) already exists: (.+?) previously defined at (.+?):(\d+):(\d+)$")
         .unwrap()
 });
@@ -26,15 +25,15 @@ impl ErrorDiagnosticHandler for DuplicateDefinitionHandler {
         if let Some(captures) = DUPLICATE_RE.captures(line) {
             let file_path = captures[1].trim();
             let Ok(file_path) = fs::canonicalize(file_path) else {
-                error!("failed to canonicalize file: {}", file_path);
+                error!("failed to canonicalize file: {file_path}");
                 return None;
             };
 
             let name = captures[5].trim().to_string();
-            let unqualified_name = name.split('.').last().unwrap_or(name.as_str());
+            let unqualified_name = name.split('.').next_back().unwrap_or(name.as_str());
             let unqualified_name_length = unqualified_name.chars().count() as u32;
 
-            let message = format!("the name `{}` is defined multiple times", name);
+            let message = format!("the name `{name}` is defined multiple times");
             let curr_line = captures[2].parse().unwrap_or(1) - 1;
             let curr_char = captures[3]
                 .parse()
@@ -77,7 +76,7 @@ impl ErrorDiagnosticHandler for DuplicateDefinitionHandler {
                     message,
                     related_information: Some(vec![DiagnosticRelatedInformation {
                         location: previous_location,
-                        message: format!("previous definition of `{}` defined here", name),
+                        message: format!("previous definition of `{name}` defined here"),
                     }]),
                     ..Default::default()
                 },

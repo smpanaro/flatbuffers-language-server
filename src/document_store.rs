@@ -13,7 +13,14 @@ pub struct DocumentStore {
     pub document_map: DashMap<PathBuf, Rope>,
 }
 
+impl Default for DocumentStore {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl DocumentStore {
+    #[must_use]
     pub fn new() -> Self {
         Self {
             document_map: DashMap::new(),

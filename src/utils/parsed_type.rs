@@ -14,7 +14,7 @@ pub struct ParsedType {
     pub array_size: Option<TypePart>,
 }
 
-pub fn parse_type(text: &str, range: Range) -> Option<ParsedType> {
+#[must_use] pub fn parse_type(text: &str, range: Range) -> Option<ParsedType> {
     let mut parser = TypeParser::new(text, range.start);
     parser.parse()
 }
@@ -140,7 +140,7 @@ impl<'a> TypeParser<'a> {
 }
 
 impl ParsedType {
-    pub fn qualified_name(&self) -> String {
+    #[must_use] pub fn qualified_name(&self) -> String {
         let mut parts = self
             .namespace
             .iter()
@@ -149,7 +149,7 @@ impl ParsedType {
         parts.push(&self.type_name.text);
         parts.join(".")
     }
-    pub fn to_display_string(&self) -> String {
+    #[must_use] pub fn to_display_string(&self) -> String {
         let mut s = String::new();
         if self.is_vector {
             s.push('[');

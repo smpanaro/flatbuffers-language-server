@@ -17,7 +17,7 @@ pub struct LspLogger {
 }
 
 impl LspLogger {
-    pub fn new(client: Client) -> Self {
+    #[must_use] pub fn new(client: Client) -> Self {
         Self { client }
     }
 }

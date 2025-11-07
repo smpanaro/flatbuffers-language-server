@@ -11,6 +11,7 @@ use std::ffi::c_char;
 use std::ffi::{CStr, CString};
 use std::fs;
 use std::path::{Path, PathBuf};
+use std::string::ToString;
 use tower_lsp_server::lsp_types::{Diagnostic, Position, Range};
 
 #[derive(Default)]
@@ -21,7 +22,7 @@ pub struct ParseResult {
     pub root_type_info: Option<RootTypeInfo>,
 }
 
-/// A trait for parsing FlatBuffers schema files.
+/// A trait for parsing `FlatBuffers` schema files.
 pub trait Parser {
     fn parse(&self, path: &Path, content: &str, search_paths: &[PathBuf]) -> ParseResult;
 }
@@ -149,7 +150,7 @@ unsafe fn extract_structs_and_tables(
         };
 
         let namespace: Vec<String> = c_str_to_optional_string(def_info.namespace_)
-            .map(|s| s.split('.').map(|p| p.to_string()).collect())
+            .map(|s| s.split('.').map(ToString::to_string).collect())
             .unwrap_or_default();
 
         let qualified_name = if namespace.is_empty() {
@@ -160,16 +161,13 @@ unsafe fn extract_structs_and_tables(
 
         let file = c_str_to_string(def_info.file);
         let Ok(file_path) = fs::canonicalize(&file) else {
-            error!("failed to canonicalize file: {}", file);
+            error!("failed to canonicalize file: {file}");
             continue;
         };
 
         if st.contains_key(&qualified_name) {
             // This should not happen. The flatbuffers parser returns rich errors for duplicate definitions.
-            error!(
-                "found duplicate symbol while extracting structs: {}",
-                qualified_name
-            );
+            error!("found duplicate symbol while extracting structs: {qualified_name}");
             continue;
         }
 
@@ -250,7 +248,7 @@ unsafe fn extract_enums_and_unions(parser_ptr: *mut ffi::FlatbuffersParser, st: 
         };
 
         let namespace: Vec<String> = c_str_to_optional_string(def_info.namespace_)
-            .map(|s| s.split('.').map(|p| p.to_string()).collect())
+            .map(|s| s.split('.').map(ToString::to_string).collect())
             .unwrap_or_default();
 
         let qualified_name = if namespace.is_empty() {
@@ -261,16 +259,13 @@ unsafe fn extract_enums_and_unions(parser_ptr: *mut ffi::FlatbuffersParser, st: 
 
         let file = c_str_to_string(def_info.file);
         let Ok(file_path) = fs::canonicalize(&file) else {
-            error!("failed to canonicalize file: {}", file);
+            error!("failed to canonicalize file: {file}");
             continue;
         };
 
         if st.contains_key(&qualified_name) {
             // This should not happen. The flatbuffers parser returns rich errors for duplicate definitions.
-            error!(
-                "found duplicate symbol while extracting enums: {}",
-                qualified_name
-            );
+            error!("found duplicate symbol while extracting enums: {qualified_name}");
             continue;
         }
 
@@ -282,7 +277,7 @@ unsafe fn extract_enums_and_unions(parser_ptr: *mut ffi::FlatbuffersParser, st: 
                 continue;
             };
 
-            if def_info.is_union && (val_name == "NONE" || val_name == "") {
+            if def_info.is_union && (val_name == "NONE" || val_name.is_empty()) {
                 continue;
             }
             variants.push((val_name, val_info));
@@ -327,7 +322,7 @@ unsafe fn extract_enums_and_unions(parser_ptr: *mut ffi::FlatbuffersParser, st: 
                         }
                     })
                     .collect(),
-                underlying_type: underlying_type,
+                underlying_type,
             })
         };
 
@@ -356,7 +351,7 @@ unsafe fn extract_root_type(parser_ptr: *mut ffi::FlatbuffersParser) -> Option<R
     let file = c_str_to_string(root_def.file);
 
     let Ok(file_path) = fs::canonicalize(&file) else {
-        error!("failed to canonicalize file: {}", file);
+        error!("failed to canonicalize file: {file}");
         return None;
     };
 
@@ -408,7 +403,7 @@ unsafe fn build_include_graph(
             .and_then(|p| fs::canonicalize(p).ok())
             .map(|p| p.to_string_lossy().into_owned())
             {
-                includes.push(include_path.to_owned());
+                includes.push(include_path.clone());
             }
         }
         include_graph.insert(canonical_file_path, includes);

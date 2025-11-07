@@ -18,6 +18,6 @@ impl DurationFormat for Duration {
         if self.as_nanos() > 0 {
             return format!("{}ns", self.as_nanos());
         }
-        return format!("{:?}", self);
+        format!("{self:?}")
     }
 }

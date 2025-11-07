@@ -16,15 +16,21 @@ use crate::{
 /// Maintains the workspace file and folder layout.
 #[derive(Debug)]
 pub struct WorkspaceLayout {
-    /// Paths that have a known_file as a descendant.
+    /// Paths that have a `known_file` as a descendant.
     pub search_paths: HashSet<PathBuf>,
     pub workspace_roots: HashSet<PathBuf>,
-    /// Known FlatBuffers schema files.
+    /// Known `FlatBuffers` schema files.
     known_files: HashSet<PathBuf>,
 }
 
+impl Default for WorkspaceLayout {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl WorkspaceLayout {
-    pub fn new() -> Self {
+    #[must_use] pub fn new() -> Self {
         Self {
             search_paths: HashSet::new(),
             workspace_roots: HashSet::new(),
@@ -86,7 +92,7 @@ impl WorkspaceLayout {
                 if let Ok(entry) = result {
                     if is_flatbuffer_schema_path(entry.path()) {
                         if let Ok(path) = fs::canonicalize(entry.path()) {
-                            new_files.insert(path.to_path_buf());
+                            new_files.insert(path.clone());
                         }
                     }
                 }
@@ -126,7 +132,7 @@ impl WorkspaceLayout {
     }
 
     /// Find the known files that have the provided path as a prefix.
-    pub fn known_matching_files(&self, path: &PathBuf) -> Vec<PathBuf> {
+    #[must_use] pub fn known_matching_files(&self, path: &PathBuf) -> Vec<PathBuf> {
         self.known_files
             .iter()
             .filter(|fp| fp.starts_with(path))
@@ -134,12 +140,12 @@ impl WorkspaceLayout {
             .collect()
     }
 
-    /// Update search_paths so it contains every directory that is
-    /// both an ancestor of a known_file and a descendant of a
-    /// workspace_root (include the roots themselves).
+    /// Update `search_paths` so it contains every directory that is
+    /// both an ancestor of a `known_file` and a descendant of a
+    /// `workspace_root` (include the roots themselves).
     fn update_search_paths(&mut self) {
         let mut new_paths = HashSet::new();
-        for f in self.known_files.iter() {
+        for f in &self.known_files {
             new_paths.extend(self.search_paths_for_path(f));
         }
 

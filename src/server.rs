@@ -45,7 +45,7 @@ pub struct Backend {
 }
 
 impl Backend {
-    pub fn new(client: Client) -> Self {
+    #[must_use] pub fn new(client: Client) -> Self {
         let documents = Arc::new(DocumentStore::new());
         let analysis = Arc::new(Analyzer::new(Arc::clone(&documents)));
         Self {
@@ -133,7 +133,7 @@ impl LanguageServer for Backend {
             })
             .await
         {
-            error!("failed to create initialized scan progress: {}", err)
+            error!("failed to create initialized scan progress: {err}");
         }
 
         self.client
@@ -150,7 +150,7 @@ impl LanguageServer for Backend {
             })
             .await;
 
-        let diagnostics = lifecycle::handle_initialized(&self).await;
+        let diagnostics = lifecycle::handle_initialized(self).await;
         for (uri, diags) in diagnostics {
             self.client.publish_diagnostics(uri, diags, None).await;
         }

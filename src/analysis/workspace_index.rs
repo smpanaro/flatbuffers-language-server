@@ -14,7 +14,7 @@ pub struct WorkspaceIndex {
 }
 
 impl WorkspaceIndex {
-    pub fn new() -> Self {
+    #[must_use] pub fn new() -> Self {
         Self {
             symbols: SymbolIndex::new(),
             dependencies: DependencyGraph::default(),

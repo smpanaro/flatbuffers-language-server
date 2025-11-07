@@ -28,7 +28,7 @@ pub struct Analyzer {
 }
 
 impl Analyzer {
-    pub fn new(documents: Arc<DocumentStore>) -> Self {
+    #[must_use] pub fn new(documents: Arc<DocumentStore>) -> Self {
         Self {
             index: RwLock::new(WorkspaceIndex::new()),
             documents,
@@ -52,7 +52,7 @@ impl Analyzer {
 
         let added_paths = added
             .iter()
-            .filter_map(|u| uri_to_path_buf(&u).ok())
+            .filter_map(|u| uri_to_path_buf(u).ok())
             .collect::<Vec<_>>();
         for addition in &added_paths {
             self.add_workspace_folder(addition.clone()).await;
@@ -93,7 +93,7 @@ impl Analyzer {
 
         let mut layout = self.layout.write().await;
         let mut index = self.index.write().await;
-        let to_remove = layout.known_matching_files(&folder);
+        let to_remove = layout.known_matching_files(folder);
 
         files_to_reparse = HashSet::new();
         for path in &to_remove {
@@ -109,8 +109,8 @@ impl Analyzer {
             }
         }
 
-        layout.remove_root(&folder);
-        index.diagnostics.remove_dir(&folder);
+        layout.remove_root(folder);
+        index.diagnostics.remove_dir(folder);
 
         FolderRemoval {
             removed: to_remove,
@@ -211,7 +211,7 @@ impl Analyzer {
             for event in changes {
                 // Canonicalize will fail for deleted files, so fall back to non-canonical.
                 // TODO: Figure out a better heuristic (resolve parents or store client<>canonical map or scan).
-                let non_canonical = event.uri.to_file_path().and_then(|p| Some(p.to_path_buf()));
+                let non_canonical = event.uri.to_file_path().map(|p| p.to_path_buf());
                 let Some(path) = uri_to_path_buf(&event.uri).ok().or(non_canonical) else {
                     continue;
                 };
@@ -237,7 +237,7 @@ impl Analyzer {
                         let deleted_files = layout.known_matching_files(&path);
                         for deleted in &deleted_files {
                             let affected_files = index
-                                .remove(&deleted)
+                                .remove(deleted)
                                 .into_iter()
                                 .filter(|p| !deleted_files.contains(p))
                                 .collect::<Vec<_>>();
@@ -278,7 +278,7 @@ impl FolderRemoval {
     fn diagnostics(&self) -> HashMap<Uri, Vec<Diagnostic>> {
         self.removed
             .iter()
-            .filter_map(|p| path_buf_to_uri(&p).ok())
+            .filter_map(|p| path_buf_to_uri(p).ok())
             .map(|u| (u, vec![]))
             .collect()
     }

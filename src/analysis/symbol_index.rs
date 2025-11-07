@@ -27,7 +27,7 @@ pub struct SymbolIndex {
 }
 
 impl SymbolIndex {
-    pub fn new() -> Self {
+    #[must_use] pub fn new() -> Self {
         let mut builtins = HashMap::new();
         populate_builtins(&mut builtins);
 
@@ -75,7 +75,7 @@ impl SymbolIndex {
         }
     }
 
-    pub fn namespaces(&self) -> HashSet<String> {
+    #[must_use] pub fn namespaces(&self) -> HashSet<String> {
         self.global
             .values()
             .map(|s| &s.info.namespace)
@@ -136,7 +136,7 @@ fn populate_keywords(keywords: &mut HashMap<String, String>) {
     let keywords_data = [
         (
             "table",
-            r#"A type with fields.
+            r"A type with fields.
 
 The main way of grouping data in FlatBuffers. Fields can be added and removed while maintaining backwards compatibility allowing the type to evolve over time.
 
@@ -146,11 +146,11 @@ table Film {
     duration:int (deprecated);
 }
 ```
-"#,
+",
         ),
         (
             "struct",
-            r#"A scalar type with fields.
+            r"A scalar type with fields.
 
 All fields are required and must be scalar types, including other structs. Once defined structs cannot be modified. Structs use less memory than tables and are faster to access.
 
@@ -161,11 +161,11 @@ struct Vec3 {
     z:float;
 }
 ```
-"#,
+",
         ),
         (
             "enum",
-            r#"A set of named constant values.
+            r"A set of named constant values.
 
 New values may be added, but old values cannot be removed or deprecated.
 
@@ -176,11 +176,11 @@ enum Size:byte {
   Large
 }
 ```
-"#,
+",
         ),
         (
             "union",
-            r#"A set of possible table types.
+            r"A set of possible table types.
 
 Essentially an enum stored with a value that is one of its types.
 
@@ -198,11 +198,11 @@ table View {
     medium:Medium; // Which Photo or Video was viewed.
 }
 ```
-"#,
+",
         ),
         (
             "namespace",
-            r#"Specify a namespace to use in generated code.
+            r"Specify a namespace to use in generated code.
 
 Support for this varies by language.
 
@@ -220,7 +220,7 @@ namespace Game {
     struct Player;
 // ...
 ```
-"#,
+",
         ),
         (
             "root_type",
@@ -266,8 +266,8 @@ table Watch {
         ),
     ];
 
-    for (kw, doc) in keywords_data.iter() {
-        keywords.insert(kw.to_string(), doc.to_string());
+    for (kw, doc) in &keywords_data {
+        keywords.insert((*kw).to_string(), (*doc).to_string());
     }
 }
 
