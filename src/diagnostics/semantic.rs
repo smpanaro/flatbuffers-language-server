@@ -1,9 +1,11 @@
 use crate::diagnostics::codes::DiagnosticCode;
 use std::collections::{HashMap, HashSet};
-use std::fs;
 use std::path::{Path, PathBuf};
+use std::{fs, u32};
 
-use tower_lsp_server::lsp_types::{Diagnostic, DiagnosticSeverity, DiagnosticTag, Position, Range};
+use tower_lsp_server::lsp_types::{
+    Diagnostic, DiagnosticSeverity, DiagnosticTag, NumberOrString, Position, Range,
+};
 
 use crate::symbol_table::{RootTypeInfo, SymbolKind, SymbolTable};
 
@@ -12,6 +14,10 @@ pub fn analyze_deprecated_fields(
     diagnostics: &mut HashMap<PathBuf, Vec<Diagnostic>>,
 ) {
     for symbol in st.values() {
+        if symbol.info.location.path != st.path {
+            continue;
+        }
+
         let fields = match &symbol.kind {
             SymbolKind::Table(t) => &t.fields,
             SymbolKind::Struct(s) => &s.fields,
@@ -41,6 +47,14 @@ pub fn analyze_deprecated_fields(
             }
         }
     }
+}
+
+struct IncludeStatement {
+    canonical: PathBuf,
+    /// text inside the quoted string
+    text: String,
+    line: u32,
+    line_length: u32,
 }
 
 pub fn analyze_unused_includes(
@@ -86,30 +100,15 @@ pub fn analyze_unused_includes(
         }
     }
 
-    let mut directly_required_files = HashSet::new();
+    // Need to get from the file's includes to each of these.
+    let mut symbol_defining_files = HashSet::new();
     for used_type in &used_types {
         if let Some(symbol) = st.get(&used_type) {
             let path = &symbol.info.location.path;
-            directly_required_files.insert(path.to_path_buf());
-        }
-    }
-
-    let mut required_files = HashSet::new();
-    let mut queue: Vec<_> = directly_required_files.into_iter().collect();
-    let mut visited = HashSet::new();
-
-    while let Some(file) = queue.pop() {
-        if visited.contains(&file) {
-            continue;
-        }
-        visited.insert(file.clone());
-        required_files.insert(file.clone());
-
-        if let Some(includes) = include_graph.get(file.to_str().unwrap()) {
-            for include in includes {
-                if let Some(canonical) = fs::canonicalize(include).ok() {
-                    queue.push(canonical.to_path_buf());
-                }
+            // TODO: Make everything PathBuf.
+            if let Some(path_str) = path.to_str() {
+                symbol_defining_files.insert(path_str);
+                log::info!("{} requires {path:?}", symbol.info.name);
             }
         }
     }
@@ -118,41 +117,61 @@ pub fn analyze_unused_includes(
         return;
     };
 
-    for (line_num, line) in file_contents.lines().enumerate() {
-        if !line.trim().starts_with("include") {
-            continue;
-        }
-        let Some(include_path) = line.split("\"").nth(1) else {
-            continue;
-        };
+    // Need to do this because although we know what files are imported,
+    // we don't know what lines those imports are on.
+    let include_statements: Vec<_> = file_contents
+        .lines()
+        .enumerate()
+        .into_iter()
+        .filter(|(_, line)| line.trim().starts_with("include"))
+        .filter_map(|(idx, line)| line.split("\"").nth(1).map(|path| (idx, line, path))) // contents inside the quotes
+        .filter_map(|(idx, line, path)| {
+            resolve_include(&current_dir, path, search_paths)
+                .map(|abs_path| (idx, line, path, abs_path))
+        })
+        .map(|(idx, line, path, abs_path)| IncludeStatement {
+            canonical: abs_path,
+            text: path.to_string(),
+            line: idx as u32,
+            line_length: line.len() as u32,
+        })
+        .collect();
 
-        if let Some(absolute_path) = resolve_include(&current_dir, include_path, search_paths) {
-            if !required_files.contains(&absolute_path) {
-                let range = Range {
-                    start: Position {
-                        line: line_num as u32,
-                        character: 0,
-                    },
-                    end: Position {
-                        line: line_num as u32,
-                        character: line.len() as u32,
-                    },
-                };
-                diagnostics
-                    .entry(st.path.clone())
-                    .or_default()
-                    .push(Diagnostic {
-                        range,
-                        severity: Some(DiagnosticSeverity::HINT),
-                        code: Some(tower_lsp_server::lsp_types::NumberOrString::String(
-                            DiagnosticCode::UnusedInclude.as_str().to_string(),
-                        )),
-                        message: format!("unused include: {}", include_path),
-                        tags: Some(vec![DiagnosticTag::UNNECESSARY]),
-                        ..Default::default()
-                    });
-            }
+    let file_to_transitive_includes = transitive_include_graph(include_graph);
+    for include in include_statements {
+        let provides_transitively: HashSet<_> = file_to_transitive_includes
+            .get(include.canonical.to_str().unwrap_or_default())
+            .map(|transitive_includes| {
+                transitive_includes
+                    .intersection(&symbol_defining_files)
+                    .collect()
+            })
+            .unwrap_or_default();
+
+        let provides_directly =
+            symbol_defining_files.contains(include.canonical.to_str().unwrap_or_default());
+        if provides_directly || provides_transitively.len() > 0 {
+            continue;
         }
+
+        let line = include.line;
+        let range = Range {
+            start: Position::new(line, 0),
+            end: Position::new(line, include.line_length),
+        };
+        diagnostics
+            .entry(st.path.clone())
+            .or_default()
+            .push(Diagnostic {
+                range,
+                severity: Some(DiagnosticSeverity::HINT),
+                code: Some(NumberOrString::String(
+                    DiagnosticCode::UnusedInclude.as_str().to_string(),
+                )),
+                message: format!("unused include: {}", include.text),
+                tags: Some(vec![DiagnosticTag::UNNECESSARY]),
+                ..Default::default()
+            });
     }
 }
 
@@ -178,4 +197,30 @@ fn resolve_include(
     }
 
     None
+}
+
+fn transitive_include_graph<'a>(
+    direct_include_graph: &'a HashMap<String, Vec<String>>,
+) -> HashMap<&'a str, HashSet<&'a str>> {
+    fn dfs<'a>(
+        node: &'a str,
+        graph: &'a HashMap<String, Vec<String>>,
+        visited: &mut HashSet<&'a str>,
+    ) {
+        if let Some(neighbors) = graph.get(node) {
+            for n in neighbors {
+                if visited.insert(n) {
+                    dfs(n, graph, visited);
+                }
+            }
+        }
+    }
+
+    let mut result = HashMap::new();
+    for key in direct_include_graph.keys() {
+        let mut visited = HashSet::new();
+        dfs(key, direct_include_graph, &mut visited);
+        result.insert(key.as_str(), visited);
+    }
+    result
 }

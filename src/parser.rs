@@ -84,11 +84,11 @@ unsafe fn parse_success_case(
     extract_structs_and_tables(parser_ptr, &mut st);
     extract_enums_and_unions(parser_ptr, &mut st);
 
-    let included_files = extract_all_included_files(parser_ptr);
+    let included_files = extract_all_included_files(parser_ptr); // recursive. includes transient includes.
     let root_type_info = extract_root_type(parser_ptr);
 
     let mut diagnostics = parse_error_messages(parser_ptr, path, content); // warnings
-    let include_graph = unsafe { build_include_graph(parser_ptr) };
+    let include_graph = unsafe { build_include_graph(parser_ptr) }; // direct includes only.
     diagnostics::semantic::analyze_unused_includes(
         &st,
         &mut diagnostics,
@@ -385,15 +385,18 @@ unsafe fn build_include_graph(
     let mut include_graph = HashMap::new();
     let num_files = ffi::get_num_files_with_includes(parser_ptr);
     for i in 0..num_files {
-        let Some(file_path) =
-            c_str_to_optional_string(ffi::get_file_with_includes_path(parser_ptr, i))
-                .and_then(|p| fs::canonicalize(p).ok())
-                .map(|p| p.to_string_lossy().into_owned())
-        else {
+        let Some((original_file_path, canonical_file_path)) = c_str_to_optional_string(
+            ffi::get_file_with_includes_path(parser_ptr, i),
+        )
+        .and_then(|original| {
+            fs::canonicalize(&original)
+                .ok()
+                .map(|canon| (original, canon.to_string_lossy().into_owned()))
+        }) else {
             continue;
         };
 
-        let c_file_path = CString::new(file_path.clone()).unwrap();
+        let c_file_path = CString::new(original_file_path.clone()).unwrap();
         let num_includes = ffi::get_num_includes_for_file(parser_ptr, c_file_path.as_ptr());
         let mut includes = Vec::new();
         for j in 0..num_includes {
@@ -408,7 +411,7 @@ unsafe fn build_include_graph(
                 includes.push(include_path.to_owned());
             }
         }
-        include_graph.insert(file_path, includes);
+        include_graph.insert(canonical_file_path, includes);
     }
     include_graph
 }

@@ -693,3 +693,121 @@ table MyTable {
     }
     assert_eq!(harness.call::<AllDiagnostics>(()).await.len(), 2);
 }
+
+#[tokio::test]
+async fn no_unused_conflicting_namespace() {
+    let schema_fixture = r#"
+include "../related/namespace_n.fbs";
+include "../related/namespace_x.fbs
+
+union MyTable {
+    N.OtherTable,
+}
+"#;
+    let namespace_n_fixture = "namespace N; table OtherTable {}";
+    let namespace_x_fixture = "namespace X; table OtherTable {}";
+
+    let mut harness = TestHarness::new();
+    harness
+        .initialize_and_open(&[
+            ("related/namespace_n.fbs", namespace_n_fixture),
+            ("related/namespace_x.fbs", namespace_x_fixture),
+            ("core/schema.fbs", schema_fixture),
+        ])
+        .await;
+
+    let schema_uri = harness.file_uri("core/schema.fbs");
+    let diagnostics = loop {
+        let param = harness
+            .notification::<notification::PublishDiagnostics>()
+            .await;
+        if schema_uri == param.uri {
+            break param.diagnostics;
+        } else {
+            assert!(param.diagnostics.is_empty());
+        }
+    };
+
+    {
+        let all_params = harness.call::<AllDiagnostics>(()).await;
+        let non_empty_others = all_params
+            .iter()
+            .filter(|&(uri, _)| uri != &schema_uri)
+            .filter(|(_, ds)| !ds.is_empty())
+            .collect::<Vec<_>>();
+        assert!(non_empty_others.is_empty());
+    }
+
+    assert_eq!(diagnostics.len(), 1);
+    assert_eq!(diagnostics[0].range.start.line, 2); // namespace_x.fbs
+}
+
+#[tokio::test]
+async fn no_unused_include_transient() {
+    let schema_fixture = r#"
+include "../related/middle.fbs"; // OtherTable is included transitively through this, so it is "used".
+
+table MyTable {
+    a: OtherTable;
+}
+"#;
+    let middle_fixture = r#"include "leaf.fbs";"#;
+    let leaf_fixture = "table OtherTable {}";
+
+    let mut harness = TestHarness::new();
+    harness
+        .initialize_and_open(&[
+            ("related/leaf.fbs", leaf_fixture),
+            ("related/middle.fbs", middle_fixture),
+            ("core/schema.fbs", schema_fixture),
+        ])
+        .await;
+
+    let middle_uri = harness.file_uri("related/middle.fbs");
+    for _ in 0..3 {
+        let param = harness
+            .notification::<notification::PublishDiagnostics>()
+            .await;
+        log::info!("uri: {}", param.uri.path());
+        if middle_uri == param.uri {
+            assert_eq!(param.diagnostics.len(), 1); // is unused in the context of middle.fbs (this is an argument that this diagnostic should be only evaluated for leaf files or at a "whole program" level)
+        } else {
+            assert!(param.diagnostics.is_empty());
+        }
+    }
+    assert_eq!(harness.call::<AllDiagnostics>(()).await.len(), 3);
+}
+
+#[tokio::test]
+async fn unused_include() {
+    let schema_fixture = r#"
+include "../related/other.fbs";
+
+table MyTable {}
+"#;
+    let other_fixture = "table OtherTable {}";
+
+    let mut harness = TestHarness::new();
+    harness
+        .initialize_and_open(&[
+            ("related/other.fbs", other_fixture),
+            ("core/schema.fbs", schema_fixture),
+        ])
+        .await;
+
+    let schema_uri = harness.file_uri("core/schema.fbs");
+    let diagnostic = loop {
+        let param = harness
+            .notification::<notification::PublishDiagnostics>()
+            .await;
+        if schema_uri == param.uri {
+            break param.diagnostics;
+        }
+        assert!(param.diagnostics.is_empty());
+    };
+    assert_eq!(harness.call::<AllDiagnostics>(()).await.len(), 2);
+
+    assert_eq!(diagnostic.len(), 1);
+    assert_eq!(diagnostic[0].range.start, Position::new(1, 0));
+    assert_eq!(diagnostic[0].range.end.line, 1);
+}

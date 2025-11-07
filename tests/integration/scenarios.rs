@@ -1,8 +1,8 @@
 use crate::{harness::TestHarness, helpers::parse_fixture};
 use insta::assert_snapshot;
 use tower_lsp_server::lsp_types::{
-    notification, request, HoverParams, Position, Range, TextDocumentIdentifier,
-    TextDocumentPositionParams, VersionedTextDocumentIdentifier,
+    notification, request, DiagnosticSeverity, HoverParams, Position, Range,
+    TextDocumentIdentifier, TextDocumentPositionParams, VersionedTextDocumentIdentifier,
 };
 
 #[tokio::test]
@@ -302,6 +302,63 @@ table WithError {
                 TextDocumentIdentifier::new(included_uri.clone()),
                 &included_error,
             )
+            .await;
+        let notifs = harness.pending_notifications::<notification::PublishDiagnostics>();
+        assert!(notifs.is_empty());
+    }
+}
+
+#[tokio::test]
+async fn saving_included_file_maintains_hints() {
+    let includer = r#"
+include "included.fbs";
+union Any { T }
+"#;
+
+    let included = r#"
+include "includer.fbs"; // unused
+
+table T {
+    depr: int (deprecated);
+}
+"#;
+
+    let mut harness = TestHarness::new();
+    let included_uri = harness.file_uri("included.fbs");
+
+    {
+        // Initial open.
+        harness
+            .initialize_and_open_some(
+                &[("includer.fbs", includer), ("included.fbs", included)],
+                &["included.fbs"],
+            )
+            .await;
+
+        for _ in 0..2 {
+            let params = harness
+                .notification::<notification::PublishDiagnostics>()
+                .await;
+            if included_uri == params.uri {
+                assert_eq!(params.diagnostics.len(), 2); // unused + deprecated
+                assert!(params
+                    .diagnostics
+                    .iter()
+                    .all(|d| d.severity == Some(DiagnosticSeverity::HINT)));
+            } else {
+                assert_eq!(params.diagnostics.len(), 0)
+            }
+        }
+    }
+
+    {
+        // Save to trigger reparsing of included + includer.
+        // Use the test-only synchronous save so that any new diagnostics
+        // are published before the sync response is received.
+        // Otherwise we don't have a non-timeout based way of knowing
+        // that no diagnostics were published.
+        harness
+            .save_file_sync(TextDocumentIdentifier::new(included_uri.clone()), &included)
             .await;
         let notifs = harness.pending_notifications::<notification::PublishDiagnostics>();
         assert!(notifs.is_empty());

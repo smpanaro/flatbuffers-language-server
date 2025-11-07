@@ -2,7 +2,6 @@ use crate::analysis::diagnostic_store::DiagnosticStore;
 use crate::analysis::root_type_store::RootTypeStore;
 use crate::analysis::symbol_index::SymbolIndex;
 use crate::{analysis::dependency_graph::DependencyGraph, parser::ParseResult};
-use std::iter::once;
 use std::path::{Path, PathBuf};
 
 /// An index of workspace semantic information.
@@ -40,11 +39,8 @@ impl WorkspaceIndex {
         self.dependencies.update(path, result.includes.clone());
 
         let mut diagnostics = result.diagnostics;
-        let all_parsed = once(path.to_path_buf()).chain(result.includes);
-        for path in all_parsed {
-            // Absence in parse result implies there were no diagnostics for this file.
-            diagnostics.entry(path).or_default();
-        }
+        // Absence in parse result implies there were no diagnostics for this file.
+        diagnostics.entry(path.to_path_buf()).or_default();
 
         self.diagnostics.update(diagnostics);
     }

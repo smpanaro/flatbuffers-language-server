@@ -6,6 +6,8 @@
 - Add namespace to completions so editors can show and style based on it.
 - Fixed invalid syntax in enum and union hovers. This resulted in incorrect highlighting in some editors.
 - Fixed reporting diagnostics from included files on the wrong line. This occasionally led to crashes.
+- Fixed unused include detection so it works in many more cases. This rarely worked previously.
+  - This will flag transitive-only imports as unused (e.g. B includes C but does not use it. A includes B and uses C). If you have this use case please open an issue.
 
 ## 0.0.1 - October 19, 2025
 
