@@ -1,6 +1,8 @@
 use crate::harness::TestHarness;
 use insta::assert_snapshot;
-use tower_lsp_server::lsp_types::{request, WorkspaceSymbolParams};
+use tower_lsp_server::lsp_types::{
+    request, PartialResultParams, WorkDoneProgressParams, WorkspaceSymbolParams,
+};
 
 async fn get_workspace_symbols(workspace: &[(&str, &str)], query: &str) -> String {
     let mut harness = TestHarness::new();
@@ -16,8 +18,8 @@ async fn get_workspace_symbols(workspace: &[(&str, &str)], query: &str) -> Strin
     let response = harness
         .call::<request::WorkspaceSymbolRequest>(WorkspaceSymbolParams {
             query: query.to_string(),
-            work_done_progress_params: Default::default(),
-            partial_result_params: Default::default(),
+            work_done_progress_params: WorkDoneProgressParams::default(),
+            partial_result_params: PartialResultParams::default(),
         })
         .await
         .unwrap();
@@ -31,7 +33,7 @@ async fn get_workspace_symbols(workspace: &[(&str, &str)], query: &str) -> Strin
 async fn workspace_symbol_returns_all_symbols() {
     let workspace = &[(
         "schema.fbs",
-        r#"
+        r"
 table MyTable {
     a: int;
 }
@@ -48,7 +50,7 @@ enum MyEnum: byte {
 union MyUnion {
     MyTable,
 }
-"#,
+",
     )];
 
     let response = get_workspace_symbols(workspace, "").await;
@@ -59,7 +61,7 @@ union MyUnion {
 async fn workspace_symbol_fuzzy_match() {
     let workspace = &[(
         "schema.fbs",
-        r#"
+        r"
 table MyTable {
     a: int;
 }
@@ -76,7 +78,7 @@ enum MyEnum: byte {
 union MyUnion {
     MyTable,
 }
-"#,
+",
     )];
 
     let response = get_workspace_symbols(workspace, "MyT").await;

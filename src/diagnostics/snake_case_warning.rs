@@ -1,7 +1,7 @@
 use std::{fs, path::PathBuf, str::FromStr};
 
-use crate::diagnostics::codes::DiagnosticCode;
 use crate::diagnostics::ErrorDiagnosticHandler;
+use crate::{diagnostics::codes::DiagnosticCode, utils::as_pos_idx};
 use heck::ToSnakeCase;
 use log::error;
 use regex::Regex;
@@ -22,9 +22,7 @@ pub struct SnakeCaseWarningHandler;
 
 impl ErrorDiagnosticHandler for SnakeCaseWarningHandler {
     fn handle(&self, line: &str, _content: &str) -> Option<(PathBuf, Diagnostic)> {
-        let Some(captures) = SNAKE_CASE_RE.captures(line) else {
-            return None;
-        };
+        let captures = SNAKE_CASE_RE.captures(line)?;
         let file_path = captures[1].trim();
         let Ok(file_path) = fs::canonicalize(file_path) else {
             error!("failed to canonicalize file: {file_path}");
@@ -34,22 +32,14 @@ impl ErrorDiagnosticHandler for SnakeCaseWarningHandler {
         let line_num: u32 = captures[2].parse().unwrap_or(1u32).saturating_sub(1);
         let col_num: u32 = captures[3].parse().unwrap_or(1);
         let name = captures[4].trim();
-        let name_length = name.chars().count() as u32;
+        let name_length = as_pos_idx(name.chars().count());
 
         let replacement = name.to_snake_case();
-        let message = format!(
-            "field `{name}` should be in snake_case e.g. `{replacement}`"
-        );
+        let message = format!("field `{name}` should be in snake_case e.g. `{replacement}`");
 
         let range = Range {
-            start: Position {
-                line: line_num,
-                character: col_num.saturating_sub(name_length),
-            },
-            end: Position {
-                line: line_num,
-                character: col_num,
-            },
+            start: Position::new(line_num, col_num.saturating_sub(name_length)),
+            end: Position::new(line_num, col_num),
         };
 
         Some((

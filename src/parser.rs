@@ -4,6 +4,7 @@ use crate::symbol_table::{
     Enum, EnumVariant, Field, RootTypeInfo, Struct, Symbol, SymbolInfo, SymbolKind, SymbolTable,
     Table, Union, UnionVariant,
 };
+use crate::utils::as_pos_idx;
 use crate::utils::parsed_type::parse_type;
 use log::{debug, error};
 use std::collections::HashMap;
@@ -32,9 +33,8 @@ pub struct FlatcFFIParser;
 
 impl Parser for FlatcFFIParser {
     fn parse(&self, path: &Path, content: &str, search_paths: &[PathBuf]) -> ParseResult {
-        let c_content = match CString::new(content) {
-            Ok(s) => s,
-            Err(_) => return Default::default(), // Content has null bytes
+        let Ok(c_content) = CString::new(content) else {
+            return ParseResult::default();
         };
         let c_filename = CString::new(path.to_str().unwrap_or_default()).unwrap();
 
@@ -54,7 +54,7 @@ impl Parser for FlatcFFIParser {
                 c_path_ptrs.as_mut_ptr(),
             );
             if parser_ptr.is_null() {
-                return Default::default();
+                return ParseResult::default();
             }
 
             let result = if ffi::is_parser_success(parser_ptr) {
@@ -218,8 +218,8 @@ unsafe fn extract_structs_and_tables(
         } else {
             SymbolKind::Struct(Struct {
                 fields,
-                size: def_info.bytesize as usize,
-                alignment: def_info.minalign as usize,
+                size: def_info.bytesize,
+                alignment: def_info.minalign,
             })
         };
 
@@ -429,7 +429,7 @@ unsafe fn c_str_to_optional_string(ptr: *const std::os::raw::c_char) -> Option<S
 
 /// Helper to create a symbol and its location.
 fn create_symbol(
-    file_path: &PathBuf,
+    file_path: &Path,
     name: String,
     namespace: Vec<String>,
     line: u32,
@@ -438,9 +438,9 @@ fn create_symbol(
     documentation: Option<String>,
 ) -> Symbol {
     let location = crate::symbol_table::Location {
-        path: file_path.clone(),
+        path: file_path.to_path_buf(),
         range: Range::new(
-            Position::new(line, col - (name.chars().count() as u32)),
+            Position::new(line, col - as_pos_idx(name.chars().count())),
             Position::new(line, col),
         ),
     };

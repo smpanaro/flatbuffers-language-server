@@ -1,10 +1,15 @@
+#![allow(
+    clippy::mutable_key_type,
+    reason = "Rename lsp_types definition has Uri keys"
+)]
+
 use crate::harness::TestHarness;
 use crate::helpers::parse_fixture;
 use std::collections::HashMap;
 use std::str::FromStr;
 use tower_lsp_server::lsp_types::{
     request, Position, Range, RenameParams, TextDocumentIdentifier, TextDocumentPositionParams,
-    TextEdit, Uri,
+    TextEdit, Uri, WorkDoneProgressParams,
 };
 
 async fn get_rename_edits(
@@ -27,7 +32,7 @@ async fn get_rename_edits(
                 text_document: TextDocumentIdentifier { uri: main_file_uri },
                 position,
             },
-            work_done_progress_params: Default::default(),
+            work_done_progress_params: WorkDoneProgressParams::default(),
             new_name: new_name.to_string(),
         })
         .await
@@ -38,12 +43,12 @@ async fn get_rename_edits(
 
 #[tokio::test]
 async fn rename_table_no_namespace() {
-    let fixture = r#"
+    let fixture = r"
 table My$0Table {
     a: int;
 }
 root_type MyTable;
-"#;
+";
     let mut changes = get_rename_edits(fixture, &[], "NewTableName").await;
     assert_eq!(changes.len(), 1);
 
@@ -69,12 +74,12 @@ root_type MyTable;
 
 #[tokio::test]
 async fn rename_table_from_usage() {
-    let fixture = r#"
+    let fixture = r"
 table MyTable {
     a: int;
 }
 root_type My$0Table;
-"#;
+";
     let mut changes = get_rename_edits(fixture, &[], "NewTableName").await;
     assert_eq!(changes.len(), 1);
 
@@ -100,13 +105,13 @@ root_type My$0Table;
 
 #[tokio::test]
 async fn rename_table_with_namespace() {
-    let fixture = r#"
+    let fixture = r"
 namespace My.Api;
 table My$0Table {
     a: int;
 }
 root_type My.Api.MyTable;
-"#;
+";
     let mut changes = get_rename_edits(fixture, &[], "NewTableName").await;
     assert_eq!(changes.len(), 1);
 
@@ -136,11 +141,11 @@ async fn rename_across_files() {
 include "other.fbs";
 root_type Other$0Table;
 "#;
-    let other_fixture = r#"
+    let other_fixture = r"
 table OtherTable {
     a: int;
 }
-"#;
+";
 
     let changes = get_rename_edits(main_fixture, &[("other.fbs", other_fixture)], "NewName").await;
     assert_eq!(changes.len(), 2);

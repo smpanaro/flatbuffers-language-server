@@ -1,7 +1,8 @@
 use crate::harness::TestHarness;
 use insta::assert_snapshot;
 use tower_lsp_server::lsp_types::{
-    request, CodeActionContext, CodeActionParams, TextDocumentIdentifier,
+    request, CodeActionContext, CodeActionParams, PartialResultParams, TextDocumentIdentifier,
+    WorkDoneProgressParams,
 };
 
 /// Gets code actions for a multi-file workspace, waiting for a specific diagnostic to appear first.
@@ -19,12 +20,7 @@ async fn get_code_actions_for_workspace(
     let diagnostic = harness
         .wait_for_diagnostic(diagnostic_message)
         .await
-        .unwrap_or_else(|| {
-            panic!(
-                "Did not receive expected diagnostic: {}",
-                diagnostic_message
-            )
-        });
+        .unwrap_or_else(|| panic!("Did not receive expected diagnostic: {diagnostic_message}"));
 
     let response = harness
         .call::<request::CodeActionRequest>(CodeActionParams {
@@ -35,8 +31,8 @@ async fn get_code_actions_for_workspace(
                 only: None,
                 trigger_kind: None,
             },
-            work_done_progress_params: Default::default(),
-            partial_result_params: Default::default(),
+            work_done_progress_params: WorkDoneProgressParams::default(),
+            partial_result_params: PartialResultParams::default(),
         })
         .await;
 
@@ -85,13 +81,13 @@ table MyTable {
 
 #[tokio::test]
 async fn import_undefined_type() {
-    let definition_fixture = r#"namespace MyNamespace;
+    let definition_fixture = r"namespace MyNamespace;
 table MyTable {}
-"#;
-    let schema_fixture = r#"table T {
+";
+    let schema_fixture = r"table T {
     f: MyTable;
 }
-"#;
+";
     let mut harness = TestHarness::new();
     let response = get_code_actions_for_workspace(
         &mut harness,
@@ -110,16 +106,16 @@ table MyTable {}
 
 #[tokio::test]
 async fn import_undefined_type_matching_namespace() {
-    let definition_fixture = r#"namespace MyNamespace;
+    let definition_fixture = r"namespace MyNamespace;
 
 table MyTable {}
-"#;
-    let schema_fixture = r#"namespace MyNamespace;
+";
+    let schema_fixture = r"namespace MyNamespace;
 
 table T {
     f: MyTable;
 }
-"#;
+";
     let mut harness = TestHarness::new();
     let response = get_code_actions_for_workspace(
         &mut harness,
@@ -138,14 +134,14 @@ table T {
 
 #[tokio::test]
 async fn import_qualified_undefined_type() {
-    let definition_fixture = r#"namespace MyNamespace;
+    let definition_fixture = r"namespace MyNamespace;
 
 table MyTable {}
-"#;
-    let schema_fixture = r#"table T {
+";
+    let schema_fixture = r"table T {
     f: MyNamespace.MyTable;
 }
-"#;
+";
     let mut harness = TestHarness::new();
     let response = get_code_actions_for_workspace(
         &mut harness,
@@ -164,16 +160,16 @@ table MyTable {}
 
 #[tokio::test]
 async fn import_undefined_type_with_existing_namespace() {
-    let definition_fixture = r#"namespace MyNamespace;
+    let definition_fixture = r"namespace MyNamespace;
 
 table MyTable {}
-"#;
-    let schema_fixture = r#"namespace OtherNamespace;
+";
+    let schema_fixture = r"namespace OtherNamespace;
 
 table T {
     f: MyTable;
 }
-"#;
+";
     let mut harness = TestHarness::new();
     let response = get_code_actions_for_workspace(
         &mut harness,
@@ -192,10 +188,10 @@ table T {
 
 #[tokio::test]
 async fn import_undefined_type_already_included() {
-    let definition_fixture = r#"namespace MyNamespace;
+    let definition_fixture = r"namespace MyNamespace;
 
 table MyTable {}
-"#;
+";
     let schema_fixture = r#"include "definitions.fbs";
 
 table T {
@@ -239,8 +235,8 @@ async fn no_code_action_for_other_diagnostics() {
                 only: None,
                 trigger_kind: None,
             },
-            work_done_progress_params: Default::default(),
-            partial_result_params: Default::default(),
+            work_done_progress_params: WorkDoneProgressParams::default(),
+            partial_result_params: PartialResultParams::default(),
         })
         .await;
 
@@ -253,11 +249,11 @@ async fn no_code_action_for_other_diagnostics() {
 
 #[tokio::test]
 async fn expecting_token_quickfix() {
-    let schema_fixture = r#"
+    let schema_fixture = r"
 table Foo {
     foo: [int;
 }
-"#;
+";
 
     let mut harness = TestHarness::new();
     let response = get_code_actions_for_workspace(
@@ -274,9 +270,9 @@ table Foo {
 
 #[tokio::test]
 async fn missing_semicolon_quickfix() {
-    let schema_fixture = r#"
+    let schema_fixture = r"
 table MyTable {}
-root_type MyTable"#;
+root_type MyTable";
     let mut harness = TestHarness::new();
     let response = get_code_actions_for_workspace(
         &mut harness,
@@ -340,8 +336,8 @@ async fn code_action_for_undefined_type_in_unopened_file() {
                 only: Some(vec![tower_lsp_server::lsp_types::CodeActionKind::QUICKFIX]),
                 trigger_kind: None,
             },
-            work_done_progress_params: Default::default(),
-            partial_result_params: Default::default(),
+            work_done_progress_params: WorkDoneProgressParams::default(),
+            partial_result_params: PartialResultParams::default(),
         })
         .await
         .unwrap();

@@ -25,10 +25,10 @@ async fn test_analyzer_root_type_store() {
     fs::create_dir(&schemas_dir).unwrap();
 
     let common_fbs_path = schemas_dir.join("common.fbs");
-    let common_fbs_content = r#"
+    let common_fbs_content = r"
         namespace schemas;
         table CommonObject { value:int; }
-    "#;
+    ";
     fs::write(&common_fbs_path, common_fbs_content).unwrap();
 
     let root_fbs_path = dir.path().join("root.fbs");
@@ -40,10 +40,10 @@ async fn test_analyzer_root_type_store() {
     fs::write(&root_fbs_path, root_fbs_content).unwrap();
 
     let other_fbs_path = dir.path().join("other.fbs");
-    let other_fbs_content = r#"
+    let other_fbs_content = r"
         table OtherRoot { field:string; }
         root_type OtherRoot;
-    "#;
+    ";
     fs::write(&other_fbs_path, other_fbs_content).unwrap();
 
     // 2. Populate the document store.

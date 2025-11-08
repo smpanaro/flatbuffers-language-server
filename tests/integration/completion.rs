@@ -4,7 +4,8 @@ use flatbuffers_language_server::ext::all_diagnostics::AllDiagnostics;
 use insta::assert_snapshot;
 use tower_lsp_server::lsp_types::{
     notification, request, CompletionContext, CompletionParams, CompletionTriggerKind,
-    TextDocumentIdentifier, TextDocumentPositionParams, VersionedTextDocumentIdentifier,
+    PartialResultParams, TextDocumentIdentifier, TextDocumentPositionParams,
+    VersionedTextDocumentIdentifier, WorkDoneProgressParams,
 };
 
 async fn get_completion_list(
@@ -59,8 +60,8 @@ async fn get_completion_list(
                 text_document: TextDocumentIdentifier { uri: main_file_uri },
                 position,
             },
-            work_done_progress_params: Default::default(),
-            partial_result_params: Default::default(),
+            work_done_progress_params: WorkDoneProgressParams::default(),
+            partial_result_params: PartialResultParams::default(),
             context: Some(CompletionContext {
                 trigger_kind: CompletionTriggerKind::INVOKED,
                 trigger_character: None,
@@ -83,7 +84,7 @@ async fn get_completion_list(
 
 #[tokio::test]
 async fn completion_for_type_in_field_name() {
-    let fixture = r#"
+    let fixture = r"
 // Naive alpha sort would place this first.
 table Abacus {}
 
@@ -95,7 +96,7 @@ table Widget {
 table Collection {
     primaryWidget: $0
 }
-"#;
+";
     let mut harness = TestHarness::new();
     let response = get_completion_list(&mut harness, fixture, &[]).await;
     assert_snapshot!(response);
@@ -103,7 +104,7 @@ table Collection {
 
 #[tokio::test]
 async fn completion_for_root_type() {
-    let fixture = r#"
+    let fixture = r"
 namespace MyNamespace;
 
 table MyTable {}
@@ -111,7 +112,7 @@ table AnotherTable {}
 struct RootTypeCannotBeStruct { a: int; }
 
 root_type $0
-"#;
+";
     let mut harness = TestHarness::new();
     let response = get_completion_list(&mut harness, fixture, &[]).await;
     assert_snapshot!(response);
@@ -119,10 +120,10 @@ root_type $0
 
 #[tokio::test]
 async fn completion_for_keywords() {
-    let fixture = r#"
+    let fixture = r"
 table T {}
 t$0
-"#;
+";
     let mut harness = TestHarness::new();
     let response = get_completion_list(&mut harness, fixture, &[]).await;
     assert_snapshot!(response);
@@ -130,11 +131,11 @@ t$0
 
 #[tokio::test]
 async fn no_completion_on_new_line_in_table_block() {
-    let fixture = r#"
+    let fixture = r"
 table MyTable {
     $0
 }
-"#;
+";
     let mut harness = TestHarness::new();
     let response = get_completion_list(&mut harness, fixture, &[]).await;
     assert_snapshot!(response);
@@ -142,12 +143,12 @@ table MyTable {
 
 #[tokio::test]
 async fn no_completion_on_new_line_in_struct_block() {
-    let fixture = r#"
+    let fixture = r"
 struct MyStruct {
     a: int;
     $0
 }
-"#;
+";
     let mut harness = TestHarness::new();
     let response = get_completion_list(&mut harness, fixture, &[]).await;
     assert_snapshot!(response);
@@ -155,11 +156,11 @@ struct MyStruct {
 
 #[tokio::test]
 async fn completion_includes_all_primitive_types() {
-    let fixture = r#"
+    let fixture = r"
 table MyTable {
     a: $0
 }
-"#;
+";
     let mut harness = TestHarness::new();
     let response = get_completion_list(&mut harness, fixture, &[]).await;
     assert_snapshot!(response);
@@ -167,11 +168,11 @@ table MyTable {
 
 #[tokio::test]
 async fn completion_for_field_type_prefix() {
-    let fixture = r#"
+    let fixture = r"
 table MyTable {
     a: u$0
 }
-"#;
+";
     let mut harness = TestHarness::new();
     let response = get_completion_list(&mut harness, fixture, &[]).await;
     assert_snapshot!(response);
@@ -179,19 +180,19 @@ table MyTable {
 
 #[tokio::test]
 async fn completion_from_included_file() {
-    let included_fixture = r#"
+    let included_fixture = r"
 /// A table from another file.
 table IncludedTable {}
 struct IncludedStruct {
     must_have_a_field: float;
 }
-"#;
+";
 
-    let main_fixture = r#"
+    let main_fixture = r"
 table MyTable {
     a: In$0
 }
-"#;
+";
     let mut harness = TestHarness::new();
     let response = get_completion_list(
         &mut harness,
@@ -205,9 +206,9 @@ table MyTable {
 #[tokio::test]
 #[ignore = "Table attribute completions are not supported."]
 async fn completion_for_attribute_on_table() {
-    let fixture = r#"
+    let fixture = r"
 table MyTable($0) {}
-"#;
+";
     let mut harness = TestHarness::new();
     let response = get_completion_list(&mut harness, fixture, &[]).await;
     assert_snapshot!(response);
@@ -216,9 +217,9 @@ table MyTable($0) {}
 #[tokio::test]
 #[ignore = "Table attribute completions are not supported."]
 async fn completion_for_filtered_attribute_on_table() {
-    let fixture = r#"
+    let fixture = r"
 table MyTable(h$0) {}
-"#;
+";
     let mut harness = TestHarness::new();
     let response = get_completion_list(&mut harness, fixture, &[]).await;
     assert_snapshot!(response);
@@ -226,11 +227,11 @@ table MyTable(h$0) {}
 
 #[tokio::test]
 async fn completion_for_attribute_on_field() {
-    let fixture = r#"
+    let fixture = r"
 table MyTable {
     my_field: int ($0);
 }
-"#;
+";
     let mut harness = TestHarness::new();
     let response = get_completion_list(&mut harness, fixture, &[]).await;
     assert_snapshot!(response);
@@ -238,11 +239,11 @@ table MyTable {
 
 #[tokio::test]
 async fn completion_for_filtered_attribute_on_field() {
-    let fixture = r#"
+    let fixture = r"
 table MyTable {
     my_field: int (k$0);
 }
-"#;
+";
     let mut harness = TestHarness::new();
     let response = get_completion_list(&mut harness, fixture, &[]).await;
     assert_snapshot!(response);
@@ -250,11 +251,11 @@ table MyTable {
 
 #[tokio::test]
 async fn completion_for_partial_attribute_on_field() {
-    let fixture = r#"
+    let fixture = r"
 table MyTable {
     my_field: int ($0
 }
-"#;
+";
     let mut harness = TestHarness::new();
     let response = get_completion_list(&mut harness, fixture, &[]).await;
     assert_snapshot!(response);
@@ -262,11 +263,11 @@ table MyTable {
 
 #[tokio::test]
 async fn completion_for_partial_filtered_attribute_on_field() {
-    let fixture = r#"
+    let fixture = r"
 table MyTable {
     my_field: int (k$0
 }
-"#;
+";
     let mut harness = TestHarness::new();
     let response = get_completion_list(&mut harness, fixture, &[]).await;
     assert_snapshot!(response);
@@ -274,13 +275,13 @@ table MyTable {
 
 #[tokio::test]
 async fn completion_for_second_field_id_attribute() {
-    let fixture = r#"
+    let fixture = r"
 table FieldType {}
 table MyTable {
     first_field: FieldType (id: 0, required);
     second_field: int (i$0
 }
-"#;
+";
     let mut harness = TestHarness::new();
     let response = get_completion_list(&mut harness, fixture, &[]).await;
     assert_snapshot!(response);
@@ -288,11 +289,11 @@ table MyTable {
 
 #[tokio::test]
 async fn completion_for_second_attribute() {
-    let fixture = r#"
+    let fixture = r"
 table MyTable {
     first_field: int (id: 0, $0
 }
-"#;
+";
     let mut harness = TestHarness::new();
     let response = get_completion_list(&mut harness, fixture, &[]).await;
     assert_snapshot!(response);
@@ -300,7 +301,7 @@ table MyTable {
 
 #[tokio::test]
 async fn completion_for_field_namespace_partial() {
-    let fixture = r#"
+    let fixture = r"
 namespace one.two.three;
 
 table Tree {}
@@ -308,7 +309,7 @@ table Tree {}
 table Forest {
     oak: on$0
 }
-"#;
+";
     let mut harness = TestHarness::new();
     let response = get_completion_list(&mut harness, fixture, &[]).await;
     assert_snapshot!(response);
@@ -316,7 +317,7 @@ table Forest {
 
 #[tokio::test]
 async fn completion_for_field_namespace_partial_with_dot() {
-    let fixture = r#"
+    let fixture = r"
 namespace one.two.three;
 
 table Tree {}
@@ -324,7 +325,7 @@ table Tree {}
 table Forest {
     oak: one.two.$0
 }
-"#;
+";
     let mut harness = TestHarness::new();
     let response = get_completion_list(&mut harness, fixture, &[]).await;
     assert_snapshot!(response);
@@ -332,7 +333,7 @@ table Forest {
 
 #[tokio::test]
 async fn completion_for_field_namespace_partial_with_dot_no_type() {
-    let fixture = r#"
+    let fixture = r"
 namespace one.two.three;
 
 table Tree {}
@@ -340,7 +341,7 @@ table Tree {}
 table Forest {
     oak: one.two.three.$0
 }
-"#;
+";
     let mut harness = TestHarness::new();
     let response = get_completion_list(&mut harness, fixture, &[]).await;
     assert_snapshot!(response);
@@ -348,7 +349,7 @@ table Forest {
 
 #[tokio::test]
 async fn completion_for_field_namespace_partial_with_dot_and_type_part() {
-    let fixture = r#"
+    let fixture = r"
 namespace one.two.three;
 
 table Tree {}
@@ -356,7 +357,7 @@ table Tree {}
 table Forest {
     oak: one.two.three.T$0
 }
-"#;
+";
     let mut harness = TestHarness::new();
     let response = get_completion_list(&mut harness, fixture, &[]).await;
     assert_snapshot!(response);

@@ -69,8 +69,8 @@ pub struct Table {
 #[derive(Debug, Clone, PartialEq)]
 pub struct Struct {
     pub fields: Vec<Symbol>,
-    pub size: usize,
-    pub alignment: usize,
+    pub size: u64,
+    pub alignment: u64,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -110,7 +110,8 @@ pub struct Field {
 }
 
 impl Symbol {
-    #[must_use] pub fn type_name(&self) -> &str {
+    #[must_use]
+    pub fn type_name(&self) -> &str {
         match &self.kind {
             SymbolKind::Enum(_) => "enum",
             SymbolKind::Union(_) => "union",
@@ -121,7 +122,8 @@ impl Symbol {
         }
     }
 
-    #[must_use] pub fn find_symbol<'a>(&'a self, path: &PathBuf, pos: Position) -> Option<&'a Symbol> {
+    #[must_use]
+    pub fn find_symbol<'a>(&'a self, path: &PathBuf, pos: Position) -> Option<&'a Symbol> {
         if self.info.location.path != *path {
             return None;
         }
@@ -162,11 +164,13 @@ impl Symbol {
         None
     }
 
-    #[must_use] pub fn hover_markdown(&self) -> String {
-        let mut code_content = String::new();
-        if !self.info.namespace.is_empty() {
-            code_content.push_str(&format!("namespace {};\n\n", self.info.namespace.join(".")));
-        }
+    #[must_use]
+    pub fn hover_markdown(&self) -> String {
+        let mut code_content = if self.info.namespace.is_empty() {
+            String::new()
+        } else {
+            format!("namespace {};\n\n", self.info.namespace.join("."))
+        };
 
         let definition = match &self.kind {
             SymbolKind::Table(t) => format!("table {} {{{}}}", self.info.name, t.fields_markdown()),
@@ -214,7 +218,8 @@ impl Symbol {
 
 impl SymbolTable {
     /// Create a new token map.
-    #[must_use] pub fn new(path: PathBuf) -> SymbolTable {
+    #[must_use]
+    pub fn new(path: PathBuf) -> SymbolTable {
         SymbolTable {
             path,
             table: HashMap::with_capacity(2048),
@@ -225,11 +230,13 @@ impl SymbolTable {
         self.table.insert(key, symbol);
     }
 
-    #[must_use] pub fn contains_key(&self, key: &str) -> bool {
+    #[must_use]
+    pub fn contains_key(&self, key: &str) -> bool {
         self.table.contains_key(key)
     }
 
-    #[must_use] pub fn get(&self, key: &str) -> Option<&Symbol> {
+    #[must_use]
+    pub fn get(&self, key: &str) -> Option<&Symbol> {
         self.table.get(key)
     }
 
@@ -237,7 +244,8 @@ impl SymbolTable {
         self.table.values()
     }
 
-    #[must_use] pub fn into_inner(self) -> HashMap<String, Symbol> {
+    #[must_use]
+    pub fn into_inner(self) -> HashMap<String, Symbol> {
         self.table
     }
 }
@@ -267,19 +275,22 @@ fn fields_markdown(fields: &[Symbol]) -> String {
 }
 
 impl Table {
-    #[must_use] pub fn fields_markdown(&self) -> String {
+    #[must_use]
+    pub fn fields_markdown(&self) -> String {
         fields_markdown(&self.fields)
     }
 }
 
 impl Struct {
-    #[must_use] pub fn fields_markdown(&self) -> String {
+    #[must_use]
+    pub fn fields_markdown(&self) -> String {
         fields_markdown(&self.fields)
     }
 }
 
 impl Enum {
-    #[must_use] pub fn variants_markdown(&self) -> String {
+    #[must_use]
+    pub fn variants_markdown(&self) -> String {
         if self.variants.is_empty() {
             return String::new();
         }
@@ -317,7 +328,8 @@ impl Enum {
 }
 
 impl Union {
-    #[must_use] pub fn variants_markdown(&self) -> String {
+    #[must_use]
+    pub fn variants_markdown(&self) -> String {
         if self.variants.is_empty() {
             return String::new();
         }
@@ -360,7 +372,8 @@ impl From<&SymbolKind> for lsp_types::SymbolKind {
 }
 
 impl SymbolInfo {
-    #[must_use] pub fn qualified_name(&self) -> String {
+    #[must_use]
+    pub fn qualified_name(&self) -> String {
         if self.namespace.is_empty() {
             self.name.clone()
         } else {
@@ -368,7 +381,8 @@ impl SymbolInfo {
         }
     }
 
-    #[must_use] pub fn namespace_str(&self) -> Option<String> {
+    #[must_use]
+    pub fn namespace_str(&self) -> Option<String> {
         if self.namespace.is_empty() {
             None
         } else {

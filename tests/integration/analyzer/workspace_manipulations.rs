@@ -17,13 +17,13 @@ async fn test_analyzer_workspace_manipulations() {
     fs::create_dir_all(&a_root_dir).unwrap();
     a_root_dir = fs::canonicalize(a_root_dir).unwrap();
 
-    let file_a_path = a_root_dir.join("a.fbs");
-    let file_a_content = r#"
+    let first_file_path = a_root_dir.join("a.fbs");
+    let first_file_content = r#"
         #include "../a-root/a.fbs";
         table A { field: int; }
         root_type A;
     "#;
-    fs::write(&file_a_path, file_a_content).unwrap();
+    fs::write(&first_file_path, first_file_content).unwrap();
 
     let document_store = DocumentStore::new();
     let analyzer = Analyzer::new(Arc::new(document_store));
@@ -54,10 +54,10 @@ async fn test_analyzer_workspace_manipulations() {
     assert_matches_fresh_analyzer(Some(b_root_dir.clone()), &analyzer).await;
 
     // 4. Add new file and parse
-    let file_b_path = b_root_dir.join("b.fbs");
-    let file_b_content = "table B { field: int; };\nroot_type B;";
-    fs::write(&file_b_path, file_b_content).unwrap();
-    let canonical_file_b_path = fs::canonicalize(&file_b_path).unwrap();
+    let second_file_path = b_root_dir.join("b.fbs");
+    let second_file_content = "table B { field: int; };\nroot_type B;";
+    fs::write(&second_file_path, second_file_content).unwrap();
+    let canonical_file_b_path = fs::canonicalize(&second_file_path).unwrap();
     analyzer
         .handle_file_changes(vec![FileEvent {
             uri: path_buf_to_uri(&canonical_file_b_path).unwrap(),
@@ -68,7 +68,7 @@ async fn test_analyzer_workspace_manipulations() {
     assert_matches_fresh_analyzer(Some(b_root_dir.clone()), &analyzer).await;
 
     // 5. Remove file
-    fs::remove_file(&file_b_path).unwrap();
+    fs::remove_file(&second_file_path).unwrap();
     analyzer
         .handle_file_changes(vec![FileEvent {
             uri: path_buf_to_uri(&canonical_file_b_path).unwrap(),

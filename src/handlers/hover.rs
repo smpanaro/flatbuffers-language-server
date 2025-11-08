@@ -1,10 +1,10 @@
 use crate::analysis::WorkspaceSnapshot;
 use crate::ext::duration::DurationFormat;
+use crate::utils::as_pos_idx;
 use crate::utils::paths::uri_to_path_buf;
 use log::debug;
 use ropey::Rope;
 use std::time::Instant;
-use tower_lsp_server::jsonrpc::Result;
 use tower_lsp_server::lsp_types::{
     Hover, HoverContents, HoverParams, MarkupContent, MarkupKind, Position, Range,
 };
@@ -45,18 +45,13 @@ fn is_inside_braces(doc: &Rope, position: Position) -> bool {
     open_braces > close_braces
 }
 
-pub async fn handle_hover<'a>(
-    snapshot: &WorkspaceSnapshot<'a>,
-    params: HoverParams,
-) -> Result<Option<Hover>> {
+pub fn handle_hover(snapshot: &WorkspaceSnapshot<'_>, params: HoverParams) -> Option<Hover> {
     let start = Instant::now();
     let uri = params.text_document_position_params.text_document.uri;
     let pos = params.text_document_position_params.position;
     let mut res: Option<Hover> = None;
 
-    let Ok(path) = uri_to_path_buf(&uri) else {
-        return Ok(None);
-    };
+    let path = uri_to_path_buf(&uri).ok()?;
 
     if let Some(resolved) = snapshot.resolve_symbol_at(&uri, pos) {
         res = Some(Hover {
@@ -74,14 +69,8 @@ pub async fn handle_hover<'a>(
 
                 if let Some(doc) = snapshot.symbols.keywords.get(word) {
                     let range = Range {
-                        start: Position {
-                            line: pos.line,
-                            character: start_char as u32,
-                        },
-                        end: Position {
-                            line: pos.line,
-                            character: end_char as u32,
-                        },
+                        start: Position::new(pos.line, as_pos_idx(start_char)),
+                        end: Position::new(pos.line, as_pos_idx(end_char)),
                     };
                     res = Some(Hover {
                         contents: HoverContents::Markup(MarkupContent {
@@ -103,5 +92,5 @@ pub async fn handle_hover<'a>(
         pos.line + 1,
         pos.character + 1
     );
-    Ok(res)
+    res
 }

@@ -1,7 +1,9 @@
 use crate::diagnostics::codes::DiagnosticCode;
+use crate::utils::as_pos_idx;
 use std::collections::{HashMap, HashSet};
+use std::fs;
+use std::hash::BuildHasher;
 use std::path::{Path, PathBuf};
-use std::{fs, u32};
 
 use tower_lsp_server::lsp_types::{
     Diagnostic, DiagnosticSeverity, DiagnosticTag, NumberOrString, Position, Range,
@@ -9,9 +11,9 @@ use tower_lsp_server::lsp_types::{
 
 use crate::symbol_table::{RootTypeInfo, SymbolKind, SymbolTable};
 
-pub fn analyze_deprecated_fields(
+pub fn analyze_deprecated_fields<S: BuildHasher>(
     st: &SymbolTable,
-    diagnostics: &mut HashMap<PathBuf, Vec<Diagnostic>>,
+    diagnostics: &mut HashMap<PathBuf, Vec<Diagnostic>, S>,
 ) {
     for symbol in st.values() {
         if symbol.info.location.path != st.path {
@@ -57,11 +59,11 @@ struct IncludeStatement {
     line_length: u32,
 }
 
-pub fn analyze_unused_includes(
+pub fn analyze_unused_includes<S: BuildHasher>(
     st: &SymbolTable,
-    diagnostics: &mut HashMap<PathBuf, Vec<Diagnostic>>,
+    diagnostics: &mut HashMap<PathBuf, Vec<Diagnostic>, S>,
     file_contents: &str,
-    include_graph: &HashMap<String, Vec<String>>,
+    include_graph: &HashMap<String, Vec<String>, S>,
     search_paths: &[PathBuf],
     root_type_info: &Option<RootTypeInfo>,
 ) {
@@ -96,7 +98,7 @@ pub fn analyze_unused_includes(
                     used_types.insert(variant.name.clone());
                 }
             }
-            _ => continue,
+            _ => (),
         }
     }
 
@@ -108,7 +110,7 @@ pub fn analyze_unused_includes(
             // TODO: Make everything PathBuf.
             if let Some(path_str) = path.to_str() {
                 symbol_defining_files.insert(path_str);
-                log::info!("{} requires {path:?}", symbol.info.name);
+                log::info!("{} requires {}", symbol.info.name, path.display());
             }
         }
     }
@@ -131,8 +133,8 @@ pub fn analyze_unused_includes(
         .map(|(idx, line, path, abs_path)| IncludeStatement {
             canonical: abs_path,
             text: path.to_string(),
-            line: idx as u32,
-            line_length: line.len() as u32,
+            line: as_pos_idx(idx),
+            line_length: as_pos_idx(line.len()),
         })
         .collect();
 
@@ -198,12 +200,12 @@ fn resolve_include(
     None
 }
 
-fn transitive_include_graph(
-    direct_include_graph: &HashMap<String, Vec<String>>,
+fn transitive_include_graph<S: BuildHasher>(
+    direct_include_graph: &HashMap<String, Vec<String>, S>,
 ) -> HashMap<&str, HashSet<&str>> {
-    fn dfs<'a>(
+    fn dfs<'a, S: BuildHasher>(
         node: &'a str,
-        graph: &'a HashMap<String, Vec<String>>,
+        graph: &'a HashMap<String, Vec<String>, S>,
         visited: &mut HashSet<&'a str>,
     ) {
         if let Some(neighbors) = graph.get(node) {

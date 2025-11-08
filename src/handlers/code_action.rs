@@ -1,11 +1,11 @@
 use crate::analysis::WorkspaceSnapshot;
 use crate::diagnostics::codes::DiagnosticCode;
+use crate::utils::as_pos_idx;
 use crate::utils::paths::uri_to_path_buf;
 
 use serde_json::Value;
 use std::collections::HashMap;
 use std::string::ToString;
-use tower_lsp_server::jsonrpc::Result;
 use tower_lsp_server::lsp_types::{
     CodeAction, CodeActionKind, CodeActionOrCommand, CodeActionParams, CodeActionResponse,
     Diagnostic, DiagnosticSeverity, NumberOrString, Position, Range, TextEdit, Uri, WorkspaceEdit,
@@ -15,10 +15,11 @@ use tower_lsp_server::lsp_types::{
 ///
 /// This function iterates through diagnostics provided by the client and generates
 /// relevant quick-fix actions based on the diagnostic code.
-pub async fn handle_code_action<'a>(
-    snapshot: &WorkspaceSnapshot<'a>,
+#[allow(clippy::too_many_lines)]
+pub fn handle_code_action(
+    snapshot: &WorkspaceSnapshot<'_>,
     params: CodeActionParams,
-) -> Result<Option<CodeActionResponse>> {
+) -> Option<CodeActionResponse> {
     let uri = params.text_document.uri;
     let mut code_actions = Vec::new();
 
@@ -47,12 +48,13 @@ pub async fn handle_code_action<'a>(
                                 start.line,
                                 // Diagnostic character is truncated to the end of the line,
                                 // regardless of sent diagnostic.
-                                start.character + if end_of_line { 1 } else { 0 },
+                                start.character + u32::from(end_of_line),
                             );
                             let text_edit = TextEdit {
                                 range: Range::new(insertion_pos, insertion_pos),
                                 new_text: expected.to_string(),
                             };
+                            #[allow(clippy::mutable_key_type, reason = "external type definition")]
                             let mut changes = HashMap::new();
                             changes.insert(uri.clone(), vec![text_edit]);
                             let code_action = CodeAction {
@@ -81,6 +83,7 @@ pub async fn handle_code_action<'a>(
                             range: diagnostic.range,
                             new_text: replacement_name.clone(),
                         };
+                        #[allow(clippy::mutable_key_type, reason = "external type definition")]
                         let mut changes = HashMap::new();
                         changes.insert(uri.clone(), vec![text_edit]);
                         let edit = WorkspaceEdit {
@@ -111,6 +114,7 @@ pub async fn handle_code_action<'a>(
                     },
                     new_text: String::new(),
                 };
+                #[allow(clippy::mutable_key_type, reason = "external type definition")]
                 let mut changes = HashMap::new();
                 changes.insert(uri.clone(), vec![text_edit]);
                 let code_action = CodeAction {
@@ -134,7 +138,7 @@ pub async fn handle_code_action<'a>(
             }
         }
     }
-    Ok(Some(code_actions))
+    Some(code_actions)
 }
 
 /// Creates a `CodeActionOrCommand` representing a quick fix.
@@ -144,6 +148,7 @@ fn create_quickfix(
     title: String,
     edits: Vec<TextEdit>,
 ) -> CodeActionOrCommand {
+    #[allow(clippy::mutable_key_type, reason = "external type definition")]
     let mut changes = HashMap::new();
     changes.insert(uri.clone(), edits);
     let edit = WorkspaceEdit {
@@ -167,6 +172,7 @@ fn create_quickfix(
 /// This function searches the workspace for symbols that match the undefined type
 /// and suggests actions such as importing the symbol, qualifying the type name,
 /// or setting the file's namespace.
+#[allow(clippy::too_many_lines)]
 fn generate_undefined_type_code_actions(
     snapshot: &WorkspaceSnapshot,
     uri: &Uri,
@@ -219,7 +225,7 @@ fn generate_undefined_type_code_actions(
         .enumerate()
         .filter(|(_, line)| line.to_string().trim().starts_with("include "))
         .last()
-        .map(|(i, _)| i as u32);
+        .map(|(i, _)| as_pos_idx(i));
     let include_insert_line = last_include_line.map_or(0, |line| line + 1);
     let include_insert_pos = Position::new(include_insert_line, 0);
 

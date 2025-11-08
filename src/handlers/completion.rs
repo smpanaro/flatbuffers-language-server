@@ -1,23 +1,27 @@
 use crate::analysis::WorkspaceSnapshot;
 use crate::ext::duration::DurationFormat;
 use crate::symbol_table::{Symbol, SymbolKind};
+use crate::utils::as_pos_idx;
 use crate::utils::paths::uri_to_path_buf;
 use log::debug;
 use regex::Regex;
 use ropey::Rope;
 use std::iter::once;
 use std::path::PathBuf;
+use std::sync::LazyLock;
 use std::time::Instant;
-use tower_lsp_server::jsonrpc::Result;
 use tower_lsp_server::lsp_types::{
     CompletionItem, CompletionItemKind, CompletionItemLabelDetails, CompletionParams,
     CompletionResponse, CompletionTextEdit, Documentation, MarkupContent, MarkupKind, Position,
     Range, TextEdit,
 };
 
-static FIELD_RE: std::sync::LazyLock<Regex> = std::sync::LazyLock::new(|| Regex::new(r"^\s*(\w+)\s*:\s*([\w\.]*)").unwrap());
-static ROOT_TYPE_RE: std::sync::LazyLock<Regex> = std::sync::LazyLock::new(|| Regex::new(r"^\s*root_type\s+([\w\.]*)").unwrap());
+static FIELD_RE: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"^\s*(\w+)\s*:\s*([\w\.]*)").unwrap());
+static ROOT_TYPE_RE: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"^\s*root_type\s+([\w\.]*)").unwrap());
 
+#[allow(clippy::too_many_lines)]
 fn handle_attribute_completion(
     snapshot: &WorkspaceSnapshot,
     path: &PathBuf,
@@ -90,7 +94,7 @@ fn handle_attribute_completion(
                         let range = Range {
                             start: Position {
                                 line: position.line,
-                                character: (position.character - last_word.len() as u32),
+                                character: (position.character - as_pos_idx(last_word.len())),
                             },
                             end: position,
                         };
@@ -167,6 +171,7 @@ fn handle_attribute_completion(
     None
 }
 
+#[allow(clippy::too_many_lines)]
 fn handle_field_type_completion(
     snapshot: &WorkspaceSnapshot,
     path: &PathBuf,
@@ -179,9 +184,7 @@ fn handle_field_type_completion(
         return None;
     }
     let (range, partial_text) = get_field_type_completion_context(line, position)?;
-    let Some(captures) = FIELD_RE.captures(line) else {
-        return None;
-    };
+    let captures = FIELD_RE.captures(line)?;
     let field_name = captures.get(1).map_or("", |m| m.as_str());
 
     let mut items = Vec::new();
@@ -360,18 +363,15 @@ fn field_sort_text(
         (is_a_match, if is_a_match { "0" } else { "4" })
     } else {
         // Case 2: User is typing a type name or namespace directly
-        let is_type_match = symbol_name.is_some_and(|sn| {
-            sn.to_lowercase().contains(&partial_text.to_lowercase())
-        });
-        let is_type_prefix_match = symbol_name.is_some_and(|sn| {
-            sn.to_lowercase().starts_with(&partial_text.to_lowercase())
-        });
+        let is_type_match =
+            symbol_name.is_some_and(|sn| sn.to_lowercase().contains(&partial_text.to_lowercase()));
+        let is_type_prefix_match = symbol_name
+            .is_some_and(|sn| sn.to_lowercase().starts_with(&partial_text.to_lowercase()));
         let is_ns_match = symbol_namespace
             .iter()
             .any(|ns| ns.starts_with(partial_text));
-        let field_name_contains_type = symbol_name.is_some_and(|sn| {
-            field_name.to_lowercase().contains(&sn.to_lowercase())
-        });
+        let field_name_contains_type =
+            symbol_name.is_some_and(|sn| field_name.to_lowercase().contains(&sn.to_lowercase()));
 
         if is_type_match {
             if field_name_contains_type {
@@ -533,7 +533,7 @@ fn get_field_type_completion_context(line: &str, position: Position) -> Option<(
     let line_upto_cursor = &line[..position.character as usize];
     FIELD_RE.captures(line_upto_cursor).and_then(|captures| {
         captures.get(2).map(|partial_match| {
-            let start_char = line_upto_cursor[..partial_match.start()].chars().count() as u32;
+            let start_char = as_pos_idx(line_upto_cursor[..partial_match.start()].chars().count());
             let range = Range {
                 start: Position {
                     line: position.line,
@@ -553,7 +553,8 @@ fn get_root_type_completion_context(line: &str, position: Position) -> Option<(R
         .captures(line_upto_cursor)
         .and_then(|captures| {
             captures.get(1).map(|partial_match| {
-                let start_char = line_upto_cursor[..partial_match.start()].chars().count() as u32;
+                let start_char =
+                    as_pos_idx(line_upto_cursor[..partial_match.start()].chars().count());
                 let range = Range {
                     start: Position {
                         line: position.line,
@@ -567,30 +568,23 @@ fn get_root_type_completion_context(line: &str, position: Position) -> Option<(R
         })
 }
 
-pub async fn handle_completion<'a>(
-    snapshot: &WorkspaceSnapshot<'a>,
-    params: CompletionParams,
-) -> Result<Option<CompletionResponse>> {
+pub fn handle_completion(
+    snapshot: &WorkspaceSnapshot<'_>,
+    params: &CompletionParams,
+) -> Option<CompletionResponse> {
     let start = Instant::now();
     let position = params.text_document_position.position;
 
-    let Ok(path) = uri_to_path_buf(&params.text_document_position.text_document.uri) else {
-        return Ok(None);
-    };
+    let path = uri_to_path_buf(&params.text_document_position.text_document.uri).ok()?;
 
-    let Some(doc) = snapshot.documents.get(&path) else {
-        return Ok(None);
-    };
-    let Some(line) = doc
+    let doc = snapshot.documents.get(&path)?;
+    let line = doc
         .lines()
         .nth(position.line as usize)
-        .map(|s| s.to_string())
-    else {
-        return Ok(None);
-    };
+        .map(|s| s.to_string())?;
 
     if should_suppress_completion(&doc, position) {
-        return Ok(None);
+        return None;
     }
 
     let response = if let Some(response) =
@@ -618,7 +612,7 @@ pub async fn handle_completion<'a>(
         })
     );
 
-    Ok(response)
+    response
 }
 
 fn generate_include_text_edit(
@@ -631,9 +625,7 @@ fn generate_include_text_edit(
             .dependencies
             .includes
             .get(path)
-            .is_some_and(|includes| {
-                includes.iter().any(|p| p == &symbol.info.location.path)
-            });
+            .is_some_and(|includes| includes.iter().any(|p| p == &symbol.info.location.path));
 
         if !is_already_included {
             if let Some(relative_path) =
@@ -656,7 +648,7 @@ fn generate_include_edit(doc: &Rope, relative_path: &str) -> TextEdit {
         .enumerate()
         .filter(|(_, line)| line.to_string().trim().starts_with("include "))
         .last()
-        .map(|(i, _)| i as u32);
+        .map(|(i, _)| as_pos_idx(i));
 
     let include_insert_line = last_include_line.map_or(0, |line| line + 1);
     let include_insert_pos = Position::new(include_insert_line, 0);
@@ -736,11 +728,8 @@ mod tests {
 
     #[test]
     fn test_field_sort_text() {
-        assert_eq!(
-            field_sort_text("bean", "pastries.", Some("Bean"), &["pastries"], false).0,
-            true
-        );
-        assert_eq!(
+        assert!(field_sort_text("bean", "pastries.", Some("Bean"), &["pastries"], false).0);
+        assert!(
             field_sort_text(
                 "bean",
                 "pastri",
@@ -748,24 +737,20 @@ mod tests {
                 &["pastries", "vanilla"],
                 false
             )
-            .0,
-            true
+            .0
         );
-        assert_eq!(
-            field_sort_text("bean", "Be", Some("Bean"), &["pastries"], false).0,
-            true
+        assert!(field_sort_text("bean", "Be", Some("Bean"), &["pastries"], false).0);
+        assert!(
+            // Helpful to see extra metadata for what was selected.
+            field_sort_text("bean", "pastries", None, &["pastries"], false).0
         );
-        assert_eq!(
-            field_sort_text("bean", "pastries", None, &["pastries"], false).0,
-            true // Helpful to see extra metadata for what was selected.
+        assert!(
+            // Should not insert pastries.pastries again.
+            !field_sort_text("bean", "pastries.", None, &["pastries"], false).0
         );
-        assert_eq!(
-            field_sort_text("bean", "pastries.", None, &["pastries"], false).0,
-            false // Should not insert pastries.pastries again.
-        );
-        assert_eq!(
-            field_sort_text("bean", "one.two.", None, &["one", "two", "three"], false).0,
-            true // Should suggest `one.two.three`.
+        assert!(
+            // Should suggest `one.two.three`.
+            field_sort_text("bean", "one.two.", None, &["one", "two", "three"], false).0
         );
     }
 

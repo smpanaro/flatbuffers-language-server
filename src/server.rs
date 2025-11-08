@@ -6,9 +6,9 @@ use crate::handlers::{
     code_action, completion, goto_definition, hover, lifecycle, references, rename,
     workspace_symbol,
 };
-#[cfg(any(test, feature = "test-harness"))]
 use crate::utils::paths::path_buf_to_uri;
 use log::{error, info};
+use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use tokio::sync::Notify;
@@ -19,7 +19,7 @@ use tower_lsp_server::lsp_types::request::WorkDoneProgressCreate;
 use tower_lsp_server::lsp_types::{
     notification, CodeActionKind, CodeActionOptions, CodeActionParams,
     CodeActionProviderCapability, CodeActionResponse, CompletionOptions, CompletionParams,
-    CompletionResponse, DidChangeTextDocumentParams, DidChangeWatchedFilesParams,
+    CompletionResponse, Diagnostic, DidChangeTextDocumentParams, DidChangeWatchedFilesParams,
     DidChangeWatchedFilesRegistrationOptions, DidChangeWorkspaceFoldersParams,
     DidCloseTextDocumentParams, DidOpenTextDocumentParams, DidSaveTextDocumentParams,
     FileSystemWatcher, GlobPattern, GotoDefinitionParams, GotoDefinitionResponse, Hover,
@@ -28,7 +28,7 @@ use tower_lsp_server::lsp_types::{
     ReferenceParams, Registration, RenameOptions, RenameParams, ServerCapabilities, ServerInfo,
     SymbolInformation, TextDocumentPositionParams, TextDocumentSyncCapability,
     TextDocumentSyncKind, TextDocumentSyncOptions, WorkDoneProgress, WorkDoneProgressBegin,
-    WorkDoneProgressCreateParams, WorkDoneProgressEnd, WorkspaceEdit,
+    WorkDoneProgressCreateParams, WorkDoneProgressEnd, WorkDoneProgressOptions, WorkspaceEdit,
     WorkspaceFoldersServerCapabilities, WorkspaceServerCapabilities, WorkspaceSymbol,
     WorkspaceSymbolParams,
 };
@@ -45,7 +45,8 @@ pub struct Backend {
 }
 
 impl Backend {
-    #[must_use] pub fn new(client: Client) -> Self {
+    #[must_use]
+    pub fn new(client: Client) -> Self {
         let documents = Arc::new(DocumentStore::new());
         let analysis = Arc::new(Analyzer::new(Arc::clone(&documents)));
         Self {
@@ -102,7 +103,7 @@ impl LanguageServer for Backend {
                         ",".to_string(),
                         ".".to_string(),
                     ]),
-                    work_done_progress_options: Default::default(),
+                    work_done_progress_options: WorkDoneProgressOptions::default(),
                     all_commit_characters: None,
                     completion_item: None,
                 }),
@@ -114,7 +115,7 @@ impl LanguageServer for Backend {
                 )),
                 rename_provider: Some(OneOf::Right(RenameOptions {
                     prepare_provider: Some(true),
-                    work_done_progress_options: Default::default(),
+                    work_done_progress_options: WorkDoneProgressOptions::default(),
                 })),
                 workspace_symbol_provider: Some(OneOf::Left(true)),
                 ..ServerCapabilities::default()
@@ -151,9 +152,7 @@ impl LanguageServer for Backend {
             .await;
 
         let diagnostics = lifecycle::handle_initialized(self).await;
-        for (uri, diags) in diagnostics {
-            self.client.publish_diagnostics(uri, diags, None).await;
-        }
+        self.publish_diagnostics(diagnostics).await;
         self.mark_ready();
 
         self.client
@@ -192,53 +191,43 @@ impl LanguageServer for Backend {
 
     async fn did_open(&self, params: DidOpenTextDocumentParams) {
         self.wait_until_ready().await;
-        let diagnostics = lifecycle::handle_did_open(self, params).await;
-        for (uri, diags) in diagnostics {
-            self.client.publish_diagnostics(uri, diags, None).await;
-        }
+        let diagnostics = lifecycle::handle_did_open(self, &params).await;
+        self.publish_diagnostics(diagnostics).await;
     }
 
     async fn did_change(&self, params: DidChangeTextDocumentParams) {
         self.wait_until_ready().await;
         let diagnostics = lifecycle::handle_did_change(self, params).await;
-        for (uri, diags) in diagnostics {
-            self.client.publish_diagnostics(uri, diags, None).await;
-        }
+        self.publish_diagnostics(diagnostics).await;
     }
 
     async fn did_close(&self, params: DidCloseTextDocumentParams) {
         self.wait_until_ready().await;
-        lifecycle::handle_did_close(self, params).await;
+        lifecycle::handle_did_close(self, &params);
     }
 
     async fn did_save(&self, params: DidSaveTextDocumentParams) {
         self.wait_until_ready().await;
         let diagnostics = lifecycle::handle_did_save(self, params).await;
-        for (uri, diags) in diagnostics {
-            self.client.publish_diagnostics(uri, diags, None).await;
-        }
+        self.publish_diagnostics(diagnostics).await;
     }
 
     async fn did_change_watched_files(&self, params: DidChangeWatchedFilesParams) {
         self.wait_until_ready().await;
         let diagnostics = self.analyzer.handle_file_changes(params.changes).await;
-        for (uri, diags) in diagnostics {
-            self.client.publish_diagnostics(uri, diags, None).await;
-        }
+        self.publish_diagnostics(diagnostics).await;
     }
 
     async fn did_change_workspace_folders(&self, params: DidChangeWorkspaceFoldersParams) {
         self.wait_until_ready().await;
         let diagnostics = lifecycle::handle_did_change_workspace_folders(self, params).await;
-        for (uri, diags) in diagnostics {
-            self.client.publish_diagnostics(uri, diags, None).await;
-        }
+        self.publish_diagnostics(diagnostics).await;
     }
 
     async fn hover(&self, params: HoverParams) -> Result<Option<Hover>> {
         self.wait_until_ready().await;
         let snapshot = self.analyzer.snapshot().await;
-        hover::handle_hover(&snapshot, params).await
+        Ok(hover::handle_hover(&snapshot, params))
     }
 
     async fn goto_definition(
@@ -247,25 +236,25 @@ impl LanguageServer for Backend {
     ) -> Result<Option<GotoDefinitionResponse>> {
         self.wait_until_ready().await;
         let snapshot = self.analyzer.snapshot().await;
-        goto_definition::handle_goto_definition(&snapshot, params).await
+        Ok(goto_definition::handle_goto_definition(&snapshot, params))
     }
 
     async fn references(&self, params: ReferenceParams) -> Result<Option<Vec<Location>>> {
         self.wait_until_ready().await;
         let snapshot = self.analyzer.snapshot().await;
-        references::handle_references(&snapshot, params).await
+        Ok(references::handle_references(&snapshot, params))
     }
 
     async fn completion(&self, params: CompletionParams) -> Result<Option<CompletionResponse>> {
         self.wait_until_ready().await;
         let snapshot = self.analyzer.snapshot().await;
-        completion::handle_completion(&snapshot, params).await
+        Ok(completion::handle_completion(&snapshot, &params))
     }
 
     async fn code_action(&self, params: CodeActionParams) -> Result<Option<CodeActionResponse>> {
         self.wait_until_ready().await;
         let snapshot = self.analyzer.snapshot().await;
-        code_action::handle_code_action(&snapshot, params).await
+        Ok(code_action::handle_code_action(&snapshot, params))
     }
 
     async fn prepare_rename(
@@ -274,13 +263,13 @@ impl LanguageServer for Backend {
     ) -> Result<Option<PrepareRenameResponse>> {
         self.wait_until_ready().await;
         let snapshot = self.analyzer.snapshot().await;
-        rename::prepare_rename(&snapshot, params).await
+        Ok(rename::prepare_rename(&snapshot, &params))
     }
 
     async fn rename(&self, params: RenameParams) -> Result<Option<WorkspaceEdit>> {
         self.wait_until_ready().await;
         let snapshot = self.analyzer.snapshot().await;
-        rename::rename(&snapshot, params).await
+        Ok(rename::rename(&snapshot, params))
     }
 
     async fn symbol(
@@ -289,11 +278,26 @@ impl LanguageServer for Backend {
     ) -> Result<Option<OneOf<Vec<SymbolInformation>, Vec<WorkspaceSymbol>>>> {
         self.wait_until_ready().await;
         let snapshot = self.analyzer.snapshot().await;
-        let result = workspace_symbol::handle_workspace_symbol(&snapshot, params).await?;
-        Ok(result.map(OneOf::Right))
+        let result = workspace_symbol::handle_workspace_symbol(&snapshot, &params);
+        Ok(Some(OneOf::Right(result)))
     }
 }
 
+// Convenience.
+impl Backend {
+    async fn publish_diagnostics(&self, diagnostics: Vec<(PathBuf, Vec<Diagnostic>)>) {
+        let uri_diagnostics = diagnostics
+            .into_iter()
+            .filter_map(|(pb, ds)| path_buf_to_uri(&pb).ok().map(|u| (u, ds)))
+            .collect::<Vec<_>>();
+
+        for (uri, diags) in uri_diagnostics {
+            self.client.publish_diagnostics(uri, diags, None).await;
+        }
+    }
+}
+
+// Initial scan.
 impl Backend {
     async fn wait_until_ready(&self) {
         if self.ready.load(Ordering::Acquire) {
@@ -310,17 +314,23 @@ impl Backend {
 
 #[cfg(any(test, feature = "test-harness"))]
 impl Backend {
+    #[allow(clippy::missing_errors_doc)]
     pub async fn did_save_sync(&self, params: DidSaveTextDocumentParams) -> Result<i32> {
         self.did_save(params).await;
         Ok(0)
     }
 
+    #[allow(clippy::missing_errors_doc)]
     pub async fn all_diagnostics(
         &self,
-        _: <AllDiagnostics as Request>::Params,
+        (): <AllDiagnostics as Request>::Params,
     ) -> Result<<AllDiagnostics as Request>::Result> {
         let snapshot = self.analyzer.snapshot().await;
         let diagnostics = snapshot.diagnostics.all();
+        #[allow(
+            clippy::mutable_key_type,
+            reason = "for consistency with lsp_types::notification::PublishDiagnosticsParams"
+        )]
         let result = diagnostics
             .iter()
             .filter_map(|(path, diags)| path_buf_to_uri(path).ok().map(|uri| (uri, diags.clone())))

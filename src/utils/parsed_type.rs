@@ -14,7 +14,8 @@ pub struct ParsedType {
     pub array_size: Option<TypePart>,
 }
 
-#[must_use] pub fn parse_type(text: &str, range: Range) -> Option<ParsedType> {
+#[must_use]
+pub fn parse_type(text: &str, range: Range) -> Option<ParsedType> {
     let mut parser = TypeParser::new(text, range.start);
     parser.parse()
 }
@@ -93,17 +94,12 @@ impl<'a> TypeParser<'a> {
             self.skip_whitespace();
             if self.consume_char('.') {
                 self.skip_whitespace();
-                if is_empty {
-                    continue;
-                }
             } else {
                 break;
             }
         }
         // Unexpected, every type should have a name.
-        let Some(type_name) = parts.pop() else {
-            return None;
-        };
+        let type_name = parts.pop()?;
 
         Some((parts, type_name))
     }
@@ -113,9 +109,7 @@ impl<'a> TypeParser<'a> {
         let is_vector = self.consume_char('[');
         self.skip_whitespace();
 
-        let Some((namespace, type_name)) = self.parse_fqn() else {
-            return None;
-        };
+        let (namespace, type_name) = self.parse_fqn()?;
 
         let mut array_size = None;
         self.skip_whitespace();
@@ -140,7 +134,8 @@ impl<'a> TypeParser<'a> {
 }
 
 impl ParsedType {
-    #[must_use] pub fn qualified_name(&self) -> String {
+    #[must_use]
+    pub fn qualified_name(&self) -> String {
         let mut parts = self
             .namespace
             .iter()
@@ -149,7 +144,8 @@ impl ParsedType {
         parts.push(&self.type_name.text);
         parts.join(".")
     }
-    #[must_use] pub fn to_display_string(&self) -> String {
+    #[must_use]
+    pub fn to_display_string(&self) -> String {
         let mut s = String::new();
         if self.is_vector {
             s.push('[');

@@ -6,13 +6,13 @@ use tokio::time::Instant;
 use tower_lsp_server::lsp_types::{
     Diagnostic, DidChangeTextDocumentParams, DidChangeWorkspaceFoldersParams,
     DidCloseTextDocumentParams, DidOpenTextDocumentParams, DidSaveTextDocumentParams,
-    InitializeParams, Uri,
+    InitializeParams,
 };
 
 pub async fn handle_did_open(
     backend: &Backend,
-    params: DidOpenTextDocumentParams,
-) -> Vec<(Uri, Vec<Diagnostic>)> {
+    params: &DidOpenTextDocumentParams,
+) -> Vec<(PathBuf, Vec<Diagnostic>)> {
     if let Some(path) = backend.documents.handle_did_open(params) {
         backend.analyzer.parse(vec![path]).await
     } else {
@@ -23,7 +23,7 @@ pub async fn handle_did_open(
 pub async fn handle_did_change(
     backend: &Backend,
     params: DidChangeTextDocumentParams,
-) -> Vec<(Uri, Vec<Diagnostic>)> {
+) -> Vec<(PathBuf, Vec<Diagnostic>)> {
     if let Some(path) = backend.documents.handle_did_change(params) {
         backend.analyzer.parse(vec![path]).await
     } else {
@@ -34,7 +34,7 @@ pub async fn handle_did_change(
 pub async fn handle_did_save(
     backend: &Backend,
     params: DidSaveTextDocumentParams,
-) -> Vec<(Uri, Vec<Diagnostic>)> {
+) -> Vec<(PathBuf, Vec<Diagnostic>)> {
     if let Some((path, _)) = backend.documents.handle_did_save(params) {
         let mut files_to_reparse = vec![path.clone()];
         {
@@ -49,7 +49,7 @@ pub async fn handle_did_save(
     }
 }
 
-pub async fn handle_did_close(backend: &Backend, params: DidCloseTextDocumentParams) {
+pub fn handle_did_close(backend: &Backend, params: &DidCloseTextDocumentParams) {
     backend.documents.handle_did_close(params);
 }
 
@@ -68,7 +68,7 @@ pub async fn handle_initialize(backend: &Backend, params: InitializeParams) {
     layout.add_roots(roots);
 }
 
-pub async fn handle_initialized(backend: &Backend) -> Vec<(Uri, Vec<Diagnostic>)> {
+pub async fn handle_initialized(backend: &Backend) -> Vec<(PathBuf, Vec<Diagnostic>)> {
     let start = Instant::now();
 
     let files = {
@@ -91,7 +91,7 @@ pub async fn handle_initialized(backend: &Backend) -> Vec<(Uri, Vec<Diagnostic>)
 pub async fn handle_did_change_workspace_folders(
     backend: &Backend,
     params: DidChangeWorkspaceFoldersParams,
-) -> Vec<(Uri, Vec<Diagnostic>)> {
+) -> Vec<(PathBuf, Vec<Diagnostic>)> {
     let added = params.event.added.into_iter().map(|e| e.uri).collect();
     let removed = params.event.removed.into_iter().map(|e| e.uri).collect();
     backend

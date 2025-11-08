@@ -9,11 +9,11 @@ pub use crate::analysis::snapshot::WorkspaceSnapshot;
 use crate::analysis::workspace_index::WorkspaceIndex;
 use crate::document_store::DocumentStore;
 use crate::parser::Parser;
-use crate::utils::paths::{is_flatbuffer_schema, path_buf_to_uri, uri_to_path_buf};
+use crate::utils::paths::{is_flatbuffer_schema, uri_to_path_buf};
 use crate::workspace_layout::WorkspaceLayout;
 use log::info;
 use std::collections::{HashMap, HashSet};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use tokio::sync::RwLock;
 use tower_lsp_server::lsp_types::{Diagnostic, FileChangeType, FileEvent, Uri};
@@ -28,7 +28,8 @@ pub struct Analyzer {
 }
 
 impl Analyzer {
-    #[must_use] pub fn new(documents: Arc<DocumentStore>) -> Self {
+    #[must_use]
+    pub fn new(documents: Arc<DocumentStore>) -> Self {
         Self {
             index: RwLock::new(WorkspaceIndex::new()),
             documents,
@@ -36,7 +37,7 @@ impl Analyzer {
         }
     }
 
-    pub async fn snapshot<'a>(&'a self) -> WorkspaceSnapshot<'a> {
+    pub async fn snapshot(&'_ self) -> WorkspaceSnapshot<'_> {
         WorkspaceSnapshot {
             index: self.index.read().await,
             documents: Arc::new(self.documents.document_map.clone()),
@@ -47,8 +48,8 @@ impl Analyzer {
         &self,
         added: Vec<Uri>,
         removed: Vec<Uri>,
-    ) -> Vec<(Uri, Vec<Diagnostic>)> {
-        let mut diagnostics: HashMap<Uri, Vec<Diagnostic>> = HashMap::new();
+    ) -> Vec<(PathBuf, Vec<Diagnostic>)> {
+        let mut diagnostics: HashMap<PathBuf, Vec<Diagnostic>> = HashMap::new();
 
         let added_paths = added
             .iter()
@@ -88,7 +89,6 @@ impl Analyzer {
 
     /// Remove the given workspace folder and return affected files.
     async fn remove_workspace_folder(&self, folder: &PathBuf) -> FolderRemoval {
-        let mut diagnostics_to_publish: HashMap<Uri, Vec<Diagnostic>> = HashMap::new();
         let mut files_to_reparse;
 
         let mut layout = self.layout.write().await;
@@ -103,10 +103,6 @@ impl Analyzer {
                 .filter(|p| !to_remove.contains(p))
                 .collect::<Vec<_>>();
             files_to_reparse.extend(affected_files);
-
-            if let Ok(uri) = path_buf_to_uri(path) {
-                diagnostics_to_publish.entry(uri).or_default();
-            }
         }
 
         layout.remove_root(folder);
@@ -123,7 +119,7 @@ impl Analyzer {
     pub async fn parse(
         &self,
         paths: impl IntoIterator<Item = PathBuf>,
-    ) -> Vec<(Uri, Vec<Diagnostic>)> {
+    ) -> Vec<(PathBuf, Vec<Diagnostic>)> {
         let mut parsed_in_scan = HashSet::new();
         let mut all_diagnostics = Vec::new();
         for path in paths {
@@ -137,14 +133,14 @@ impl Analyzer {
 
     async fn parse_single(
         &self,
-        path: &PathBuf,
+        path: &Path,
         parsed_files: &mut HashSet<PathBuf>,
-    ) -> Vec<(Uri, Vec<Diagnostic>)> {
+    ) -> Vec<(PathBuf, Vec<Diagnostic>)> {
         let layout = self.layout.read().await;
         let mut index = self.index.write().await;
         let search_paths: Vec<_> = layout.search_paths.iter().map(PathBuf::from).collect();
 
-        let mut files_to_parse = vec![path.clone()];
+        let mut files_to_parse = vec![path.to_path_buf()];
         let mut newly_parsed_files = HashSet::new();
 
         while let Some(path) = files_to_parse.pop() {
@@ -182,20 +178,15 @@ impl Analyzer {
             index.update(&path, result);
         }
 
-        index
-            .diagnostics
-            .mark_published()
-            .into_iter()
-            .filter_map(|(k, v)| path_buf_to_uri(&k).ok().map(|u| (u, v)))
-            .collect()
+        index.diagnostics.mark_published().into_iter().collect()
     }
 
     pub async fn handle_file_changes(
         &self,
         changes: Vec<FileEvent>,
-    ) -> Vec<(Uri, Vec<Diagnostic>)> {
+    ) -> Vec<(PathBuf, Vec<Diagnostic>)> {
         let mut files_to_reparse = HashSet::new();
-        let mut diagnostics_to_publish: HashMap<Uri, Vec<Diagnostic>> = HashMap::new();
+        let mut diagnostics_to_publish: HashMap<PathBuf, Vec<Diagnostic>> = HashMap::new();
 
         // What about folders? Watching files is sufficient.
         // New folder created     : empty so can't have .fbs files.
@@ -246,9 +237,7 @@ impl Analyzer {
                             info!("marking {} deleted", deleted.display());
                             self.documents.document_map.remove(deleted);
                             layout.remove_file(deleted);
-                            if let Ok(deleted_uri) = path_buf_to_uri(deleted) {
-                                diagnostics_to_publish.entry(deleted_uri).or_default();
-                            }
+                            diagnostics_to_publish.entry(deleted.clone()).or_default();
                         }
                     }
                     _ => {}
@@ -275,11 +264,7 @@ impl FolderRemoval {
     /// to clear any previous diagnostics for removed files.
     // TODO: Maybe this logic can move into DiagnosticStore
     //       (Based on known_files?)
-    fn diagnostics(&self) -> HashMap<Uri, Vec<Diagnostic>> {
-        self.removed
-            .iter()
-            .filter_map(|p| path_buf_to_uri(p).ok())
-            .map(|u| (u, vec![]))
-            .collect()
+    fn diagnostics(&self) -> HashMap<PathBuf, Vec<Diagnostic>> {
+        self.removed.iter().map(|u| (u.clone(), vec![])).collect()
     }
 }

@@ -3,6 +3,7 @@ use crate::helpers::parse_fixture;
 use insta::assert_snapshot;
 use tower_lsp_server::lsp_types::{
     request, Hover, HoverParams, TextDocumentIdentifier, TextDocumentPositionParams,
+    WorkDoneProgressParams,
 };
 
 async fn get_hover_response(
@@ -24,18 +25,18 @@ async fn get_hover_response(
                 text_document: TextDocumentIdentifier { uri: main_file_uri },
                 position,
             },
-            work_done_progress_params: Default::default(),
+            work_done_progress_params: WorkDoneProgressParams::default(),
         })
         .await
 }
 
 #[tokio::test]
 async fn hover_on_keyword() {
-    let fixture = r#"
+    let fixture = r"
 $0table MyTable {
     a: int;
 }
-"#;
+";
     let mut harness = TestHarness::new();
     let response = get_hover_response(&mut harness, fixture, &[]).await;
     assert_snapshot!(serde_json::to_string_pretty(&response).unwrap());
@@ -43,10 +44,10 @@ $0table MyTable {
 
 #[tokio::test]
 async fn hover_on_root_type_keyword() {
-    let fixture = r#"
+    let fixture = r"
 table MyTable { a:int; }
 $0root_type MyTable;
-"#;
+";
     let mut harness = TestHarness::new();
     let response = get_hover_response(&mut harness, fixture, &[]).await;
     assert_snapshot!(serde_json::to_string_pretty(&response).unwrap());
@@ -54,11 +55,11 @@ $0root_type MyTable;
 
 #[tokio::test]
 async fn hover_on_field_named_table() {
-    let fixture = r#"
+    let fixture = r"
 table MyTable {
     t$0able: int;
 }
-"#;
+";
     let mut harness = TestHarness::new();
     let response = get_hover_response(&mut harness, fixture, &[]).await;
     assert_snapshot!(serde_json::to_string_pretty(&response).unwrap());
@@ -66,11 +67,11 @@ table MyTable {
 
 #[tokio::test]
 async fn hover_on_table_definition() {
-    let fixture = r#"
+    let fixture = r"
 table $0MyTable {
     a: int;
 }
-"#;
+";
     let mut harness = TestHarness::new();
     let response = get_hover_response(&mut harness, fixture, &[]).await;
     assert_snapshot!(serde_json::to_string_pretty(&response).unwrap());
@@ -78,11 +79,11 @@ table $0MyTable {
 
 #[tokio::test]
 async fn hover_on_field_primitive_type() {
-    let fixture = r#"
+    let fixture = r"
 table MyTable {
     a: $0int;
 }
-"#;
+";
     let mut harness = TestHarness::new();
     let response = get_hover_response(&mut harness, fixture, &[]).await;
     assert_snapshot!(serde_json::to_string_pretty(&response).unwrap());
@@ -90,7 +91,7 @@ table MyTable {
 
 #[tokio::test]
 async fn hover_on_field_table_type() {
-    let fixture = r#"
+    let fixture = r"
 table Widget {
     name: string;
 }
@@ -98,7 +99,7 @@ table Widget {
 table ProductionLine {
     widget: $0Widget;
 }
-"#;
+";
     let mut harness = TestHarness::new();
     let response = get_hover_response(&mut harness, fixture, &[]).await;
     assert_snapshot!(serde_json::to_string_pretty(&response).unwrap());
@@ -106,7 +107,7 @@ table ProductionLine {
 
 #[tokio::test]
 async fn hover_on_field_vector_type() {
-    let fixture = r#"
+    let fixture = r"
 /// A 2D coordinate.
 struct Point {
     x: float;
@@ -116,7 +117,7 @@ struct Point {
 table Line {
     points: [$0Point];
 }
-"#;
+";
     let mut harness = TestHarness::new();
     let response = get_hover_response(&mut harness, fixture, &[]).await;
     assert_snapshot!(serde_json::to_string_pretty(&response).unwrap());
@@ -124,11 +125,11 @@ table Line {
 
 #[tokio::test]
 async fn hover_on_field_array_type() {
-    let fixture = r#"
+    let fixture = r"
 struct MyStruct {
     a: [$0int:3];
 }
-"#;
+";
     let mut harness = TestHarness::new();
     let response = get_hover_response(&mut harness, fixture, &[]).await;
     assert_snapshot!(serde_json::to_string_pretty(&response).unwrap());
@@ -136,12 +137,12 @@ struct MyStruct {
 
 #[tokio::test]
 async fn hover_on_field_enum_type() {
-    let fixture = r#"
+    let fixture = r"
 enum Color: short { Red=1, Blue=2, Green=3 }
 table MyStruct {
     c: Co$0lor = Red;
 }
-"#;
+";
     let mut harness = TestHarness::new();
     let response = get_hover_response(&mut harness, fixture, &[]).await;
     assert_snapshot!(serde_json::to_string_pretty(&response).unwrap());
@@ -149,7 +150,7 @@ table MyStruct {
 
 #[tokio::test]
 async fn hover_on_union_member() {
-    let fixture = r#"
+    let fixture = r"
 /// A table with b.
 table MyTable {
     b: bool;
@@ -158,7 +159,7 @@ table MyTable {
 union MyUnion {
     $0MyTable
 }
-"#;
+";
     let mut harness = TestHarness::new();
     let response = get_hover_response(&mut harness, fixture, &[]).await;
     assert_snapshot!(serde_json::to_string_pretty(&response).unwrap());
@@ -166,7 +167,7 @@ union MyUnion {
 
 #[tokio::test]
 async fn hover_on_root_type() {
-    let fixture = r#"
+    let fixture = r"
 namespace MyNS; // root type requires a namespac
 
 table MyTable {
@@ -174,7 +175,7 @@ table MyTable {
 }
 
 root_type $0MyTable;
-"#;
+";
     let mut harness = TestHarness::new();
     let response = get_hover_response(&mut harness, fixture, &[]).await;
     assert_snapshot!(serde_json::to_string_pretty(&response).unwrap());
@@ -182,12 +183,12 @@ root_type $0MyTable;
 
 #[tokio::test]
 async fn hover_on_included_definition() {
-    let included_fixture = r#"
+    let included_fixture = r"
 // This is from another file.
 table IncludedTable {
     b: bool;
 }
-"#;
+";
 
     let main_fixture = r#"
 include "included.fbs";
@@ -208,7 +209,7 @@ table MyTable {
 
 #[tokio::test]
 async fn hover_mid_type_name() {
-    let fixture = r#"
+    let fixture = r"
 table Widget {
     name: string;
 }
@@ -216,7 +217,7 @@ table Widget {
 table ProductionLine {
     widget: Wid$0get;
 }
-"#;
+";
     let mut harness = TestHarness::new();
     let response = get_hover_response(&mut harness, fixture, &[]).await;
     assert_snapshot!(serde_json::to_string_pretty(&response).unwrap());
@@ -224,13 +225,13 @@ table ProductionLine {
 
 #[tokio::test]
 async fn hover_union_namespace() {
-    let fixture = r#"
+    let fixture = r"
 namespace Global;
 table Foo {}
 table Bar {}
 table Baz {}
 union Any { Glo$0bal.Foo, Bar, Baz }
-"#;
+";
     let mut harness = TestHarness::new();
     let response = get_hover_response(&mut harness, fixture, &[]).await;
     assert_snapshot!(serde_json::to_string_pretty(&response).unwrap());
@@ -238,26 +239,26 @@ union Any { Glo$0bal.Foo, Bar, Baz }
 
 #[tokio::test]
 async fn hover_despite_warnings() {
-    let fixture = r#"
+    let fixture = r"
 table Tab {
     shouldBeSnakeCase: i$0nt; // flatc will warn that this should be snake_case
 }
-"#;
+";
     let mut harness = TestHarness::new();
     let response = get_hover_response(&mut harness, fixture, &[]).await;
-    assert!(response.is_some())
+    assert!(response.is_some());
 }
 
 #[tokio::test]
 async fn hover_vector64() {
     // vector64 is parsed uniquely and needs special handling.
-    let fixture = r#"
+    let fixture = r"
 table RootTable {
     big_vector:[ui$0nt8] (vector64);
 }
-"#;
+";
 
     let mut harness = TestHarness::new();
     let response = get_hover_response(&mut harness, fixture, &[]).await;
-    assert!(response.is_some())
+    assert!(response.is_some());
 }

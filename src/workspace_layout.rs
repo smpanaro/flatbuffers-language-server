@@ -30,7 +30,8 @@ impl Default for WorkspaceLayout {
 }
 
 impl WorkspaceLayout {
-    #[must_use] pub fn new() -> Self {
+    #[must_use]
+    pub fn new() -> Self {
         Self {
             search_paths: HashSet::new(),
             workspace_roots: HashSet::new(),
@@ -65,12 +66,12 @@ impl WorkspaceLayout {
         self.search_paths.clear();
 
         let roots: Vec<_> = self.workspace_roots.iter().cloned().collect();
-        self.scan_dirs(roots);
+        self.scan_dirs(&roots);
 
         self.known_files.iter().cloned().collect()
     }
 
-    fn scan_dirs(&mut self, paths: Vec<PathBuf>) {
+    fn scan_dirs(&mut self, paths: &[PathBuf]) {
         let start = Instant::now();
 
         if paths.is_empty() {
@@ -132,7 +133,8 @@ impl WorkspaceLayout {
     }
 
     /// Find the known files that have the provided path as a prefix.
-    #[must_use] pub fn known_matching_files(&self, path: &PathBuf) -> Vec<PathBuf> {
+    #[must_use]
+    pub fn known_matching_files(&self, path: &PathBuf) -> Vec<PathBuf> {
         self.known_files
             .iter()
             .filter(|fp| fp.starts_with(path))

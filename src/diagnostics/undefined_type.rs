@@ -1,7 +1,7 @@
 use std::{fs, path::PathBuf};
 
-use crate::diagnostics::codes::DiagnosticCode;
 use crate::diagnostics::ErrorDiagnosticHandler;
+use crate::{diagnostics::codes::DiagnosticCode, utils::as_pos_idx};
 use log::error;
 use regex::Regex;
 use serde_json::json;
@@ -19,6 +19,7 @@ static UNDEFINED_TYPE_RE: std::sync::LazyLock<Regex> = std::sync::LazyLock::new(
 pub struct UndefinedTypeHandler;
 
 impl ErrorDiagnosticHandler for UndefinedTypeHandler {
+    #[allow(clippy::too_many_lines)]
     fn handle(&self, line: &str, content: &str) -> Option<(PathBuf, Diagnostic)> {
         if let Some(captures) = RE.captures(line) {
             let message = captures[4].trim().to_string();
@@ -101,8 +102,8 @@ impl ErrorDiagnosticHandler for UndefinedTypeHandler {
                         if let Some(line_content) = content.lines().nth(line_num as usize) {
                             if let Some(start) = line_content.find(type_name.as_str()) {
                                 let end = start + type_name.as_str().len();
-                                temp_range.start.character = start as u32;
-                                temp_range.end.character = end as u32;
+                                temp_range.start.character = as_pos_idx(start);
+                                temp_range.end.character = as_pos_idx(end);
                             }
                         }
                     }

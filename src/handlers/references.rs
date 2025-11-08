@@ -4,23 +4,20 @@ use crate::symbol_table;
 use crate::utils::paths::path_buf_to_uri;
 use log::debug;
 use std::time::Instant;
-use tower_lsp_server::jsonrpc::Result;
 use tower_lsp_server::lsp_types::{Location, ReferenceParams};
 
-pub async fn handle_references<'a>(
-    snapshot: &WorkspaceSnapshot<'a>,
+pub fn handle_references(
+    snapshot: &WorkspaceSnapshot<'_>,
     params: ReferenceParams,
-) -> Result<Option<Vec<Location>>> {
+) -> Option<Vec<Location>> {
     let start = Instant::now();
     let uri = params.text_document_position.text_document.uri;
     let position = params.text_document_position.position;
 
-    let Some(resolved) = snapshot.resolve_symbol_at(&uri, position) else {
-        return Ok(None);
-    };
+    let resolved = snapshot.resolve_symbol_at(&uri, position)?;
 
     if resolved.target.info.builtin {
-        return Ok(None);
+        return None;
     }
 
     let target_name = resolved.ref_name;
@@ -29,9 +26,7 @@ pub async fn handle_references<'a>(
     // Find all references to this symbol across all files
     for entry in &snapshot.symbols.global {
         let symbol = entry.1;
-        let Ok(file_uri) = path_buf_to_uri(&symbol.info.location.path) else {
-            continue;
-        };
+        let file_uri = path_buf_to_uri(&symbol.info.location.path).ok()?;
 
         if let symbol_table::SymbolKind::Union(u) = &symbol.kind {
             for variant in &u.variants {
@@ -94,9 +89,9 @@ pub async fn handle_references<'a>(
         references.len()
     );
 
-    Ok(if references.is_empty() {
+    if references.is_empty() {
         None
     } else {
         Some(references)
-    })
+    }
 }

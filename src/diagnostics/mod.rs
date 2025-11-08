@@ -18,7 +18,8 @@ pub trait ErrorDiagnosticHandler {
     fn handle(&self, line: &str, content: &str) -> Option<(PathBuf, Diagnostic)>;
 }
 
-#[must_use] pub fn generate_diagnostics_from_error_string(
+#[must_use]
+pub fn generate_diagnostics_from_error_string(
     error_str: &str,
     root_path: &Path,
     root_content: &str,

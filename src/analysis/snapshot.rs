@@ -139,7 +139,8 @@ impl<'a> WorkspaceSnapshot<'a> {
         })
     }
 
-    #[must_use] pub fn find_enclosing_table(&self, path: &PathBuf, position: Position) -> Option<&Symbol> {
+    #[must_use]
+    pub fn find_enclosing_table(&self, path: &PathBuf, position: Position) -> Option<&Symbol> {
         let mut symbols_before_cursor: Vec<_> = self
             .symbols
             .global

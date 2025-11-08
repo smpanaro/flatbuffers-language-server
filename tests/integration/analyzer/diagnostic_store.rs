@@ -3,7 +3,6 @@ use std::sync::Arc;
 
 use flatbuffers_language_server::analysis::Analyzer;
 use flatbuffers_language_server::document_store::DocumentStore;
-use flatbuffers_language_server::utils::paths::uri_to_path_buf;
 use flatbuffers_language_server::workspace_layout::WorkspaceLayout;
 use tempfile::tempdir;
 
@@ -54,20 +53,18 @@ async fn test_analyzer_diagnostic_store() {
     // 6. Assert that the contents of diagnostics returned by parse match our expectations.
     assert_eq!(diagnostics.len(), 2);
 
-    let (invalid_url, invalid_diags) = diagnostics
+    let (invalid_path, invalid_diags) = diagnostics
         .iter()
-        .find(|(url, _)| url.as_str().ends_with("/invalid.fbs"))
+        .find(|(path, _)| path.ends_with("invalid.fbs"))
         .unwrap();
-    let invalid_path = uri_to_path_buf(invalid_url).unwrap();
-    assert_eq!(invalid_path, canonical_invalid_path);
+    assert_eq!(invalid_path, &canonical_invalid_path);
     assert_eq!(invalid_diags.len(), 1);
     assert!(invalid_diags[0].message.contains("UndefinedType"));
 
-    let (valid_url, valid_diags) = diagnostics
+    let (valid_path, valid_diags) = diagnostics
         .iter()
-        .find(|(url, _)| url.as_str().ends_with("/valid.fbs"))
+        .find(|(path, _)| path.ends_with("valid.fbs"))
         .unwrap();
-    let valid_path = uri_to_path_buf(valid_url).unwrap();
-    assert_eq!(valid_path, canonical_valid_path);
+    assert_eq!(valid_path, &canonical_valid_path);
     assert!(valid_diags.is_empty());
 }

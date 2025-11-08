@@ -27,7 +27,8 @@ pub struct SymbolIndex {
 }
 
 impl SymbolIndex {
-    #[must_use] pub fn new() -> Self {
+    #[must_use]
+    pub fn new() -> Self {
         let mut builtins = HashMap::new();
         populate_builtins(&mut builtins);
 
@@ -75,7 +76,8 @@ impl SymbolIndex {
         }
     }
 
-    #[must_use] pub fn namespaces(&self) -> HashSet<String> {
+    #[must_use]
+    pub fn namespaces(&self) -> HashSet<String> {
         self.global
             .values()
             .map(|s| &s.info.namespace)
@@ -132,6 +134,7 @@ fn populate_builtins(symbols: &mut HashMap<String, Symbol>) {
     }
 }
 
+#[allow(clippy::too_many_lines)]
 fn populate_keywords(keywords: &mut HashMap<String, String>) {
     let keywords_data = [
         (
@@ -312,12 +315,14 @@ fn populate_builtin_attributes(attributes: &mut HashMap<String, Attribute>) {
 
 #[cfg(test)]
 mod tests {
+    use std::string::ToString;
+
     use super::*;
-    use crate::symbol_table::{Location, Symbol, SymbolInfo, SymbolKind};
+    use crate::symbol_table::{Location, Symbol, SymbolInfo, SymbolKind, Table};
     use tower_lsp_server::lsp_types::{Position, Range};
 
     fn make_symbol(name: &str, path: &Path) -> Symbol {
-        let mut namespace = name.split(".").map(|s| s.to_string()).collect::<Vec<_>>();
+        let mut namespace = name.split('.').map(ToString::to_string).collect::<Vec<_>>();
         namespace.pop();
         Symbol {
             info: SymbolInfo {
@@ -330,7 +335,7 @@ mod tests {
                 documentation: None,
                 builtin: false,
             },
-            kind: SymbolKind::Table(Default::default()),
+            kind: SymbolKind::Table(Table::default()),
         }
     }
 
@@ -394,6 +399,6 @@ mod tests {
                 "single".to_string()
             ]),
             index.namespaces()
-        )
+        );
     }
 }

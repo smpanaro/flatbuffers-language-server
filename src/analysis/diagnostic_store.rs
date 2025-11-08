@@ -39,7 +39,8 @@ impl DiagnosticStore {
             .collect()
     }
 
-    #[must_use] pub fn all(&self) -> &HashMap<PathBuf, Vec<Diagnostic>> {
+    #[must_use]
+    pub fn all(&self) -> &HashMap<PathBuf, Vec<Diagnostic>> {
         &self.per_file
     }
 

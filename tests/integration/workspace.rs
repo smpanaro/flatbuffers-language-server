@@ -4,8 +4,8 @@ use tower_lsp_server::lsp_types::{
     notification::{self, DidChangeWatchedFiles, DidChangeWorkspaceFolders},
     request, CompletionContext, CompletionParams, CompletionTriggerKind,
     DidChangeWatchedFilesParams, DidChangeWorkspaceFoldersParams, FileChangeType, FileEvent,
-    TextDocumentIdentifier, TextDocumentPositionParams, WorkspaceFolder,
-    WorkspaceFoldersChangeEvent,
+    PartialResultParams, TextDocumentIdentifier, TextDocumentPositionParams,
+    WorkDoneProgressParams, WorkspaceFolder, WorkspaceFoldersChangeEvent,
 };
 use tower_lsp_server::UriExt;
 
@@ -50,10 +50,10 @@ async fn diagnostics_are_cleared_on_file_deletion() {
 async fn completions_are_removed_on_file_deletion() {
     let file_to_delete = "table TypeFromDeletedFile {}";
     let (file_with_completion, position) = parse_fixture(
-        r#"
+        r"
 table T {
     f: TypeFr$0
-}"#,
+}",
     );
 
     let mut harness = TestHarness::new();
@@ -81,8 +81,8 @@ table T {
                 },
                 position,
             },
-            work_done_progress_params: Default::default(),
-            partial_result_params: Default::default(),
+            work_done_progress_params: WorkDoneProgressParams::default(),
+            partial_result_params: PartialResultParams::default(),
             context: Some(CompletionContext {
                 trigger_kind: CompletionTriggerKind::INVOKED,
                 trigger_character: None,
@@ -130,8 +130,8 @@ table T {
                 },
                 position,
             },
-            work_done_progress_params: Default::default(),
-            partial_result_params: Default::default(),
+            work_done_progress_params: WorkDoneProgressParams::default(),
+            partial_result_params: PartialResultParams::default(),
             context: Some(CompletionContext {
                 trigger_kind: CompletionTriggerKind::INVOKED,
                 trigger_character: None,
@@ -196,10 +196,10 @@ async fn completions_are_removed_on_workspace_folder_removal() {
     let mut harness = TestHarness::new();
     let folders = vec!["root1", "root2"];
     let (file_with_completion, position) = parse_fixture(
-        r#"
+        r"
 table T {
     f: TypeFr$0
-}"#,
+}",
     );
     let files = vec![
         ("root1/completion.fbs", file_with_completion.as_str()),
@@ -229,8 +229,8 @@ table T {
                 },
                 position,
             },
-            work_done_progress_params: Default::default(),
-            partial_result_params: Default::default(),
+            work_done_progress_params: WorkDoneProgressParams::default(),
+            partial_result_params: PartialResultParams::default(),
             context: Some(CompletionContext {
                 trigger_kind: CompletionTriggerKind::INVOKED,
                 trigger_character: None,
@@ -281,8 +281,8 @@ table T {
                 },
                 position,
             },
-            work_done_progress_params: Default::default(),
-            partial_result_params: Default::default(),
+            work_done_progress_params: WorkDoneProgressParams::default(),
+            partial_result_params: PartialResultParams::default(),
             context: Some(CompletionContext {
                 trigger_kind: CompletionTriggerKind::INVOKED,
                 trigger_character: None,

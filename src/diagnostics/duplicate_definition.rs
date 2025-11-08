@@ -1,6 +1,6 @@
 use std::{fs, path::PathBuf};
 
-use crate::diagnostics::ErrorDiagnosticHandler;
+use crate::{diagnostics::ErrorDiagnosticHandler, utils::as_pos_idx};
 use log::error;
 use regex::Regex;
 use tower_lsp_server::{
@@ -31,7 +31,7 @@ impl ErrorDiagnosticHandler for DuplicateDefinitionHandler {
 
             let name = captures[5].trim().to_string();
             let unqualified_name = name.split('.').next_back().unwrap_or(name.as_str());
-            let unqualified_name_length = unqualified_name.chars().count() as u32;
+            let unqualified_name_length = as_pos_idx(unqualified_name.chars().count());
 
             let message = format!("the name `{name}` is defined multiple times");
             let curr_line = captures[2].parse().unwrap_or(1) - 1;

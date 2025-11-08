@@ -4,7 +4,6 @@ use log::debug;
 use nucleo_matcher::pattern::{CaseMatching, Normalization, Pattern};
 use nucleo_matcher::{Config, Matcher};
 use std::time::Instant;
-use tower_lsp_server::jsonrpc::Result;
 use tower_lsp_server::lsp_types::{OneOf, WorkspaceSymbol, WorkspaceSymbolParams};
 
 fn to_workspace_symbol(symbol: &crate::symbol_table::Symbol) -> WorkspaceSymbol {
@@ -22,10 +21,20 @@ fn to_workspace_symbol(symbol: &crate::symbol_table::Symbol) -> WorkspaceSymbol 
     }
 }
 
-pub async fn handle_workspace_symbol<'a>(
-    snapshot: &WorkspaceSnapshot<'a>,
-    params: WorkspaceSymbolParams,
-) -> Result<Option<Vec<WorkspaceSymbol>>> {
+pub fn handle_workspace_symbol(
+    snapshot: &WorkspaceSnapshot<'_>,
+    params: &WorkspaceSymbolParams,
+) -> Vec<WorkspaceSymbol> {
+    struct SymbolWrapper<'a> {
+        symbol: &'a WorkspaceSymbol,
+    }
+
+    impl AsRef<str> for SymbolWrapper<'_> {
+        fn as_ref(&self) -> &str {
+            &self.symbol.name
+        }
+    }
+
     let start = Instant::now();
 
     let result = if params.query.is_empty() {
@@ -37,7 +46,7 @@ pub async fn handle_workspace_symbol<'a>(
             .map(to_workspace_symbol)
             .collect();
         symbols.sort_by(|a, b| a.name.cmp(&b.name));
-        Some(symbols)
+        symbols
     } else {
         let symbols: Vec<WorkspaceSymbol> = snapshot
             .symbols
@@ -47,16 +56,6 @@ pub async fn handle_workspace_symbol<'a>(
             .map(to_workspace_symbol)
             .collect();
 
-        struct SymbolWrapper<'a> {
-            symbol: &'a WorkspaceSymbol,
-        }
-
-        impl AsRef<str> for SymbolWrapper<'_> {
-            fn as_ref(&self) -> &str {
-                &self.symbol.name
-            }
-        }
-
         let wrapped_symbols: Vec<SymbolWrapper> = symbols
             .iter()
             .map(|s| SymbolWrapper { symbol: s })
@@ -65,15 +64,16 @@ pub async fn handle_workspace_symbol<'a>(
         let mut matcher = Matcher::new(Config::DEFAULT);
         let pattern = Pattern::parse(&params.query, CaseMatching::Ignore, Normalization::Smart);
 
-        let mut matches = pattern.match_list(wrapped_symbols, &mut matcher);
-        matches.sort_by_key(|(s, score)| (std::cmp::Reverse(*score), s.symbol.name.as_str()));
+        let mut symbol_matches = pattern.match_list(wrapped_symbols, &mut matcher);
+        symbol_matches
+            .sort_by_key(|(s, score)| (std::cmp::Reverse(*score), s.symbol.name.as_str()));
 
-        let result: Vec<WorkspaceSymbol> = matches
+        let result: Vec<WorkspaceSymbol> = symbol_matches
             .into_iter()
             .map(|(wrapper, _)| wrapper.symbol.clone())
             .collect();
 
-        Some(result)
+        result
     };
 
     let elapsed = start.elapsed();
@@ -83,5 +83,5 @@ pub async fn handle_workspace_symbol<'a>(
         params.query
     );
 
-    Ok(result)
+    result
 }

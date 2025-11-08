@@ -7,6 +7,7 @@ use flatbuffers_language_server::workspace_layout::WorkspaceLayout;
 use tempfile::tempdir;
 
 #[tokio::test]
+#[allow(clippy::too_many_lines)]
 async fn test_analyzer_symbol_index() {
     // 1. Setup the files on disk.
     let dir = tempdir().unwrap();
@@ -21,22 +22,22 @@ async fn test_analyzer_symbol_index() {
     */
 
     let no_namespace_fbs_path = dir.path().join("no_namespace.fbs");
-    let no_namespace_fbs_content = r#"
+    let no_namespace_fbs_content = r"
         table TableNoNamespace { field: int; }
         struct StructNoNamespace { field: int; }
         enum EnumNoNamespace: byte { A, B }
         union UnionNoNamespace { TableNoNamespace }
-    "#;
+    ";
     fs::write(&no_namespace_fbs_path, no_namespace_fbs_content).unwrap();
 
     let with_namespace_fbs_path = dir.path().join("with_namespace.fbs");
-    let with_namespace_fbs_content = r#"
+    let with_namespace_fbs_content = r"
         namespace MyNamespace;
         table TableWithNamespace { field: int; }
         struct StructWithNamespace { field: int; }
         enum EnumWithNamespace: byte { A, B }
         union UnionWithNamespace { TableWithNamespace }
-    "#;
+    ";
     fs::write(&with_namespace_fbs_path, with_namespace_fbs_content).unwrap();
 
     let importer_fbs_path = dir.path().join("importer.fbs");

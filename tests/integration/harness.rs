@@ -32,7 +32,7 @@ pub enum ServerMessage {
 
 pub struct TestHarness {
     req_stream: DuplexStream,
-    res_stream: DuplexStream,
+    resp_stream: DuplexStream,
     read_buffer: Vec<u8>,
     responses: VecDeque<String>,
     unhandled_notifications: VecDeque<Request>,
@@ -46,21 +46,21 @@ impl TestHarness {
     pub fn new() -> Self {
         test_logger::init();
         let (req_client, req_server) = io::duplex(1024);
-        let (res_server, res_client) = io::duplex(1024);
+        let (resp_server, resp_client) = io::duplex(1024);
 
         let (service, socket) = LspService::build(Backend::new)
             .custom_method(DidSaveSync::METHOD, Backend::did_save_sync)
             .custom_method(AllDiagnostics::METHOD, Backend::all_diagnostics)
             .finish();
 
-        tokio::spawn(Server::new(req_server, res_server, socket).serve(service));
+        tokio::spawn(Server::new(req_server, resp_server, socket).serve(service));
 
         let temp_dir = TempDir::new().unwrap();
         let root_path = temp_dir.path().canonicalize().unwrap();
 
         Self {
             req_stream: req_client,
-            res_stream: res_client,
+            resp_stream: resp_client,
             read_buffer: Vec::new(),
             responses: VecDeque::new(),
             unhandled_notifications: VecDeque::new(),
@@ -92,10 +92,10 @@ impl TestHarness {
         // Loop until we have successfully parsed at least one message.
         while self.responses.is_empty() {
             // fill_buffer now just reads bytes without trying to interpret them.
-            if self.fill_buffer().await.is_err() {
-                // Handle the error, e.g., the stream was closed.
-                panic!("Failed to read from server");
-            }
+            assert!(
+                self.fill_buffer().await.is_ok(),
+                "Failed to read from server"
+            );
 
             // Now, try to parse messages from our persistent buffer.
             loop {
@@ -145,12 +145,11 @@ impl TestHarness {
             // A server-to-client request has an ID, but a notification does not.
             if request.id().is_some() {
                 return ServerMessage::ServerRequest(request);
-            } else {
-                return ServerMessage::Notification(request);
             }
+            return ServerMessage::Notification(request);
         }
 
-        panic!("Failed to deserialize server message: {}", msg_str);
+        panic!("Failed to deserialize server message: {msg_str}");
     }
 
     fn next_request_id(&mut self) -> i64 {
@@ -161,7 +160,7 @@ impl TestHarness {
     pub async fn initialize_and_open(&mut self, workspace: &[(&str, &str)]) {
         let files_to_open: Vec<_> = workspace.iter().map(|(name, _)| *name).collect();
         self.initialize_and_open_some(workspace, &files_to_open)
-            .await
+            .await;
     }
 
     pub async fn initialize_and_open_some(
@@ -191,16 +190,15 @@ impl TestHarness {
             .id(id)
             .finish();
         self.send_request(req).await;
-        let res = match self.recv_message().await {
-            ServerMessage::Response(res) => res,
+        let resp = match self.recv_message().await {
+            ServerMessage::Response(resp) => resp,
             ServerMessage::ServerRequest(req) | ServerMessage::Notification(req) => {
                 panic!(
-                    "Received unexpected response while waiting for initizlie response: {:?}",
-                    req
+                    "Received unexpected response while waiting for initizlie response: {req:?}"
                 );
             }
         };
-        assert!(res.is_ok());
+        assert!(resp.is_ok());
 
         // 3. Send "initialized" notification.
         let params = InitializedParams {};
@@ -210,15 +208,15 @@ impl TestHarness {
         self.send_request(req).await;
 
         // 4. Send "didOpen" notifications for the files.
-        let open_set: std::collections::HashSet<&str> = files_to_open.iter().cloned().collect();
-        for (name, content) in workspace {
+        let open_set: std::collections::HashSet<&str> = files_to_open.iter().copied().collect();
+        for &(name, content) in workspace {
             if open_set.contains(name) {
                 let uri = Uri::from_file_path(self.root_path.join(name)).unwrap();
                 let text_document = TextDocumentItem {
                     uri,
                     language_id: "flatbuffers".to_string(),
                     version: 1,
-                    text: content.to_string(),
+                    text: content.to_owned(),
                 };
                 let params = DidOpenTextDocumentParams { text_document };
                 let req = Request::build(DidOpenTextDocument::METHOD)
@@ -236,14 +234,14 @@ impl TestHarness {
         files_to_open: &[&str],
     ) {
         let mut workspace_folders = Vec::new();
-        for folder_name in folder_names {
+        for &folder_name in folder_names {
             let folder_path = self.temp_dir.path().join(folder_name);
             fs::create_dir_all(&folder_path).unwrap();
             let canonical_folder_path = folder_path.canonicalize().unwrap_or(folder_path);
             let folder_uri = Uri::from_file_path(canonical_folder_path).unwrap();
             workspace_folders.push(WorkspaceFolder {
                 uri: folder_uri,
-                name: folder_name.to_string(),
+                name: folder_name.to_owned(),
             });
         }
 
@@ -255,8 +253,10 @@ impl TestHarness {
             fs::write(path, content).unwrap();
         }
 
-        let mut params = InitializeParams::default();
-        params.workspace_folders = Some(workspace_folders);
+        let params = InitializeParams {
+            workspace_folders: Some(workspace_folders),
+            ..Default::default()
+        };
 
         let id = self.next_request_id();
         let req = Request::build(Initialize::METHOD)
@@ -264,11 +264,10 @@ impl TestHarness {
             .id(id)
             .finish();
         self.send_request(req).await;
-        let res = match self.recv_message().await {
-            ServerMessage::Response(res) => res,
-            _ => panic!("unexpected message"),
+        let ServerMessage::Response(resp) = self.recv_message().await else {
+            panic!("unexpected message")
         };
-        assert!(res.is_ok());
+        assert!(resp.is_ok());
 
         let params = InitializedParams {};
         let req = Request::build(Initialized::METHOD)
@@ -276,8 +275,8 @@ impl TestHarness {
             .finish();
         self.send_request(req).await;
 
-        let open_set: std::collections::HashSet<&str> = files_to_open.iter().cloned().collect();
-        for (name, content) in workspace_files {
+        let open_set: std::collections::HashSet<&str> = files_to_open.iter().copied().collect();
+        for &(name, content) in workspace_files {
             if open_set.contains(name) {
                 let path = self.temp_dir.path().join(name);
                 let uri = Uri::from_file_path(path).unwrap();
@@ -285,7 +284,7 @@ impl TestHarness {
                     uri,
                     language_id: "flatbuffers".to_string(),
                     version: 1,
-                    text: content.to_string(),
+                    text: content.to_owned(),
                 };
                 let params = DidOpenTextDocumentParams { text_document };
                 let req = Request::build(DidOpenTextDocument::METHOD)
@@ -377,17 +376,20 @@ impl TestHarness {
 
         loop {
             match self.recv_message().await {
-                ServerMessage::Response(res) => {
+                ServerMessage::Response(resp) => {
                     // Check if this is the response we are waiting for.
-                    if res.id() == &Id::Number(id) {
-                        let value = res.result().expect("Request failed").clone();
+                    if resp.id() == &Id::Number(id) {
+                        let value = resp.result().expect("Request failed").clone();
                         return serde_json::from_value(value)
                             .expect("Failed to deserialize response result");
-                    } else {
-                        // This is a response for a different request. This shouldn't happen in a
-                        // single-threaded test harness, so we'll panic.
-                        panic!("Received response for unexpected request id. Expected: {:?}, Got: {:?}", id, res.id());
                     }
+                    // This is a response for a different request. This shouldn't happen in a
+                    // single-threaded test harness, so we'll panic.
+                    panic!(
+                        "Received response for unexpected request id. Expected: {:?}, Got: {:?}",
+                        id,
+                        resp.id()
+                    );
                 }
                 ServerMessage::Notification(req) => {
                     // We received a notification while waiting for a response.
@@ -426,8 +428,7 @@ impl TestHarness {
             match self.recv_message().await {
                 ServerMessage::Response(res) => {
                     panic!(
-                        "Received unexpected response while waiting for a notification: {:?}",
-                        res
+                        "Received unexpected response while waiting for a notification: {res:?}"
                     );
                 }
                 ServerMessage::Notification(req) => {
@@ -438,10 +439,9 @@ impl TestHarness {
                             .clone();
                         return serde_json::from_value(params)
                             .expect("Failed to deserialize notification params");
-                    } else {
-                        // This is a different notification, so store it for later.
-                        self.unhandled_notifications.push_back(req);
                     }
+                    // This is a different notification, so store it for later.
+                    self.unhandled_notifications.push_back(req);
                 }
                 ServerMessage::ServerRequest(req) => {
                     // The server sent us a request. Handle it and continue waiting for our notification.
@@ -483,7 +483,7 @@ impl TestHarness {
         // Use the timeout when reading from the socket.
         match tokio::time::timeout(
             std::time::Duration::from_secs(5),
-            self.res_stream.read(&mut buf),
+            self.resp_stream.read(&mut buf),
         )
         .await
         {
@@ -544,10 +544,8 @@ impl TestHarness {
             let params = self
                 .notification::<notification::PublishDiagnostics>()
                 .await;
-            if &params.uri == uri {
-                if !params.diagnostics.is_empty() {
-                    return params.diagnostics[0].clone();
-                }
+            if &params.uri == uri && !params.diagnostics.is_empty() {
+                return params.diagnostics[0].clone();
             }
         }
     }

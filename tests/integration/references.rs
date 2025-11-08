@@ -1,8 +1,8 @@
 use crate::harness::TestHarness;
 use crate::helpers::parse_fixture;
 use tower_lsp_server::lsp_types::{
-    request, Location, Position, Range, ReferenceContext, ReferenceParams, TextDocumentIdentifier,
-    TextDocumentPositionParams,
+    request, Location, PartialResultParams, Position, Range, ReferenceContext, ReferenceParams,
+    TextDocumentIdentifier, TextDocumentPositionParams, WorkDoneProgressParams,
 };
 
 async fn get_references(fixture: &str, other_files: &[(&str, &str)]) -> Vec<Location> {
@@ -21,8 +21,8 @@ async fn get_references(fixture: &str, other_files: &[(&str, &str)]) -> Vec<Loca
                 text_document: TextDocumentIdentifier { uri: main_file_uri },
                 position,
             },
-            work_done_progress_params: Default::default(),
-            partial_result_params: Default::default(),
+            work_done_progress_params: WorkDoneProgressParams::default(),
+            partial_result_params: PartialResultParams::default(),
             context: ReferenceContext {
                 include_declaration: true,
             },
@@ -33,7 +33,7 @@ async fn get_references(fixture: &str, other_files: &[(&str, &str)]) -> Vec<Loca
 
 #[tokio::test]
 async fn find_references_for_table() {
-    let fixture = r#"
+    let fixture = r"
 namespace MyNS; // otherwise root isn't parsed
 
 table My$0Table {
@@ -45,7 +45,7 @@ table AnotherTable {
 }
 
 root_type MyTable;
-"#;
+";
     let mut locations = get_references(fixture, &[]).await;
     locations.sort_by_key(|loc| loc.range.start.line);
 
@@ -73,7 +73,7 @@ root_type MyTable;
 #[tokio::test]
 #[ignore = "Enum variants are not yet supported for references."]
 async fn find_references_for_enum_variant() {
-    let fixture = r#"
+    let fixture = r"
 enum MyEnum: byte {
     A$0, B, C
 }
@@ -82,7 +82,7 @@ table MyTable {
     a: MyEnum = A;
     b: MyEnum = B;
 }
-"#;
+";
     let mut locations = get_references(fixture, &[]).await;
     locations.sort_by_key(|loc| loc.range.start.line);
 
@@ -103,11 +103,11 @@ table MyTable {
 
 #[tokio::test]
 async fn find_references_across_files() {
-    let included_fixture = r#"
+    let included_fixture = r"
 table In$0cludedTable {
     b: bool;
 }
-"#;
+";
 
     let main_fixture = r#"
 include "included.fbs";
@@ -137,8 +137,8 @@ table MyTable {
                 },
                 position,
             },
-            work_done_progress_params: Default::default(),
-            partial_result_params: Default::default(),
+            work_done_progress_params: WorkDoneProgressParams::default(),
+            partial_result_params: PartialResultParams::default(),
             context: ReferenceContext {
                 include_declaration: true,
             },
@@ -167,17 +167,17 @@ table MyTable {
 
 #[tokio::test]
 async fn find_references_respects_namespaces() {
-    let coffee_fixture = r#"
+    let coffee_fixture = r"
 namespace coffee;
 
 table Be$0an {}
-"#;
+";
 
-    let pastry_fixture = r#"
+    let pastry_fixture = r"
 namespace pastry;
 
 table Bean {}
-"#;
+";
 
     let main_fixture = r#"
 include "coffee.fbs";
@@ -196,7 +196,7 @@ table Beans {
         .initialize_and_open(&[
             ("main.fbs", &main_content),
             ("coffee.fbs", &coffee_content),
-            ("pastry.fbs", &pastry_fixture),
+            ("pastry.fbs", pastry_fixture),
         ])
         .await;
 
@@ -213,8 +213,8 @@ table Beans {
                 },
                 position: coffee_position,
             },
-            work_done_progress_params: Default::default(),
-            partial_result_params: Default::default(),
+            work_done_progress_params: WorkDoneProgressParams::default(),
+            partial_result_params: PartialResultParams::default(),
             context: ReferenceContext {
                 include_declaration: true,
             },
@@ -249,8 +249,8 @@ table Beans {
                 },
                 position: pastry_position,
             },
-            work_done_progress_params: Default::default(),
-            partial_result_params: Default::default(),
+            work_done_progress_params: WorkDoneProgressParams::default(),
+            partial_result_params: PartialResultParams::default(),
             context: ReferenceContext {
                 include_declaration: true,
             },
@@ -279,11 +279,11 @@ table Beans {
 
 #[tokio::test]
 async fn find_references_respects_nested_namespaces() {
-    let included_fixture = r#"
+    let included_fixture = r"
 namespace One.Two;
 
 table X {}
-"#;
+";
 
     let main_fixture = r#"
 include "included.fbs";
@@ -299,7 +299,7 @@ table Y {
     harness
         .initialize_and_open(&[
             ("main.fbs", &main_content),
-            ("included.fbs", &included_fixture),
+            ("included.fbs", included_fixture),
         ])
         .await;
 
@@ -314,8 +314,8 @@ table Y {
                 },
                 position,
             },
-            work_done_progress_params: Default::default(),
-            partial_result_params: Default::default(),
+            work_done_progress_params: WorkDoneProgressParams::default(),
+            partial_result_params: PartialResultParams::default(),
             context: ReferenceContext {
                 include_declaration: true,
             },
@@ -344,13 +344,13 @@ table Y {
 
 #[tokio::test]
 async fn find_references_respects_namespaced_vector() {
-    let included_fixture = r#"
+    let included_fixture = r"
 namespace One.Two;
 
 struct X {
     i: int;
 }
-"#;
+";
 
     let main_fixture = r#"
 include "included.fbs";
@@ -366,7 +366,7 @@ struct Y {
     harness
         .initialize_and_open(&[
             ("main.fbs", &main_content),
-            ("included.fbs", &included_fixture),
+            ("included.fbs", included_fixture),
         ])
         .await;
 
@@ -381,8 +381,8 @@ struct Y {
                 },
                 position,
             },
-            work_done_progress_params: Default::default(),
-            partial_result_params: Default::default(),
+            work_done_progress_params: WorkDoneProgressParams::default(),
+            partial_result_params: PartialResultParams::default(),
             context: ReferenceContext {
                 include_declaration: true,
             },
@@ -411,11 +411,11 @@ struct Y {
 
 #[tokio::test]
 async fn find_references_respects_root_type_namespaces() {
-    let included_fixture = r#"
+    let included_fixture = r"
 namespace One.Two;
 
 table Number {}
-"#;
+";
 
     let main_fixture = r#"
 include "included.fbs";
@@ -429,7 +429,7 @@ root_type Two.Numbe$0r;
     harness
         .initialize_and_open(&[
             ("main.fbs", &main_content),
-            ("included.fbs", &included_fixture),
+            ("included.fbs", included_fixture),
         ])
         .await;
 
@@ -444,8 +444,8 @@ root_type Two.Numbe$0r;
                 },
                 position,
             },
-            work_done_progress_params: Default::default(),
-            partial_result_params: Default::default(),
+            work_done_progress_params: WorkDoneProgressParams::default(),
+            partial_result_params: PartialResultParams::default(),
             context: ReferenceContext {
                 include_declaration: true,
             },
@@ -474,12 +474,12 @@ root_type Two.Numbe$0r;
 
 #[tokio::test]
 async fn find_references_respects_union_namespaces() {
-    let included_fixture = r#"
+    let included_fixture = r"
 namespace One.Two;
 
 table Number {}
 table String {}
-"#;
+";
 
     let main_fixture = r#"
 include "included.fbs";
@@ -499,7 +499,7 @@ union Types {
     harness
         .initialize_and_open(&[
             ("main.fbs", &main_content),
-            ("included.fbs", &included_fixture),
+            ("included.fbs", included_fixture),
         ])
         .await;
 
@@ -514,8 +514,8 @@ union Types {
                 },
                 position,
             },
-            work_done_progress_params: Default::default(),
-            partial_result_params: Default::default(),
+            work_done_progress_params: WorkDoneProgressParams::default(),
+            partial_result_params: PartialResultParams::default(),
             context: ReferenceContext {
                 include_declaration: true,
             },

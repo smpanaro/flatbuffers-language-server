@@ -1,8 +1,13 @@
+#![allow(
+    clippy::mutable_key_type,
+    reason = "lsp_types::PublishDiagnosticParams uses Uri, which AllDiagnostics mimics"
+)]
 use crate::harness::TestHarness;
 use flatbuffers_language_server::ext::all_diagnostics::AllDiagnostics;
 use tower_lsp_server::lsp_types::{
     notification, request, CodeActionContext, CodeActionOrCommand, CodeActionParams,
-    DiagnosticSeverity, DiagnosticTag, Position, Range, TextDocumentIdentifier,
+    DiagnosticSeverity, DiagnosticTag, PartialResultParams, Position, Range,
+    TextDocumentIdentifier, WorkDoneProgressParams,
 };
 
 #[tokio::test]
@@ -35,13 +40,13 @@ async fn diagnostic_error_has_correct_range() {
 
 #[tokio::test]
 async fn multiple_files() {
-    let content_a = r#"
+    let content_a = r"
 union Any { Foo }
-"#;
-    let content_b = r#"
+";
+    let content_b = r"
 /** Error on a different line. */
 union Whichever { One }
-"#;
+";
     let mut harness = TestHarness::new();
     harness
         .initialize_and_open(&[("a.fbs", content_a), ("b.fbs", content_b)])
@@ -60,7 +65,7 @@ union Whichever { One }
         } else if params.uri == b_uri {
             params_b = Some(params);
         } else {
-            panic!("unexpected diagnostic: {:?}", params);
+            panic!("unexpected diagnostic: {params:?}");
         }
     }
 
@@ -76,15 +81,15 @@ union Whichever { One }
 
     let all = harness.call::<AllDiagnostics>(()).await;
     assert_eq!(all.len(), 2);
-    assert!(all.iter().all(|(_, ds)| ds.len() == 1))
+    assert!(all.iter().all(|(_, ds)| ds.len() == 1));
 }
 
 #[tokio::test]
 async fn duplicate_enum_definition() {
-    let content = r#"
+    let content = r"
 enum MyEnum: byte { A, B }
 enum MyEnum: byte { C, D }
-"#;
+";
     let mut harness = TestHarness::new();
     harness
         .initialize_and_open(&[("schema.fbs", content)])
@@ -135,11 +140,11 @@ async fn duplicate_enum_variant() {
 #[tokio::test]
 async fn missing_include() {
     let included_content = "enum MyEnum: byte { A, B }";
-    let content = r#"
+    let content = r"
 table Foo {
     e: MyEnum;
 }
-"#;
+";
     let mut harness = TestHarness::new();
     harness
         .initialize_and_open(&[("schema.fbs", content), ("included.fbs", included_content)])
@@ -152,9 +157,8 @@ table Foo {
             .await;
         if params.uri == schema_uri {
             break params.diagnostics;
-        } else {
-            assert_eq!(params.diagnostics.len(), 0)
         }
+        assert_eq!(params.diagnostics.len(), 0);
     };
     assert_eq!(harness.call::<AllDiagnostics>(()).await.len(), 2);
 
@@ -179,14 +183,14 @@ table Foo {
                 diagnostics: vec![diagnostic.clone()],
                 ..Default::default()
             },
-            work_done_progress_params: Default::default(),
-            partial_result_params: Default::default(),
+            work_done_progress_params: WorkDoneProgressParams::default(),
+            partial_result_params: PartialResultParams::default(),
         })
         .await;
 
     let code_action = match code_actions.unwrap()[0].clone() {
         CodeActionOrCommand::CodeAction(a) => Some(a),
-        _ => None,
+        CodeActionOrCommand::Command(_) => None,
     }
     .unwrap();
 
@@ -225,12 +229,12 @@ async fn undefined_vector_type() {
 
 #[tokio::test]
 async fn deprecated_field() {
-    let content = r#"
+    let content = r"
 table Foo {
     f: [int];
     depr: int (deprecated);
 }
-"#;
+";
     let mut harness = TestHarness::new();
     harness
         .initialize_and_open(&[("schema.fbs", content)])
@@ -247,7 +251,7 @@ table Foo {
     );
     assert_eq!(diagnostic.severity, Some(DiagnosticSeverity::HINT));
     // This tag is more appropriate for flatbuffers' usage of deprecation.
-    assert_eq!(diagnostic.tags, Some(vec![DiagnosticTag::UNNECESSARY]))
+    assert_eq!(diagnostic.tags, Some(vec![DiagnosticTag::UNNECESSARY]));
 }
 
 #[tokio::test]
@@ -272,9 +276,8 @@ include "pastries.fbs";
             .await;
         if param.uri == schema_uri {
             break param.diagnostics;
-        } else {
-            assert!(param.diagnostics.is_empty());
         }
+        assert!(param.diagnostics.is_empty());
     };
     assert_eq!(harness.call::<AllDiagnostics>(()).await.len(), 3);
     assert_eq!(diagnostics.len(), 1);
@@ -307,13 +310,13 @@ include "pastries.fbs";
 
 #[tokio::test]
 async fn missing_semicolon_field() {
-    let content = r#"
+    let content = r"
 table Coffee {
     roast: string
 
     origin: string;
 }
-"#;
+";
     let mut harness = TestHarness::new();
     harness
         .initialize_and_open(&[("schema.fbs", content)])
@@ -351,11 +354,11 @@ table Coffee {
 
 #[tokio::test]
 async fn missing_semicolon_end_of_file() {
-    let content = r#"
+    let content = r"
 table Coffee {}
 
 root_type Coffee
-"#;
+";
     let mut harness = TestHarness::new();
     harness
         .initialize_and_open(&[("schema.fbs", content)])
@@ -384,12 +387,12 @@ root_type Coffee
 
 #[tokio::test]
 async fn missing_semicolon_comment() {
-    let content = r#"
+    let content = r"
 table ids {
     one: int (id: 0)
     // two: int (id: 1);
 }
-"#;
+";
     let mut harness = TestHarness::new();
     harness
         .initialize_and_open(&[("schema.fbs", content)])
@@ -427,11 +430,11 @@ table ids {
 
 #[tokio::test]
 async fn expecting_bracket() {
-    let content = r#"
+    let content = r"
 table Foo {
     foo: [int;
 }
-"#;
+";
     let mut harness = TestHarness::new();
     harness
         .initialize_and_open(&[("schema.fbs", content)])
@@ -469,11 +472,11 @@ table Foo {
 
 #[tokio::test]
 async fn expecting_bracket_no_semicolon() {
-    let content = r#"
+    let content = r"
 table Foo {
     foo: [int
 }
-"#;
+";
     let mut harness = TestHarness::new();
     harness
         .initialize_and_open(&[("schema.fbs", content)])
@@ -511,10 +514,10 @@ table Foo {
 
 #[tokio::test]
 async fn expecting_table_brace() {
-    let content = r#"
+    let content = r"
 table Foo
     foo: int;
-"#;
+";
     let mut harness = TestHarness::new();
     harness
         .initialize_and_open(&[("schema.fbs", content)])
@@ -552,8 +555,8 @@ table Foo
 
 #[tokio::test]
 async fn field_case_warning() {
-    let content = r#"
-table MyTable { furryWombat:string; }"#;
+    let content = r"
+table MyTable { furryWombat:string; }";
 
     let mut harness = TestHarness::new();
     harness
@@ -578,13 +581,13 @@ table MyTable { furryWombat:string; }"#;
 
 #[tokio::test]
 async fn undefined_type_in_included_file() {
-    let included = r#"
+    let included = r"
 table Pen {}
 
 table Ink {
     brand: Brand; // undefined
 }
-"#;
+";
     let main = r#"
 include "included.fbs";
 root_type Pen;
@@ -623,13 +626,13 @@ root_type Pen;
 
 #[tokio::test]
 async fn undefined_vector_type_in_included_file() {
-    let included = r#"
+    let included = r"
 table Pen {}
 
 table Ink {
     brand: [Brand]; // undefined
 }
-"#;
+";
     let main = r#"
 include "included.fbs";
 root_type Pen;
@@ -697,21 +700,21 @@ table MyTable {
 #[tokio::test]
 async fn no_unused_conflicting_namespace() {
     let schema_fixture = r#"
-include "../related/namespace_n.fbs";
-include "../related/namespace_x.fbs
+include "../related/namespace_first.fbs";
+include "../related/namespace_second.fbs
 
 union MyTable {
-    N.OtherTable,
+    First.OtherTable,
 }
 "#;
-    let namespace_n_fixture = "namespace N; table OtherTable {}";
-    let namespace_x_fixture = "namespace X; table OtherTable {}";
+    let namespace_first_fixture = "namespace First; table OtherTable {}";
+    let namespace_second_fixture = "namespace Second; table OtherTable {}";
 
     let mut harness = TestHarness::new();
     harness
         .initialize_and_open(&[
-            ("related/namespace_n.fbs", namespace_n_fixture),
-            ("related/namespace_x.fbs", namespace_x_fixture),
+            ("related/namespace_first.fbs", namespace_first_fixture),
+            ("related/namespace_second.fbs", namespace_second_fixture),
             ("core/schema.fbs", schema_fixture),
         ])
         .await;
@@ -723,9 +726,8 @@ union MyTable {
             .await;
         if schema_uri == param.uri {
             break param.diagnostics;
-        } else {
-            assert!(param.diagnostics.is_empty());
         }
+        assert!(param.diagnostics.is_empty());
     };
 
     {

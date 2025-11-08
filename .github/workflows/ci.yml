@@ -41,5 +41,8 @@ jobs:
       - name: Build
         run: cargo build --verbose
 
+      - name: Run clippy
+        run: cargo clippy --all --all-targets --all-features -- -D warnings -D clippy::pedantic
+
       - name: Run tests
         run: cargo test

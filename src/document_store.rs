@@ -27,7 +27,7 @@ impl DocumentStore {
         }
     }
 
-    pub fn handle_did_open(&self, params: DidOpenTextDocumentParams) -> Option<PathBuf> {
+    pub fn handle_did_open(&self, params: &DidOpenTextDocumentParams) -> Option<PathBuf> {
         debug!("opened: {}", params.text_document.uri.path());
         if !is_flatbuffer_schema(&params.text_document.uri) {
             return None;
@@ -70,9 +70,10 @@ impl DocumentStore {
         Some((path, was_changed))
     }
 
-    pub fn handle_did_close(&self, params: DidCloseTextDocumentParams) {
+    pub fn handle_did_close(&self, params: &DidCloseTextDocumentParams) {
         debug!("closed: {}", params.text_document.uri.path());
         if !is_flatbuffer_schema(&params.text_document.uri) {
+            #[allow(clippy::needless_return)]
             return;
         }
     }

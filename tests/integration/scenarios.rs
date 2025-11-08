@@ -3,6 +3,7 @@ use insta::assert_snapshot;
 use tower_lsp_server::lsp_types::{
     notification, request, DiagnosticSeverity, HoverParams, Position, Range,
     TextDocumentIdentifier, TextDocumentPositionParams, VersionedTextDocumentIdentifier,
+    WorkDoneProgressParams,
 };
 
 #[tokio::test]
@@ -62,12 +63,12 @@ async fn error_appears_on_change_and_is_then_cleared() {
 
 #[tokio::test]
 async fn hover_works_after_file_close() {
-    let included_fixture = r#"
+    let included_fixture = r"
 // This is from another file.
 table IncludedTable {
     b: bool;
 }
-"#;
+";
 
     let main_fixture = r#"
 include "included.fbs";
@@ -95,7 +96,7 @@ table MyTable {
             TextDocumentIdentifier::new(schema_uri),
             position,
         ),
-        work_done_progress_params: Default::default(),
+        work_done_progress_params: WorkDoneProgressParams::default(),
     };
 
     let initial_response = harness
@@ -119,14 +120,14 @@ table MyTable {
 
 #[tokio::test]
 async fn deleted_symbol_causes_diagnostic() {
-    let version_one = r#"
+    let version_one = r"
 table T {}
 root_type T;
-"#;
+";
 
-    let version_two = r#"
+    let version_two = r"
 root_type T;
-"#;
+";
 
     let mut harness = TestHarness::new();
     harness
@@ -156,41 +157,40 @@ root_type T;
 
 #[tokio::test]
 async fn saving_included_file_clears_diagnostic() {
-    let includer = r#"
+    let including = r#"
 include "included.fbs";
 
 table T { i: I; } // Diagnostic here: I is referenced but not defined
 "#;
 
-    let included_before = r#"
+    let included_before = r"
 table X {}
-"#;
+";
 
-    let included_after = r#"
+    let included_after = r"
 table I {} // Change so that I is now defined.
-"#;
+";
 
     let mut harness = TestHarness::new();
     harness
         .initialize_and_open_some(
             &[
-                ("includer.fbs", includer),
+                ("including.fbs", including),
                 ("included.fbs", included_before),
             ],
             &[],
         )
         .await;
 
-    let includer_uri = harness.file_uri("includer.fbs");
+    let including_uri = harness.file_uri("including.fbs");
     let diagnostics = loop {
         let params = harness
             .notification::<notification::PublishDiagnostics>()
             .await;
-        if params.uri == includer_uri {
+        if params.uri == including_uri {
             break params.diagnostics;
-        } else {
-            assert_eq!(params.diagnostics.len(), 0)
         }
+        assert_eq!(params.diagnostics.len(), 0);
     };
 
     // Diagnostic in includer.fbs since I is not found.
@@ -205,11 +205,10 @@ table I {} // Change so that I is now defined.
         let params = harness
             .notification::<notification::PublishDiagnostics>()
             .await;
-        if params.uri == includer_uri {
+        if params.uri == including_uri {
             break params.diagnostics;
-        } else {
-            assert_eq!(params.diagnostics.len(), 0)
         }
+        assert_eq!(params.diagnostics.len(), 0);
     };
 
     // No more diagnostic now that I is defined.
@@ -228,7 +227,7 @@ table Other {
 // ^ The last bracket of this file will report the error for included.
 "#;
 
-    let included_original = r#"
+    let included_original = r"
 table AnotherTable {
     to: int;
     make: int;
@@ -242,7 +241,7 @@ table AnotherTable {
 table WithError {
     f: int;
 }
-"#;
+";
     let included_error = included_original.replace("f: int;", "f: int");
 
     let mut harness = TestHarness::new();
@@ -264,7 +263,7 @@ table WithError {
             let params = harness
                 .notification::<notification::PublishDiagnostics>()
                 .await;
-            assert_eq!(params.diagnostics.len(), 0)
+            assert_eq!(params.diagnostics.len(), 0);
         }
     }
 
@@ -283,9 +282,8 @@ table WithError {
                 .await;
             if params.uri == included_uri {
                 break params.diagnostics;
-            } else {
-                assert_eq!(params.diagnostics.len(), 0)
             }
+            assert_eq!(params.diagnostics.len(), 0);
         };
         assert_eq!(diagnostics.len(), 1);
         assert_eq!(diagnostics[0].range.start, Position::new(12, 10));
@@ -310,13 +308,13 @@ table WithError {
 
 #[tokio::test]
 async fn saving_included_file_maintains_hints() {
-    let includer = r#"
+    let including = r#"
 include "included.fbs";
 union Any { T }
 "#;
 
     let included = r#"
-include "includer.fbs"; // unused
+include "including.fbs"; // unused
 
 table T {
     depr: int (deprecated);
@@ -330,7 +328,7 @@ table T {
         // Initial open.
         harness
             .initialize_and_open_some(
-                &[("includer.fbs", includer), ("included.fbs", included)],
+                &[("including.fbs", including), ("included.fbs", included)],
                 &["included.fbs"],
             )
             .await;
@@ -346,7 +344,7 @@ table T {
                     .iter()
                     .all(|d| d.severity == Some(DiagnosticSeverity::HINT)));
             } else {
-                assert_eq!(params.diagnostics.len(), 0)
+                assert_eq!(params.diagnostics.len(), 0);
             }
         }
     }
@@ -358,7 +356,7 @@ table T {
         // Otherwise we don't have a non-timeout based way of knowing
         // that no diagnostics were published.
         harness
-            .save_file_sync(TextDocumentIdentifier::new(included_uri.clone()), &included)
+            .save_file_sync(TextDocumentIdentifier::new(included_uri.clone()), included)
             .await;
         let notifs = harness.pending_notifications::<notification::PublishDiagnostics>();
         assert!(notifs.is_empty());
