@@ -4,6 +4,7 @@ mod analyzer;
 mod code_action;
 mod completion;
 mod diagnostics;
+mod graceful_errors;
 mod harness;
 mod helpers;
 mod hover;

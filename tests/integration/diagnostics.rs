@@ -2,8 +2,11 @@
     clippy::mutable_key_type,
     reason = "lsp_types::PublishDiagnosticParams uses Uri, which AllDiagnostics mimics"
 )]
+
 use crate::harness::TestHarness;
-use flatbuffers_language_server::ext::all_diagnostics::AllDiagnostics;
+use flatbuffers_language_server::{
+    diagnostics::codes::DiagnosticCode, ext::all_diagnostics::AllDiagnostics,
+};
 use tower_lsp_server::lsp_types::{
     notification, request, CodeActionContext, CodeActionOrCommand, CodeActionParams,
     DiagnosticSeverity, DiagnosticTag, PartialResultParams, Position, Range,
@@ -280,9 +283,19 @@ include "pastries.fbs";
         assert!(param.diagnostics.is_empty());
     };
     assert_eq!(harness.call::<AllDiagnostics>(()).await.len(), 3);
-    assert_eq!(diagnostics.len(), 1);
+    assert_eq!(diagnostics.len(), 3);
 
-    let diagnostic = &diagnostics[0];
+    let unused_includes = diagnostics
+        .iter()
+        .filter(|d| d.code == Some(DiagnosticCode::UnusedInclude.into()))
+        .collect::<Vec<_>>();
+    assert_eq!(unused_includes.len(), 2);
+
+    let diagnostic = diagnostics
+        .iter()
+        .find(|d| d.code == Some(DiagnosticCode::ExpectingToken.into()))
+        .unwrap();
+
     assert_eq!(
         diagnostic.range,
         Range::new(Position::new(1, 20), Position::new(1, 21)),
@@ -701,7 +714,7 @@ table MyTable {
 async fn no_unused_conflicting_namespace() {
     let schema_fixture = r#"
 include "../related/namespace_first.fbs";
-include "../related/namespace_second.fbs
+include "../related/namespace_second.fbs";
 
 union MyTable {
     First.OtherTable,
@@ -741,7 +754,7 @@ union MyTable {
     }
 
     assert_eq!(diagnostics.len(), 1);
-    assert_eq!(diagnostics[0].range.start.line, 2); // namespace_x.fbs
+    assert_eq!(diagnostics[0].range.start.line, 2); // namespace_first.fbs
 }
 
 #[tokio::test]

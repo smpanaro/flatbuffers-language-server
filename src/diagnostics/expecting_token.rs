@@ -142,9 +142,7 @@ impl ErrorDiagnosticHandler for ExpectingTokenHandler {
                     severity: Some(DiagnosticSeverity::ERROR),
                     message,
                     related_information: Some(related_information),
-                    code: Some(tower_lsp_server::lsp_types::NumberOrString::String(
-                        DiagnosticCode::ExpectingToken.as_str().to_string(),
-                    )),
+                    code: Some(DiagnosticCode::ExpectingToken.into()),
                     data: Some(serde_json::json!({ "expected": expected_token, "eol": is_eol })),
                     ..Default::default()
                 },

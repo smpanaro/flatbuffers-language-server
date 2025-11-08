@@ -1,4 +1,5 @@
 use crate::{harness::TestHarness, helpers::parse_fixture};
+use flatbuffers_language_server::diagnostics::codes::DiagnosticCode;
 use insta::assert_snapshot;
 use tower_lsp_server::lsp_types::{
     notification, request, DiagnosticSeverity, HoverParams, Position, Range,
@@ -158,7 +159,7 @@ root_type T;
 #[tokio::test]
 async fn saving_included_file_clears_diagnostic() {
     let including = r#"
-include "included.fbs";
+include "included.fbs"; // unused include initially
 
 table T { i: I; } // Diagnostic here: I is referenced but not defined
 "#;
@@ -194,7 +195,13 @@ table I {} // Change so that I is now defined.
     };
 
     // Diagnostic in includer.fbs since I is not found.
-    assert_eq!(diagnostics.len(), 1);
+    assert_eq!(diagnostics.len(), 2);
+    assert!(diagnostics
+        .iter()
+        .any(|d| d.code == Some(DiagnosticCode::UnusedInclude.into())));
+    assert!(diagnostics
+        .iter()
+        .any(|d| d.code == Some(DiagnosticCode::UndefinedType.into())));
 
     let included_uri = harness.file_uri("included.fbs");
     harness

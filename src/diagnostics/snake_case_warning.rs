@@ -6,7 +6,7 @@ use heck::ToSnakeCase;
 use log::error;
 use regex::Regex;
 use tower_lsp_server::lsp_types::{
-    CodeDescription, Diagnostic, DiagnosticSeverity, NumberOrString, Position, Range, Uri,
+    CodeDescription, Diagnostic, DiagnosticSeverity, Position, Range, Uri,
 };
 
 // Regex to capture snake_case warnings:
@@ -47,9 +47,7 @@ impl ErrorDiagnosticHandler for SnakeCaseWarningHandler {
             Diagnostic {
                 range,
                 severity: Some(DiagnosticSeverity::WARNING),
-                code: Some(NumberOrString::String(
-                    DiagnosticCode::NonSnakeCase.as_str().to_string(),
-                )),
+                code: Some(DiagnosticCode::NonSnakeCase.into()),
                 code_description: Uri::from_str("https://flatbuffers.dev/schema/#style-guide")
                     .map(|u| CodeDescription { href: u })
                     .ok(),

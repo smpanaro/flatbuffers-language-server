@@ -1,6 +1,9 @@
 use std::{fs, path::PathBuf};
 
-use crate::{diagnostics::ErrorDiagnosticHandler, utils::as_pos_idx};
+use crate::{
+    diagnostics::{codes::DiagnosticCode, ErrorDiagnosticHandler},
+    utils::as_pos_idx,
+};
 use log::error;
 use regex::Regex;
 use tower_lsp_server::{
@@ -58,14 +61,8 @@ impl ErrorDiagnosticHandler for DuplicateDefinitionHandler {
             let previous_location = Location {
                 uri: Uri::from_file_path(captures[6].trim()).unwrap(),
                 range: Range {
-                    start: Position {
-                        line: prev_line,
-                        character: prev_char,
-                    },
-                    end: Position {
-                        line: prev_line,
-                        character: prev_char + unqualified_name_length,
-                    },
+                    start: Position::new(prev_line, prev_char),
+                    end: Position::new(prev_line, prev_char + unqualified_name_length),
                 },
             };
             Some((
@@ -74,6 +71,7 @@ impl ErrorDiagnosticHandler for DuplicateDefinitionHandler {
                     range,
                     severity: Some(DiagnosticSeverity::ERROR),
                     message,
+                    code: Some(DiagnosticCode::DuplicateDefinition.into()),
                     related_information: Some(vec![DiagnosticRelatedInformation {
                         location: previous_location,
                         message: format!("previous definition of `{name}` defined here"),

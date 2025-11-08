@@ -1,11 +1,15 @@
 ## Unreleased
 
+### New Features
 - Fuzzy search across all project types (tables, structs, enums etc).
   - VSCode calls this "Go to Symbol in Workspace". Zed, "project symbols".
 - Automatically add include statements if needed when accepting a field or root_type completion.
+- Allow more features to work when there are parsing errors. This includes hint diagnostics and hovers, among others.
 - Add namespace to completions so editors can show and style based on it.
+
+### Bug Fixes
 - Fixed invalid syntax in enum and union hovers. This resulted in incorrect highlighting in some editors.
-- Fixed reporting diagnostics from included files on the wrong line. This occasionally led to crashes.
+- Fixed reporting of diagnostics from included files on the wrong line. This occasionally led to crashes.
 - Fixed unused include detection so it works in many more cases. This rarely worked previously.
   - This will flag transitive-only imports as unused (e.g. B includes C but does not use it. A includes B and uses C). If you have this use case please open an issue.
 

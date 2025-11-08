@@ -40,14 +40,8 @@ impl ErrorDiagnosticHandler for GenericDiagnosticHandler {
             let message = captures[4].trim().to_string();
 
             let range = Range {
-                start: Position {
-                    line: line_num,
-                    character: col_num,
-                },
-                end: Position {
-                    line: line_num,
-                    character: u32::MAX,
-                },
+                start: Position::new(line_num, col_num),
+                end: Position::new(line_num, u32::MAX),
             };
 
             return Some((

@@ -136,6 +136,7 @@ pub fn handle_code_action(
                     &diagnostic,
                 ));
             }
+            DiagnosticCode::Deprecated | DiagnosticCode::DuplicateDefinition => {}
         }
     }
     Some(code_actions)

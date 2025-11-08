@@ -130,9 +130,7 @@ impl ErrorDiagnosticHandler for UndefinedTypeHandler {
                     Diagnostic {
                         range,
                         severity: Some(severity),
-                        code: Some(tower_lsp_server::lsp_types::NumberOrString::String(
-                            DiagnosticCode::UndefinedType.as_str().to_string(),
-                        )),
+                        code: Some(DiagnosticCode::UndefinedType.into()),
                         message,
                         data,
                         ..Default::default()

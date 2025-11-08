@@ -5,9 +5,7 @@ use std::fs;
 use std::hash::BuildHasher;
 use std::path::{Path, PathBuf};
 
-use tower_lsp_server::lsp_types::{
-    Diagnostic, DiagnosticSeverity, DiagnosticTag, NumberOrString, Position, Range,
-};
+use tower_lsp_server::lsp_types::{Diagnostic, DiagnosticSeverity, DiagnosticTag, Position, Range};
 
 use crate::symbol_table::{RootTypeInfo, SymbolKind, SymbolTable};
 
@@ -40,6 +38,7 @@ pub fn analyze_deprecated_fields<S: BuildHasher>(
                                     character: u32::MAX,
                                 },
                             },
+                            code: Some(DiagnosticCode::Deprecated.into()),
                             severity: DiagnosticSeverity::HINT.into(),
                             tags: vec![DiagnosticTag::UNNECESSARY].into(),
                             message: "Deprecated. Excluded from generated code.".to_string(),
@@ -166,9 +165,7 @@ pub fn analyze_unused_includes<S: BuildHasher>(
             .push(Diagnostic {
                 range,
                 severity: Some(DiagnosticSeverity::HINT),
-                code: Some(NumberOrString::String(
-                    DiagnosticCode::UnusedInclude.as_str().to_string(),
-                )),
+                code: Some(DiagnosticCode::UnusedInclude.into()),
                 message: format!("unused include: {}", include.text),
                 tags: Some(vec![DiagnosticTag::UNNECESSARY]),
                 ..Default::default()

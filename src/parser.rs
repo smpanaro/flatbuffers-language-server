@@ -57,54 +57,37 @@ impl Parser for FlatcFFIParser {
                 return ParseResult::default();
             }
 
-            let result = if ffi::is_parser_success(parser_ptr) {
-                parse_success_case(parser_ptr, path, content, search_paths)
-            } else {
-                ParseResult {
-                    diagnostics: parse_error_messages(parser_ptr, path, content),
-                    includes: extract_all_included_files(parser_ptr),
-                    ..Default::default()
-                }
+            let mut diagnostics = parse_error_messages(parser_ptr, path, content);
+
+            let mut st = SymbolTable::new(path.to_path_buf());
+            extract_structs_and_tables(parser_ptr, &mut st);
+            extract_enums_and_unions(parser_ptr, &mut st);
+
+            let included_files = extract_all_included_files(parser_ptr); // recursive. includes transient includes.
+            let root_type_info = extract_root_type(parser_ptr);
+
+            let include_graph = build_include_graph(parser_ptr); // direct includes only.
+            diagnostics::semantic::analyze_unused_includes(
+                &st,
+                &mut diagnostics,
+                content,
+                &include_graph,
+                search_paths,
+                &root_type_info,
+            );
+            diagnostics::semantic::analyze_deprecated_fields(&st, &mut diagnostics);
+
+            let result = ParseResult {
+                diagnostics,
+                symbol_table: Some(st),
+                includes: included_files,
+                root_type_info,
             };
 
             ffi::delete_parser(parser_ptr);
 
             result
         }
-    }
-}
-
-/// Handles the successful parse case.
-unsafe fn parse_success_case(
-    parser_ptr: *mut ffi::FlatbuffersParser,
-    path: &Path,
-    content: &str,
-    search_paths: &[PathBuf],
-) -> ParseResult {
-    let mut st = SymbolTable::new(path.to_path_buf());
-    extract_structs_and_tables(parser_ptr, &mut st);
-    extract_enums_and_unions(parser_ptr, &mut st);
-
-    let included_files = extract_all_included_files(parser_ptr); // recursive. includes transient includes.
-    let root_type_info = extract_root_type(parser_ptr);
-
-    let mut diagnostics = parse_error_messages(parser_ptr, path, content); // warnings
-    let include_graph = unsafe { build_include_graph(parser_ptr) }; // direct includes only.
-    diagnostics::semantic::analyze_unused_includes(
-        &st,
-        &mut diagnostics,
-        content,
-        &include_graph,
-        search_paths,
-        &root_type_info,
-    );
-    diagnostics::semantic::analyze_deprecated_fields(&st, &mut diagnostics);
-
-    ParseResult {
-        diagnostics,
-        symbol_table: Some(st),
-        includes: included_files,
-        root_type_info,
     }
 }
 
