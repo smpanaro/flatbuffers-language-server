@@ -1,5 +1,7 @@
 use flatbuffers_language_server::ext::all_diagnostics::AllDiagnostics;
-use flatbuffers_language_server::ext::did_save_sync::DidSaveSync;
+use flatbuffers_language_server::ext::sync::{
+    DidChangeSync, DidOpenSync, DidSaveSync, InitializedSync,
+};
 use flatbuffers_language_server::server::Backend;
 use serde::de::DeserializeOwned;
 use std::collections::VecDeque;
@@ -9,8 +11,7 @@ use tempfile::TempDir;
 use tokio::io::{self, AsyncReadExt, AsyncWriteExt, DuplexStream};
 use tower_lsp_server::jsonrpc::{Id, Request, Response};
 use tower_lsp_server::lsp_types::notification::{
-    DidChangeTextDocument, DidCloseTextDocument, DidOpenTextDocument, DidSaveTextDocument,
-    Initialized, Notification,
+    DidCloseTextDocument, DidSaveTextDocument, Notification,
 };
 use tower_lsp_server::lsp_types::request::{
     Initialize, RegisterCapability, Request as LspRequest, WorkDoneProgressCreate,
@@ -49,6 +50,9 @@ impl TestHarness {
         let (resp_server, resp_client) = io::duplex(1024);
 
         let (service, socket) = LspService::build(Backend::new)
+            .custom_method(InitializedSync::METHOD, Backend::initialized_sync)
+            .custom_method(DidOpenSync::METHOD, Backend::did_open_sync)
+            .custom_method(DidChangeSync::METHOD, Backend::did_change_sync)
             .custom_method(DidSaveSync::METHOD, Backend::did_save_sync)
             .custom_method(AllDiagnostics::METHOD, Backend::all_diagnostics)
             .finish();
@@ -92,10 +96,13 @@ impl TestHarness {
         // Loop until we have successfully parsed at least one message.
         while self.responses.is_empty() {
             // fill_buffer now just reads bytes without trying to interpret them.
-            assert!(
-                self.fill_buffer().await.is_ok(),
-                "Failed to read from server"
-            );
+            #[allow(
+                clippy::manual_assert,
+                reason = "easier to put a breakpoint on the panic"
+            )]
+            if self.fill_buffer().await.is_err() {
+                panic!("Failed to read from server");
+            }
 
             // Now, try to parse messages from our persistent buffer.
             loop {
@@ -202,10 +209,7 @@ impl TestHarness {
 
         // 3. Send "initialized" notification.
         let params = InitializedParams {};
-        let req = Request::build("initialized")
-            .params(serde_json::to_value(params).unwrap())
-            .finish();
-        self.send_request(req).await;
+        self.call::<InitializedSync>(params).await;
 
         // 4. Send "didOpen" notifications for the files.
         let open_set: std::collections::HashSet<&str> = files_to_open.iter().copied().collect();
@@ -219,10 +223,7 @@ impl TestHarness {
                     text: content.to_owned(),
                 };
                 let params = DidOpenTextDocumentParams { text_document };
-                let req = Request::build(DidOpenTextDocument::METHOD)
-                    .params(serde_json::to_value(params).unwrap())
-                    .finish();
-                self.send_request(req).await;
+                self.call::<DidOpenSync>(params).await;
             }
         }
     }
@@ -270,10 +271,7 @@ impl TestHarness {
         assert!(resp.is_ok());
 
         let params = InitializedParams {};
-        let req = Request::build(Initialized::METHOD)
-            .params(serde_json::to_value(params).unwrap())
-            .finish();
-        self.send_request(req).await;
+        self.call::<InitializedSync>(params).await;
 
         let open_set: std::collections::HashSet<&str> = files_to_open.iter().copied().collect();
         for &(name, content) in workspace_files {
@@ -287,15 +285,12 @@ impl TestHarness {
                     text: content.to_owned(),
                 };
                 let params = DidOpenTextDocumentParams { text_document };
-                let req = Request::build(DidOpenTextDocument::METHOD)
-                    .params(serde_json::to_value(params).unwrap())
-                    .finish();
-                self.send_request(req).await;
+                self.call::<DidOpenSync>(params).await;
             }
         }
     }
 
-    pub async fn change_file(
+    pub async fn change_file_sync(
         &mut self,
         identifier: VersionedTextDocumentIdentifier,
         content: &str,
@@ -312,10 +307,7 @@ impl TestHarness {
                 text: content.to_string(),
             }],
         };
-        let req = Request::build(DidChangeTextDocument::METHOD)
-            .params(serde_json::to_value(params).unwrap())
-            .finish();
-        self.send_request(req).await;
+        self.call::<DidChangeSync>(params).await;
     }
 
     pub async fn save_file(&mut self, identifier: TextDocumentIdentifier, content: &str) {

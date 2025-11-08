@@ -45,7 +45,7 @@ async fn get_completion_list(
     );
 
     harness
-        .change_file(
+        .change_file_sync(
             VersionedTextDocumentIdentifier {
                 uri: main_file_uri.clone(),
                 version: 2,

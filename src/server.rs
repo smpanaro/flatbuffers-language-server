@@ -315,6 +315,24 @@ impl Backend {
 #[cfg(any(test, feature = "test-harness"))]
 impl Backend {
     #[allow(clippy::missing_errors_doc)]
+    pub async fn initialized_sync(&self, params: InitializedParams) -> Result<i32> {
+        self.initialized(params).await;
+        Ok(0)
+    }
+
+    #[allow(clippy::missing_errors_doc)]
+    pub async fn did_open_sync(&self, params: DidOpenTextDocumentParams) -> Result<i32> {
+        self.did_open(params).await;
+        Ok(0)
+    }
+
+    #[allow(clippy::missing_errors_doc)]
+    pub async fn did_change_sync(&self, params: DidChangeTextDocumentParams) -> Result<i32> {
+        self.did_change(params).await;
+        Ok(0)
+    }
+
+    #[allow(clippy::missing_errors_doc)]
     pub async fn did_save_sync(&self, params: DidSaveTextDocumentParams) -> Result<i32> {
         self.did_save(params).await;
         Ok(0)

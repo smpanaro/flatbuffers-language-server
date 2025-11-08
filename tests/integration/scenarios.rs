@@ -29,7 +29,7 @@ async fn error_appears_on_change_and_is_then_cleared() {
 
     // 2. Send a change to introduce an error.
     harness
-        .change_file(
+        .change_file_sync(
             VersionedTextDocumentIdentifier::new(schema_uri.clone(), 2),
             content_with_error,
         )
@@ -47,7 +47,7 @@ async fn error_appears_on_change_and_is_then_cleared() {
 
     // 4. Send a change to fix the error.
     harness
-        .change_file(
+        .change_file_sync(
             VersionedTextDocumentIdentifier::new(schema_uri.clone(), 3),
             initial_content,
         )
@@ -144,7 +144,7 @@ root_type T;
 
     let uri = harness.file_uri("schema.fbs");
     harness
-        .change_file(VersionedTextDocumentIdentifier::new(uri, 2), version_two)
+        .change_file_sync(VersionedTextDocumentIdentifier::new(uri, 2), version_two)
         .await;
 
     {
@@ -224,7 +224,7 @@ table I {} // Change so that I is now defined.
 
 #[tokio::test]
 async fn saving_included_file_with_error() {
-    let includer = r#"
+    let including = r#"
 include "included.fbs";
 
 table Foo { e: WithError; }
@@ -253,13 +253,14 @@ table WithError {
 
     let mut harness = TestHarness::new();
     let included_uri = harness.file_uri("included.fbs");
+    let including_uri = harness.file_uri("including.fbs");
 
     {
         // Initial open.
         harness
             .initialize_and_open_some(
                 &[
-                    ("includer.fbs", includer),
+                    ("including.fbs", including),
                     ("included.fbs", included_original),
                 ],
                 &["included.fbs"],
@@ -277,7 +278,7 @@ table WithError {
     {
         // Change to introduce an error.
         harness
-            .change_file(
+            .change_file_sync(
                 VersionedTextDocumentIdentifier::new(included_uri.clone(), 1),
                 &included_error,
             )
@@ -294,22 +295,37 @@ table WithError {
         };
         assert_eq!(diagnostics.len(), 1);
         assert_eq!(diagnostics[0].range.start, Position::new(12, 10));
+        assert_eq!(
+            diagnostics[0].code,
+            Some(DiagnosticCode::ExpectingToken.into())
+        );
     }
 
     {
         // Save with the error (and trigger reparsing of includer).
-        // Use the test-only synchronous save so that any new diagnostics
-        // are published before the sync response is received.
-        // Otherwise we don't have a non-timeout based way of knowing
-        // that no diagnostics were published.
         harness
             .save_file_sync(
                 TextDocumentIdentifier::new(included_uri.clone()),
                 &included_error,
             )
             .await;
-        let notifs = harness.pending_notifications::<notification::PublishDiagnostics>();
-        assert!(notifs.is_empty());
+
+        let diagnostics = loop {
+            let params = harness
+                .notification::<notification::PublishDiagnostics>()
+                .await;
+            if params.uri == including_uri {
+                break params.diagnostics;
+            }
+            assert_eq!(params.diagnostics.len(), 0);
+        };
+        // Parsing error in WithError makes the include appear unused.
+        // TODO: This could be improved with a syntax-tolerant parser.
+        assert_eq!(diagnostics.len(), 1);
+        assert_eq!(
+            diagnostics[0].code,
+            Some(DiagnosticCode::UnusedInclude.into())
+        );
     }
 }
 
