@@ -10,7 +10,7 @@ use tower_lsp_server::lsp_types::{
 };
 
 static FIELD_RE: LazyLock<Regex> =
-    LazyLock::new(|| Regex::new(r"^\s*(\w+)\s*:\s*([\w\.]*)").unwrap());
+    LazyLock::new(|| Regex::new(r"^\s*(\w+)\s*:\s*\[?\s*([\w\.]*)").unwrap());
 
 #[allow(clippy::too_many_lines)]
 pub fn handle_field_type_completion(
@@ -250,26 +250,39 @@ mod tests {
 
     #[test]
     fn test_get_field_type_completion_context() {
-        let line = "  field: My.Namespace.T";
         let pos = |character| Position { line: 0, character };
 
-        // Cursor at the end
-        let (range, partial) = get_field_type_completion_context(line, pos(23)).unwrap();
-        assert_eq!(partial, "My.Namespace.T");
-        assert_eq!(range.start.character, 9);
-        assert_eq!(range.end.character, 23);
+        {
+            let line = "  field: My.Namespace.T";
 
-        // Cursor in the middle
-        let (range, partial) = get_field_type_completion_context(line, pos(15)).unwrap();
-        assert_eq!(partial, "My.Nam");
-        assert_eq!(range.start.character, 9);
-        assert_eq!(range.end.character, 15);
+            // Cursor at the end
+            let (range, partial) = get_field_type_completion_context(line, pos(23)).unwrap();
+            assert_eq!(partial, "My.Namespace.T");
+            assert_eq!(range.start.character, 9);
+            assert_eq!(range.end.character, 23);
 
-        let line2 = "field:T";
-        let (range2, partial2) = get_field_type_completion_context(line2, pos(7)).unwrap();
-        assert_eq!(partial2, "T");
-        assert_eq!(range2.start.character, 6);
-        assert_eq!(range2.end.character, 7);
+            // Cursor in the middle
+            let (range, partial) = get_field_type_completion_context(line, pos(15)).unwrap();
+            assert_eq!(partial, "My.Nam");
+            assert_eq!(range.start.character, 9);
+            assert_eq!(range.end.character, 15);
+        }
+
+        {
+            let line = "field:T";
+            let (range, partial) = get_field_type_completion_context(line, pos(7)).unwrap();
+            assert_eq!(partial, "T");
+            assert_eq!(range.start.character, 6);
+            assert_eq!(range.end.character, 7);
+        }
+
+        {
+            let line = "  field: [T";
+            let (range, partial) = get_field_type_completion_context(line, pos(11)).unwrap();
+            assert_eq!(partial, "T");
+            assert_eq!(range.start.character, 10);
+            assert_eq!(range.end.character, 11);
+        }
     }
 
     #[test]
