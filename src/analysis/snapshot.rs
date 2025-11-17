@@ -1,6 +1,6 @@
 use crate::analysis::workspace_index::WorkspaceIndex;
 use crate::ext::range::RangeExt;
-use crate::symbol_table::{self, Symbol, SymbolKind};
+use crate::symbol_table::{self, Field, RpcService, Symbol, SymbolKind, Union};
 use crate::utils::paths::uri_to_path_buf;
 use dashmap::DashMap;
 use ropey::Rope;
@@ -72,71 +72,37 @@ impl<'a> WorkspaceSnapshot<'a> {
             .values()
             .find_map(|symbol| symbol.find_symbol(&path, position))?;
 
-        if let symbol_table::SymbolKind::Union(u) = &symbol_at_cursor.kind {
-            for variant in &u.variants {
-                if !variant.location.range.contains(position) {
-                    continue;
-                }
+        // Handle the symbol itself.
+        let range = symbol_at_cursor.info.location.range;
+        if range.contains(position) {
+            return Some(ResolvedSymbol {
+                target: symbol_at_cursor,
+                range,
+                ref_name: symbol_at_cursor.info.qualified_name(),
+            });
+        }
 
-                if variant.parsed_type.type_name.range.contains(position) {
-                    if let Some(target_symbol) = self.symbols.global.get(&variant.name) {
-                        return Some(ResolvedSymbol {
-                            target: target_symbol,
-                            range: variant.parsed_type.type_name.range,
-                            ref_name: variant.name.clone(),
-                        });
-                    // Technically this isn't supported currently.
-                    } else if let Some(target_symbol) = self.symbols.builtins.get(&variant.name) {
-                        return Some(ResolvedSymbol {
-                            target: target_symbol,
-                            range: variant.parsed_type.type_name.range,
-                            ref_name: variant.name.clone(),
-                        });
-                    }
-                }
-                return None;
+        // Handle a nested type within the symbol.
+        if let symbol_table::SymbolKind::Union(u) = &symbol_at_cursor.kind {
+            if let Some(res) = self.resolve_symbol_in_union(u, position) {
+                return Some(res);
             }
         }
 
         if let symbol_table::SymbolKind::Field(f) = &symbol_at_cursor.kind {
-            if f.type_range.contains(position) {
-                // Check if the cursor is on one of the namespace parts
-                for part in &f.parsed_type.namespace {
-                    if part.range.contains(position) {
-                        // TODO: Add support for go-to-definition on namespace parts
-                        return None;
-                    }
-                }
-
-                // Check if the cursor is on the type name
-                if f.parsed_type.type_name.range.contains(position) {
-                    if let Some(target_symbol) = self.symbols.global.get(&f.type_name) {
-                        return Some(ResolvedSymbol {
-                            target: target_symbol,
-                            range: f.parsed_type.type_name.range,
-                            ref_name: f.type_name.clone(),
-                        });
-                    } else if let Some(target_symbol) = self.symbols.builtins.get(&f.type_name) {
-                        return Some(ResolvedSymbol {
-                            target: target_symbol,
-                            range: f.parsed_type.type_name.range,
-                            ref_name: f.type_name.clone(),
-                        });
-                    }
-                }
-
-                return None;
+            if let Some(res) = self.resolve_symbol_in_field(f, position) {
+                return Some(res);
             }
         }
 
-        // Default case: the symbol at cursor is the target.
-        let range = symbol_at_cursor.info.location.range;
-        let qualified_name = symbol_at_cursor.info.qualified_name();
-        Some(ResolvedSymbol {
-            target: symbol_at_cursor,
-            range,
-            ref_name: qualified_name,
-        })
+        if let symbol_table::SymbolKind::RpcService(r) = &symbol_at_cursor.kind {
+            if let Some(res) = self.resolve_symbol_in_rpc_service(r, position) {
+                return Some(res);
+            }
+        }
+
+        // Something that is within the symbol, but for whatever reason we cannot resolve.
+        None
     }
 
     #[must_use]
@@ -164,6 +130,109 @@ impl<'a> WorkspaceSnapshot<'a> {
             }
         }
 
+        None
+    }
+}
+
+impl<'a> WorkspaceSnapshot<'a> {
+    fn resolve_symbol_in_union(
+        &'a self,
+        union: &Union,
+        position: Position,
+    ) -> Option<ResolvedSymbol<'a>> {
+        for variant in &union.variants {
+            if !variant.location.range.contains(position) {
+                continue;
+            }
+
+            if variant.parsed_type.type_name.range.contains(position) {
+                if let Some(target_symbol) = self.symbols.global.get(&variant.name) {
+                    return Some(ResolvedSymbol {
+                        target: target_symbol,
+                        range: variant.parsed_type.type_name.range,
+                        ref_name: variant.name.clone(),
+                    });
+                // Technically this isn't supported currently.
+                } else if let Some(target_symbol) = self.symbols.builtins.get(&variant.name) {
+                    return Some(ResolvedSymbol {
+                        target: target_symbol,
+                        range: variant.parsed_type.type_name.range,
+                        ref_name: variant.name.clone(),
+                    });
+                }
+            }
+        }
+        None
+    }
+
+    fn resolve_symbol_in_field(
+        &'a self,
+        field: &Field,
+        position: Position,
+    ) -> Option<ResolvedSymbol<'a>> {
+        if field.type_range.contains(position) {
+            // Check if the cursor is on one of the namespace parts
+            for part in &field.parsed_type.namespace {
+                if part.range.contains(position) {
+                    // TODO: Add support for go-to-definition on namespace parts
+                    return None;
+                }
+            }
+
+            // Check if the cursor is on the type name
+            if field.parsed_type.type_name.range.contains(position) {
+                if let Some(target_symbol) = self.symbols.global.get(&field.type_name) {
+                    return Some(ResolvedSymbol {
+                        target: target_symbol,
+                        range: field.parsed_type.type_name.range,
+                        ref_name: field.type_name.clone(),
+                    });
+                } else if let Some(target_symbol) = self.symbols.builtins.get(&field.type_name) {
+                    return Some(ResolvedSymbol {
+                        target: target_symbol,
+                        range: field.parsed_type.type_name.range,
+                        ref_name: field.type_name.clone(),
+                    });
+                }
+            }
+        }
+
+        None
+    }
+
+    fn resolve_symbol_in_rpc_service(
+        &'a self,
+        service: &RpcService,
+        position: Position,
+    ) -> Option<ResolvedSymbol<'a>> {
+        for method in &service.methods {
+            let Some(matching_type) = vec![&method.request_type, &method.response_type]
+                .into_iter()
+                .find(|&t| t.range.contains(position))
+            else {
+                continue;
+            };
+
+            if matching_type.range.contains(position) {
+                for part in &matching_type.parsed.namespace {
+                    if part.range.contains(position) {
+                        // TODO: Add support for go-to-definition on namespace parts
+                        return None;
+                    }
+                }
+            }
+
+            if matching_type.parsed.type_name.range.contains(position) {
+                if let Some(target_symbol) = self.symbols.global.get(&matching_type.name) {
+                    return Some(ResolvedSymbol {
+                        target: target_symbol,
+                        range: matching_type.parsed.type_name.range,
+                        ref_name: matching_type.name.clone(),
+                    });
+                }
+            }
+            // RPC methods can only take tables (not builtins).
+        }
         None
     }
 }
@@ -305,6 +374,55 @@ mod tests {
         let symbol = snapshot.resolve_symbol_at(&uri, position).unwrap();
         assert_eq!(symbol.target.info.name, "int");
         assert!(matches!(symbol.target.kind, SymbolKind::Scalar));
+    }
+
+    #[tokio::test]
+    async fn test_resolve_symbol_at_rpc_service() {
+        let schema = "namespace MyNamespace;\n\ntable Req {}\ntable Res {}\nrpc_service Svc { Method(Req):Res; }";
+        let (analyzer, path, _dir) = setup_snapshot(schema).await;
+        let snapshot = analyzer.snapshot().await;
+        let uri = path_buf_to_uri(&path).unwrap();
+        let position = Position::new(4, 13);
+        let symbol = snapshot.resolve_symbol_at(&uri, position).unwrap();
+        assert_eq!(symbol.target.info.name, "Svc");
+        assert!(matches!(symbol.target.kind, SymbolKind::RpcService(_)));
+    }
+
+    #[ignore = "Hovering embedded types (e.g. field, variants) not supported yet."]
+    #[tokio::test]
+    async fn test_resolve_symbol_at_rpc_method() {
+        let schema = "namespace MyNamespace;\n\ntable Req {}\ntable Res {}\nrpc_service Svc { Method(Req):Res; }";
+        let (analyzer, path, _dir) = setup_snapshot(schema).await;
+        let snapshot = analyzer.snapshot().await;
+        let uri = path_buf_to_uri(&path).unwrap();
+        let position = Position::new(4, 19);
+        let symbol = snapshot.resolve_symbol_at(&uri, position).unwrap();
+        assert_eq!(symbol.target.info.name, "Method");
+        // assert!(matches!(symbol.target.kind, SymbolKind::RpcMethod(_)));
+    }
+
+    #[tokio::test]
+    async fn test_resolve_symbol_at_rpc_argument() {
+        let schema = "namespace MyNamespace;\n\ntable Req {}\ntable Res {}\nrpc_service Svc { Method(Req):Res; }";
+        let (analyzer, path, _dir) = setup_snapshot(schema).await;
+        let snapshot = analyzer.snapshot().await;
+        let uri = path_buf_to_uri(&path).unwrap();
+        let position = Position::new(4, 26);
+        let symbol = snapshot.resolve_symbol_at(&uri, position).unwrap();
+        assert_eq!(symbol.target.info.name, "Req");
+        assert!(matches!(symbol.target.kind, SymbolKind::Table(_)));
+    }
+
+    #[tokio::test]
+    async fn test_resolve_symbol_at_rpc_return_type() {
+        let schema = "namespace MyNamespace;\n\ntable Req {}\ntable Res {}\nrpc_service Svc { Method(Req):Res; }";
+        let (analyzer, path, _dir) = setup_snapshot(schema).await;
+        let snapshot = analyzer.snapshot().await;
+        let uri = path_buf_to_uri(&path).unwrap();
+        let position = Position::new(4, 31);
+        let symbol = snapshot.resolve_symbol_at(&uri, position).unwrap();
+        assert_eq!(symbol.target.info.name, "Res");
+        assert!(matches!(symbol.target.kind, SymbolKind::Table(_)));
     }
 
     #[tokio::test]

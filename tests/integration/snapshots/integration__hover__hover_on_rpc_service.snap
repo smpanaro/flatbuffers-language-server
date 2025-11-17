@@ -1,0 +1,20 @@
+---
+source: tests/integration/hover.rs
+expression: "serde_json::to_string_pretty(&response).unwrap()"
+---
+{
+  "contents": {
+    "kind": "markdown",
+    "value": "```flatbuffers\nnamespace API;\n\nrpc_service Service {\n  Read(Req):Res;\n}\n```\n\n---\n\n Service has a comment."
+  },
+  "range": {
+    "start": {
+      "line": 15,
+      "character": 12
+    },
+    "end": {
+      "line": 15,
+      "character": 19
+    }
+  }
+}

@@ -50,6 +50,10 @@ enum MyEnum: byte {
 union MyUnion {
     MyTable,
 }
+
+rpc_service Service {
+    Method(MyTable):MyTable;
+}
 ",
     )];
 
@@ -77,6 +81,10 @@ enum MyEnum: byte {
 
 union MyUnion {
     MyTable,
+}
+
+rpc_service Service {
+    Method(MyTable):MyTable;
 }
 ",
     )];

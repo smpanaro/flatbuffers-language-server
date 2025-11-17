@@ -1,7 +1,7 @@
 use crate::analysis::WorkspaceSnapshot;
 use crate::symbol_table::SymbolKind;
 use crate::utils::as_pos_idx;
-use std::path::PathBuf;
+use std::{cmp::max, path::PathBuf};
 use tower_lsp_server::lsp_types::{
     CompletionItem, CompletionItemKind, CompletionResponse, CompletionTextEdit, Documentation,
     MarkupContent, MarkupKind, Position, Range, TextEdit,
@@ -45,10 +45,8 @@ pub fn handle_attribute_completion(
 
                     for field in &table.fields {
                         if let SymbolKind::Field(f) = &field.kind {
-                            if f.has_id {
-                                if f.id > max_id {
-                                    max_id = f.id;
-                                }
+                            if let Some(id) = f.id {
+                                max_id = max(max_id, id);
                                 // Check styling
                                 if let Some(line) = snapshot
                                     .documents

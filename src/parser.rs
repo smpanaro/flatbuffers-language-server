@@ -1,5 +1,8 @@
 use crate::diagnostics;
 use crate::ffi;
+use crate::symbol_table::RpcMethod;
+use crate::symbol_table::RpcMethodType;
+use crate::symbol_table::RpcService;
 use crate::symbol_table::{
     Enum, EnumVariant, Field, RootTypeInfo, Struct, Symbol, SymbolInfo, SymbolKind, SymbolTable,
     Table, Union, UnionVariant,
@@ -62,6 +65,7 @@ impl Parser for FlatcFFIParser {
             let mut st = SymbolTable::new(path.to_path_buf());
             extract_structs_and_tables(parser_ptr, &mut st);
             extract_enums_and_unions(parser_ptr, &mut st);
+            extract_rpc_services(parser_ptr, &mut st);
 
             let included_files = extract_all_included_files(parser_ptr); // recursive. includes transient includes.
             let root_type_info = extract_root_type(parser_ptr);
@@ -188,8 +192,7 @@ unsafe fn extract_structs_and_tables(
                     type_range,
                     parsed_type,
                     deprecated: field_info.deprecated,
-                    has_id: field_info.has_id,
-                    id: field_info.id,
+                    id: Some(field_info.id).take_if(|_| field_info.has_id),
                 }),
                 documentation,
             );
@@ -309,6 +312,117 @@ unsafe fn extract_enums_and_unions(parser_ptr: *mut ffi::FlatbuffersParser, st: 
             })
         };
 
+        let documentation = c_str_to_optional_string(def_info.documentation);
+
+        let symbol = create_symbol(
+            &file_path,
+            name,
+            namespace,
+            def_info.line,
+            def_info.col,
+            symbol_kind,
+            documentation,
+        );
+        st.insert(qualified_name, symbol);
+    }
+}
+
+unsafe fn extract_rpc_services(parser_ptr: *mut ffi::FlatbuffersParser, st: &mut SymbolTable) {
+    let num_services = ffi::get_num_rpc_services(parser_ptr);
+    for i in 0..num_services {
+        let def_info = ffi::get_rpc_service_info(parser_ptr, i);
+        let Some(name) = c_str_to_optional_string(def_info.name) else {
+            continue;
+        };
+
+        let namespace: Vec<String> = c_str_to_optional_string(def_info.namespace_)
+            .map(|s| s.split('.').map(ToString::to_string).collect())
+            .unwrap_or_default();
+
+        let qualified_name = if namespace.is_empty() {
+            name.clone()
+        } else {
+            format!("{}.{}", namespace.join("."), name)
+        };
+
+        let file = c_str_to_string(def_info.file);
+        let Ok(file_path) = fs::canonicalize(&file) else {
+            error!("failed to canonicalize file: {file}");
+            continue;
+        };
+
+        if st.contains_key(&qualified_name) {
+            // This should not happen. The flatbuffers parser returns rich errors for duplicate definitions.
+            error!("found duplicate symbol while extracting services: {qualified_name}");
+            continue;
+        }
+
+        let mut methods = Vec::new();
+        let num_methods = ffi::get_num_rpc_methods(parser_ptr, i);
+        for j in 0..num_methods {
+            let method_info = ffi::get_rpc_method_info(parser_ptr, i, j);
+
+            // Method
+            let Some(method_name) = c_str_to_optional_string(method_info.name) else {
+                continue;
+            };
+            let range = Range::new(
+                Position::new(
+                    method_info.line,
+                    method_info.col - as_pos_idx(method_name.chars().count()),
+                ),
+                Position::new(method_info.line, method_info.col),
+            );
+            let documentation = c_str_to_optional_string(method_info.documentation);
+
+            // Request
+            let Some(request_type_name) = c_str_to_optional_string(method_info.request_type_name)
+            else {
+                continue;
+            };
+            let request_range = method_info.request_range.into();
+            let Some(request_type) = c_str_to_optional_string(method_info.request_source)
+                .and_then(|source| parse_type(&source, request_range))
+                .map(|parsed| RpcMethodType {
+                    name: request_type_name,
+                    parsed,
+                    range: request_range,
+                })
+            else {
+                error!("Failed to parse rpc request type at {}:{}:{}. Please open a GitHub Issue: https://github.com/smpanaro/flatbuffers-language-server/issues",
+                        file_path.display(), request_range.end.line, request_range.end.character);
+                continue;
+            };
+
+            // Response
+            let Some(response_type_name) = c_str_to_optional_string(method_info.response_type_name)
+            else {
+                continue;
+            };
+            let response_range = method_info.response_range.into();
+            let Some(response_type) = c_str_to_optional_string(method_info.response_source)
+                .and_then(|source| parse_type(&source, response_range))
+                .map(|parsed| RpcMethodType {
+                    name: response_type_name,
+                    parsed,
+                    range: response_range,
+                })
+            else {
+                error!("Failed to parse rpc response type at {}:{}:{}. Please open a GitHub Issue: https://github.com/smpanaro/flatbuffers-language-server/issues",
+                        file_path.display(), response_range.end.line, response_range.end.character);
+                continue;
+            };
+
+            methods.push(RpcMethod {
+                name: method_name,
+                range,
+                documentation,
+                request_type,
+                response_type,
+            });
+        }
+
+        let symbol_kind = SymbolKind::RpcService(RpcService { methods });
         let documentation = c_str_to_optional_string(def_info.documentation);
 
         let symbol = create_symbol(

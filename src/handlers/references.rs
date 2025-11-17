@@ -31,10 +31,27 @@ pub fn handle_references(
         if let symbol_table::SymbolKind::Union(u) = &symbol.kind {
             for variant in &u.variants {
                 if variant.name == target_name {
-                    references.push(Location {
-                        uri: file_uri.clone(),
-                        range: variant.parsed_type.type_name.range,
-                    });
+                    references.push(Location::new(
+                        file_uri.clone(),
+                        variant.parsed_type.type_name.range,
+                    ));
+                }
+            }
+        }
+
+        if let symbol_table::SymbolKind::RpcService(r) = &symbol.kind {
+            for method in &r.methods {
+                if method.request_type.name == target_name {
+                    references.push(Location::new(
+                        file_uri.clone(),
+                        method.request_type.parsed.type_name.range,
+                    ));
+                }
+                if method.response_type.name == target_name {
+                    references.push(Location::new(
+                        file_uri.clone(),
+                        method.response_type.parsed.type_name.range,
+                    ));
                 }
             }
         }
@@ -48,10 +65,10 @@ pub fn handle_references(
         for field in fields {
             if let symbol_table::SymbolKind::Field(f) = &field.kind {
                 if f.type_name == target_name {
-                    references.push(Location {
-                        uri: file_uri.clone(),
-                        range: f.parsed_type.type_name.range,
-                    });
+                    references.push(Location::new(
+                        file_uri.clone(),
+                        f.parsed_type.type_name.range,
+                    ));
                 }
             }
         }

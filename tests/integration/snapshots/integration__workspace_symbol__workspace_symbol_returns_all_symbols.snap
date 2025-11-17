@@ -70,5 +70,22 @@ expression: response
         }
       }
     }
+  },
+  {
+    "name": "Service",
+    "kind": 19,
+    "location": {
+      "uri": "[ROOT_URI]/schema.fbs",
+      "range": {
+        "start": {
+          "line": 18,
+          "character": 12
+        },
+        "end": {
+          "line": 18,
+          "character": 19
+        }
+      }
+    }
   }
 ]

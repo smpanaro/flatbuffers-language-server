@@ -75,6 +75,28 @@ struct RootTypeDefinitionInfo {
     const char* type_source; // text of the type declaration
 };
 
+struct RpcServiceDefinitionInfo {
+    const char* name;
+    const char* file;
+    const char* namespace_;
+    const char* documentation;
+    unsigned line;
+    unsigned col;
+};
+
+struct RpcMethodDefinitionInfo {
+    const char* name;
+    const char* documentation;
+    unsigned line;
+    unsigned col;
+    const char* request_type_name; // fully qualified name of the type
+    struct Range request_range;
+    const char* request_source; // text of the type declaration
+    const char* response_type_name; // fully qualified name of the type
+    struct Range response_range;
+    const char* response_source; // text of the type declaration
+};
+
 // Parses a schema and returns a pointer to the Parser object.
 struct FlatbuffersParser* parse_schema(const char* schema_content, const char* filename, const char **include_paths);
 
@@ -106,6 +128,14 @@ struct RootTypeDefinitionInfo get_root_type_info(struct FlatbuffersParser* parse
 // Functions for fields
 int get_num_fields(struct FlatbuffersParser* parser, int struct_index);
 struct FieldDefinitionInfo get_field_info(struct FlatbuffersParser* parser, int struct_index, int field_index);
+
+// Functions for RPC services
+int get_num_rpc_services(struct FlatbuffersParser* parser);
+struct RpcServiceDefinitionInfo get_rpc_service_info(struct FlatbuffersParser* parser, int index);
+
+// Functions for RPC methods
+int get_num_rpc_methods(struct FlatbuffersParser* parser, int service_index);
+struct RpcMethodDefinitionInfo get_rpc_method_info(struct FlatbuffersParser* parser, int service_index, int method_index);
 
 // Functions for all included files
 int get_num_all_included_files(struct FlatbuffersParser* parser);

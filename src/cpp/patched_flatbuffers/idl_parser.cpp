@@ -794,6 +794,9 @@ StructDef *Parser::LookupStructThruParentNamespaces(
 }
 
 CheckedError Parser::ParseTypeIdent(Type &type) {
+  SourcePosition start_pos = CurrentSourcePosition(-attribute_.length());
+  const char *start_cursor = cursor_ - attribute_.length();
+
   std::string id = attribute_;
   EXPECT(kTokenIdentifier);
   ECHECK(ParseNamespacing(&id, nullptr));
@@ -805,6 +808,10 @@ CheckedError Parser::ParseTypeIdent(Type &type) {
     type.base_type = BASE_TYPE_STRUCT;
     type.struct_def = LookupCreateStruct(id);
   }
+
+  type.decl_range = {start_pos, PrevSourcePosition()};
+  type.decl_text = std::string(start_cursor, prev_cursor_);
+
   return NoError();
 }
 
@@ -2914,12 +2921,16 @@ CheckedError Parser::ParseService(const char *filename) {
   std::vector<std::string> service_comment = doc_comment_;
   NEXT();
   auto service_name = attribute_;
+  const int service_decl_line = line_;
+  const int service_decl_col = static_cast<int>(CursorPosition());
   EXPECT(kTokenIdentifier);
   auto &service_def = *new ServiceDef();
   service_def.name = service_name;
   service_def.file = file_being_parsed_;
   service_def.doc_comment = service_comment;
   service_def.defined_namespace = current_namespace_;
+  service_def.decl_line = service_decl_line;
+  service_def.decl_col = service_decl_col;
   if (filename != nullptr && !opts.project_root.empty()) {
     service_def.declaration_file =
         &GetPooledString(FilePath(opts.project_root, filename, opts.binary_schema_absolute_paths));
@@ -2932,6 +2943,8 @@ CheckedError Parser::ParseService(const char *filename) {
   do {
     std::vector<std::string> doc_comment = doc_comment_;
     auto rpc_name = attribute_;
+    const int rpc_decl_line = line_;
+    const int rpc_decl_col = static_cast<int>(CursorPosition());
     EXPECT(kTokenIdentifier);
     EXPECT('(');
     Type reqtype, resptype;
@@ -2945,8 +2958,14 @@ CheckedError Parser::ParseService(const char *filename) {
     auto &rpc = *new RPCCall();
     rpc.name = rpc_name;
     rpc.request = reqtype.struct_def;
+    rpc.request_decl_range = reqtype.decl_range;
+    rpc.request_decl_text = reqtype.decl_text;
     rpc.response = resptype.struct_def;
+    rpc.response_decl_range = resptype.decl_range;
+    rpc.response_decl_text = resptype.decl_text;
     rpc.doc_comment = doc_comment;
+    rpc.decl_line = rpc_decl_line;
+    rpc.decl_col = rpc_decl_col;
     if (service_def.calls.Add(rpc_name, &rpc))
       return Error("rpc already exists: " + rpc_name);
     ECHECK(ParseMetaData(&rpc.attributes));

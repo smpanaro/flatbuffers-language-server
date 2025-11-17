@@ -47,7 +47,7 @@ pub fn handle_root_type_completion(
                     label: base_name.clone(),
                     text_edit: Some(CompletionTextEdit::Edit(TextEdit { range, new_text })),
                     additional_text_edits,
-                    kind: Some(CompletionItemKind::CLASS),
+                    kind: Some((&symbol.kind).into()),
                     detail: Some(symbol.type_name().to_string()),
                     label_details: Some(CompletionItemLabelDetails {
                         detail: None,

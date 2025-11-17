@@ -85,6 +85,21 @@ impl SymbolIndex {
             .map(|ns| ns.join("."))
             .collect()
     }
+
+    /// Returns a map from unqualified name to symbols that share that name.
+    #[must_use]
+    pub fn collisions(&self) -> HashMap<String, Vec<Symbol>> {
+        let mut by_name: HashMap<String, Vec<Symbol>> = HashMap::new();
+        for sym in self.global.values() {
+            by_name
+                .entry(sym.info.name.clone())
+                .or_default()
+                .push(sym.clone());
+        }
+
+        by_name.retain(|_, v| v.len() > 1);
+        by_name
+    }
 }
 
 // --- Built-in definitions ---
@@ -265,7 +280,22 @@ table Watch {
     brand:string;
     release_date:string (internal_feature);
 }
+```
 "#,
+        ),
+        (
+            "rpc_service",
+            r"A set of functions that take a table as a request and return a table as a response.
+
+Generated code support for this varies by language and RPC system.
+
+```flatbuffers
+rpc_service MonsterStorage {
+    Store(Monster):StoreResponse;
+    Retrieve(MonsterId):Monster;
+}
+```
+",
         ),
     ];
 
@@ -323,10 +353,10 @@ mod tests {
 
     fn make_symbol(name: &str, path: &Path) -> Symbol {
         let mut namespace = name.split('.').map(ToString::to_string).collect::<Vec<_>>();
-        namespace.pop();
+        let unqualified_name = namespace.pop();
         Symbol {
             info: SymbolInfo {
-                name: name.to_string(),
+                name: unqualified_name.unwrap(),
                 namespace,
                 location: Location {
                     path: path.to_path_buf(),
@@ -385,10 +415,14 @@ mod tests {
         let path_a = PathBuf::from("a.fbs");
 
         let mut st = SymbolTable::new(path_a.clone());
-        st.insert("A".to_string(), make_symbol("com.foo.bar.A", &path_a));
-        st.insert("B".to_string(), make_symbol("com.foo.bar.B", &path_a));
-        st.insert("C".to_string(), make_symbol("com.foo.C", &path_a));
-        st.insert("D".to_string(), make_symbol("single.D", &path_a));
+        for sym in vec![
+            make_symbol("com.foo.bar.A", &path_a),
+            make_symbol("com.foo.bar.B", &path_a),
+            make_symbol("com.foo.C", &path_a),
+            make_symbol("single.D", &path_a),
+        ] {
+            st.insert(sym.info.qualified_name(), sym);
+        }
 
         index.update(&path_a, st);
 
@@ -399,6 +433,38 @@ mod tests {
                 "single".to_string()
             ]),
             index.namespaces()
+        );
+    }
+
+    #[test]
+    fn test_collisions() {
+        let mut index = SymbolIndex::new();
+        let path_a = PathBuf::from("a.fbs");
+
+        let mut st = SymbolTable::new(path_a.clone());
+        for sym in vec![
+            make_symbol("com.foo.bar.Collides", &path_a),
+            make_symbol("com.baz.qux.Collides", &path_a),
+            make_symbol("com.foo.Unique", &path_a),
+        ] {
+            st.insert(sym.info.qualified_name(), sym);
+        }
+
+        index.update(&path_a, st);
+
+        let collisions = index.collisions();
+        assert_eq!(collisions.keys().len(), 1);
+        assert_eq!(
+            HashSet::from_iter(vec![
+                "com.foo.bar.Collides".to_string(),
+                "com.baz.qux.Collides".to_string()
+            ]),
+            collisions
+                .get("Collides")
+                .iter()
+                .flat_map(|&syms| syms.iter())
+                .map(|sym| sym.info.qualified_name())
+                .collect::<HashSet<String>>()
         );
     }
 }

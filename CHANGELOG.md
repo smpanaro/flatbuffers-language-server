@@ -5,6 +5,7 @@
   - VSCode calls this "Go to Symbol in Workspace". Zed, "project symbols".
 - Automatically add include statements if needed when accepting a field or root_type completion.
 - Allow more features to work when there are parsing errors. This includes hint diagnostics and hovers, among others.
+- Add full support for rpc_service definitions: hover, references, completions, etc.
 - Add namespace to completions so editors can show and style based on it.
 
 ### Bug Fixes

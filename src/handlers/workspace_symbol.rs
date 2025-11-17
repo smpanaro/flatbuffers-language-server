@@ -38,6 +38,7 @@ pub fn handle_workspace_symbol(
     let start = Instant::now();
 
     let result = if params.query.is_empty() {
+        // TODO: Should this include RPC methods? Omitting for now for simplicity.
         let mut symbols: Vec<WorkspaceSymbol> = snapshot
             .symbols
             .global

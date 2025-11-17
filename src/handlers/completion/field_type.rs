@@ -1,4 +1,3 @@
-use crate::symbol_table::SymbolKind;
 use crate::utils::as_pos_idx;
 use crate::{analysis::WorkspaceSnapshot, handlers::completion::util::generate_include_text_edit};
 use regex::Regex;
@@ -31,16 +30,7 @@ pub fn handle_field_type_completion(
 
     let mut items = Vec::new();
 
-    // Build a map to detect name collisions
-    let mut name_collisions: std::collections::HashMap<String, usize> =
-        std::collections::HashMap::new();
-    for entry in &snapshot.symbols.global {
-        let symbol = entry.1;
-        if let SymbolKind::Field(_) = &symbol.kind {
-            continue;
-        }
-        *name_collisions.entry(symbol.info.name.clone()).or_default() += 1;
-    }
+    let collisions = snapshot.symbols.collisions();
 
     // User-defined symbols
     for entry in &snapshot.symbols.global {
@@ -67,7 +57,7 @@ pub fn handle_field_type_completion(
         );
 
         if is_match {
-            let has_collision = name_collisions.get(base_name).is_some_and(|&c| c > 1);
+            let has_collision = collisions.contains_key(base_name);
 
             let detail = symbol.info.namespace_str().map_or_else(
                 || symbol.type_name().to_string(),

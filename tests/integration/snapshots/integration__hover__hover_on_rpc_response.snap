@@ -1,0 +1,20 @@
+---
+source: tests/integration/hover.rs
+expression: "serde_json::to_string_pretty(&response).unwrap()"
+---
+{
+  "contents": {
+    "kind": "markdown",
+    "value": "```flatbuffers\nnamespace Model;\n\ntable Res {\n  text:string;\n}\n```\n\n---\n\n Res is a response."
+  },
+  "range": {
+    "start": {
+      "line": 17,
+      "character": 26
+    },
+    "end": {
+      "line": 17,
+      "character": 29
+    }
+  }
+}

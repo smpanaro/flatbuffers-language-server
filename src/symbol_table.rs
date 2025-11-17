@@ -48,6 +48,7 @@ pub enum SymbolKind {
     Enum(Enum),
     Field(Field),
     Union(Union),
+    RpcService(RpcService),
     Scalar,
 }
 
@@ -105,8 +106,29 @@ pub struct Field {
     pub type_range: Range, // The full range covered by the type on the line. ie including brackets but not annotations
     pub parsed_type: ParsedType,
     pub deprecated: bool,
-    pub has_id: bool,
-    pub id: i32,
+    pub id: Option<i32>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct RpcService {
+    pub methods: Vec<RpcMethod>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct RpcMethod {
+    pub name: String,
+    pub range: Range,
+    pub documentation: Option<String>,
+
+    pub request_type: RpcMethodType,
+    pub response_type: RpcMethodType,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct RpcMethodType {
+    pub name: String, // fully-qualified name
+    pub parsed: ParsedType,
+    pub range: Range, // full range covered by the type
 }
 
 impl Symbol {
@@ -118,6 +140,7 @@ impl Symbol {
             SymbolKind::Struct(_) => "struct",
             SymbolKind::Table(_) => "table",
             SymbolKind::Field(_) => "field",
+            SymbolKind::RpcService(_) => "rpc_service",
             SymbolKind::Scalar => "scalar",
         }
     }
@@ -158,6 +181,16 @@ impl Symbol {
                     }
                 }
             }
+            SymbolKind::RpcService(r) => {
+                for method in &r.methods {
+                    if method.request_type.range.contains(pos) {
+                        return Some(self);
+                    }
+                    if method.response_type.range.contains(pos) {
+                        return Some(self);
+                    }
+                }
+            }
             _ => {}
         }
 
@@ -185,6 +218,13 @@ impl Symbol {
             ),
             SymbolKind::Union(u) => {
                 format!("union {} {{{}}}", self.info.name, u.variants_markdown())
+            }
+            SymbolKind::RpcService(r) => {
+                format!(
+                    "rpc_service {} {{{}}}",
+                    self.info.name,
+                    r.methods_markdown()
+                )
             }
             SymbolKind::Scalar => format!("{} // scalar", self.info.name),
             SymbolKind::Field(f) => {
@@ -344,6 +384,28 @@ impl Union {
     }
 }
 
+impl RpcService {
+    #[must_use]
+    pub fn methods_markdown(&self) -> String {
+        if self.methods.is_empty() {
+            return String::new();
+        }
+        format!(
+            "\n{}\n",
+            self.methods
+                .iter()
+                .map(|v| format!(
+                    "  {}({}):{};",
+                    v.name,
+                    v.request_type.parsed.to_display_string(),
+                    v.response_type.parsed.to_display_string(),
+                ))
+                .collect::<Vec<String>>()
+                .join("\n")
+        )
+    }
+}
+
 impl From<&SymbolKind> for CompletionItemKind {
     fn from(kind: &SymbolKind) -> Self {
         match kind {
@@ -353,6 +415,7 @@ impl From<&SymbolKind> for CompletionItemKind {
             SymbolKind::Union(_) => CompletionItemKind::INTERFACE, // No specific kind for Union, Interface is close and makes all kinds unique.
             SymbolKind::Field(_) => CompletionItemKind::FIELD,
             SymbolKind::Scalar => CompletionItemKind::KEYWORD,
+            SymbolKind::RpcService(_) => CompletionItemKind::UNIT, // This is unused, services only show at the top level of the schema.
         }
     }
 }
@@ -366,6 +429,7 @@ impl From<&SymbolKind> for lsp_types::SymbolKind {
             SymbolKind::Enum(_) => LspSymbolKind::ENUM,
             SymbolKind::Union(_) => LspSymbolKind::INTERFACE, // No specific kind for Union, Interface is close and makes all kinds unique.
             SymbolKind::Field(_) => LspSymbolKind::FIELD,
+            SymbolKind::RpcService(_) => LspSymbolKind::OBJECT, // This also bends the definition of Object, but keeping Table as Class across both SymbolKind and CompletionKind seems like a worthwhile trade-off.
             SymbolKind::Scalar => LspSymbolKind::VARIABLE,
         }
     }

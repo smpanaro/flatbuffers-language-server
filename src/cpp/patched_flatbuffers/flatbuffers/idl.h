@@ -645,6 +645,8 @@ struct RPCCall : public Definition {
   bool Deserialize(Parser &parser, const reflection::RPCCall *call);
 
   StructDef *request, *response;
+  SourceRange request_decl_range, response_decl_range; // source range of the type name, including namespace components
+  std::string request_decl_text, response_decl_text; // text of the type name, including namespace components
 };
 
 struct ServiceDef : public Definition {

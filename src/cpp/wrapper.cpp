@@ -362,17 +362,95 @@ struct FieldDefinitionInfo get_field_info(struct FlatbuffersParser* parser, int 
     return info;
 }
 
-flatbuffers::FieldDef* get_field_def(struct FlatbuffersParser* parser, int struct_index, int field_index) {
-    if (!parser) return nullptr;
+// Functions for RPC services
+int get_num_rpc_services(struct FlatbuffersParser* parser) {
+    if (!parser) return 0;
+    return static_cast<int>(parser->impl.services_.vec.size());
+}
 
-    if (struct_index < 0 || static_cast<size_t>(struct_index) >= parser->impl.structs_.vec.size()) {
-        return nullptr;
+struct RpcServiceDefinitionInfo get_rpc_service_info(struct FlatbuffersParser* parser, int index) {
+    struct RpcServiceDefinitionInfo info = { nullptr, nullptr, nullptr, nullptr, 0, 0 };
+    if (!parser || index < 0 || static_cast<size_t>(index) >= parser->impl.services_.vec.size()) {
+        return info;
     }
-    auto struct_def = parser->impl.structs_.vec[static_cast<size_t>(struct_index)];
-    if (field_index < 0 || static_cast<size_t>(field_index) >= struct_def->fields.vec.size()) {
-        return nullptr;
+    auto service_def = parser->impl.services_.vec[static_cast<size_t>(index)];
+    info.name = service_def->name.c_str();
+    info.file = service_def->file.c_str();
+
+    if (service_def->defined_namespace) {
+        std::string ns;
+        for (size_t i = 0; i < service_def->defined_namespace->components.size(); ++i) {
+            if (i > 0) {
+                ns += ".";
+            }
+            ns += service_def->defined_namespace->components[i];
+        }
+        auto result = parser->string_cache.insert(ns);
+        info.namespace_ = result.first->c_str();
     }
-    return struct_def->fields.vec[static_cast<size_t>(field_index)];
+
+    info.documentation = join_doc_comments(service_def->doc_comment, parser->string_cache);
+    info.line = service_def->decl_line - 1;
+    info.col = service_def->decl_col;
+    return info;
+}
+
+// Functions for RPC methods
+int get_num_rpc_methods(struct FlatbuffersParser* parser, int service_index) {
+    if (!parser || service_index < 0 || static_cast<size_t>(service_index) >= parser->impl.services_.vec.size()) {
+        return 0;
+    }
+    auto service_def = parser->impl.services_.vec[static_cast<size_t>(service_index)];
+    return static_cast<int>(service_def->calls.vec.size());
+}
+
+struct RpcMethodDefinitionInfo get_rpc_method_info(struct FlatbuffersParser* parser, int service_index, int method_index) {
+    struct RpcMethodDefinitionInfo info = { nullptr, nullptr, 0, 0, nullptr, {}, nullptr, nullptr, {}, nullptr };
+
+    if (!parser || service_index < 0 || static_cast<size_t>(service_index) >= parser->impl.services_.vec.size()) {
+        return info;
+    }
+    auto service_def = parser->impl.services_.vec[static_cast<size_t>(service_index)];
+    if (method_index < 0 || static_cast<size_t>(method_index) >= service_def->calls.vec.size()) {
+        return info;
+    }
+    flatbuffers::RPCCall *call_def = service_def->calls.vec[static_cast<size_t>(method_index)];
+
+    info.name = call_def->name.c_str();
+    info.documentation = join_doc_comments(call_def->doc_comment, parser->string_cache);
+
+    info.line = call_def->decl_line - 1;
+    info.col = call_def->decl_col;
+
+    {
+        std::string fqn = call_def->request->defined_namespace->GetFullyQualifiedName(call_def->request->name);
+        auto result = parser->string_cache.insert(fqn);
+        info.request_type_name = result.first->c_str();
+    }
+
+    auto req_range = call_def->request_decl_range;
+    info.request_range.start.line = req_range.start.line - 1; // parser line is 1-based
+    info.request_range.start.col = req_range.start.col;
+    info.request_range.end.line = req_range.end.line - 1;
+    info.request_range.end.col = req_range.end.col;
+
+    info.request_source = call_def->request_decl_text.c_str();
+
+    {
+        std::string fqn = call_def->response->defined_namespace->GetFullyQualifiedName(call_def->response->name);
+        auto result = parser->string_cache.insert(fqn);
+        info.response_type_name = result.first->c_str();
+    }
+
+    auto resp_range = call_def->response_decl_range;
+    info.response_range.start.line = resp_range.start.line - 1; // parser line is 1-based
+    info.response_range.start.col = resp_range.start.col;
+    info.response_range.end.line = resp_range.end.line - 1;
+    info.response_range.end.col = resp_range.end.col;
+
+    info.response_source = call_def->response_decl_text.c_str();
+
+    return info;
 }
 
 // Functions for include graph

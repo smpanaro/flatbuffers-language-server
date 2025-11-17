@@ -182,6 +182,141 @@ root_type $0MyTable;
 }
 
 #[tokio::test]
+async fn hover_on_rpc_service() {
+    let fixture = r"
+namespace Model;
+
+/// Req is a request.
+table Req {
+    id: string;
+}
+/// Res is a response.
+table Res {
+    text: string;
+}
+
+namespace API;
+
+/// Service has a comment.
+rpc_service Ser$0vice {
+    /// Read has a comment.
+    Read(Req):Res;
+}
+";
+    let mut harness = TestHarness::new();
+    let response = get_hover_response(&mut harness, fixture, &[]).await;
+    assert_snapshot!(serde_json::to_string_pretty(&response).unwrap());
+}
+
+#[tokio::test]
+async fn hover_on_rpc_request() {
+    let fixture = r"
+namespace Model;
+
+/// Req is a request.
+table Req {
+    id: string;
+}
+/// Res is a response.
+table Res {
+    text: string;
+}
+
+namespace API;
+
+/// Service has a comment.
+rpc_service Service {
+    /// Read has a comment.
+    Read(Model.R$0eq):Model.Res;
+}
+";
+    let mut harness = TestHarness::new();
+    let response = get_hover_response(&mut harness, fixture, &[]).await;
+    assert_snapshot!(serde_json::to_string_pretty(&response).unwrap());
+}
+
+#[tokio::test]
+async fn hover_on_rpc_request_namespace() {
+    let fixture = r"
+namespace Model;
+
+/// Req is a request.
+table Req {
+    id: string;
+}
+/// Res is a response.
+table Res {
+    text: string;
+}
+
+namespace API;
+
+/// Service has a comment.
+rpc_service Service {
+    /// Read has a comment.
+    Read(Mod$0el.Req):Model.Res;
+}
+";
+    let mut harness = TestHarness::new();
+    let response = get_hover_response(&mut harness, fixture, &[]).await;
+    assert_snapshot!(serde_json::to_string_pretty(&response).unwrap());
+}
+
+#[tokio::test]
+async fn hover_on_rpc_response() {
+    let fixture = r"
+namespace Model;
+
+/// Req is a request.
+table Req {
+    id: string;
+}
+/// Res is a response.
+table Res {
+    text: string;
+}
+
+namespace API;
+
+/// Service has a comment.
+rpc_service Service {
+    /// Read has a comment.
+    Read(Model.Req):Model.Re$0s;
+}
+";
+    let mut harness = TestHarness::new();
+    let response = get_hover_response(&mut harness, fixture, &[]).await;
+    assert_snapshot!(serde_json::to_string_pretty(&response).unwrap());
+}
+
+#[tokio::test]
+async fn hover_on_rpc_response_namespace() {
+    let fixture = r"
+namespace Model;
+
+/// Req is a request.
+table Req {
+    id: string;
+}
+/// Res is a response.
+table Res {
+    text: string;
+}
+
+namespace API;
+
+/// Service has a comment.
+rpc_service Service {
+    /// Read has a comment.
+    Read(Model.Req):Mo$0del.Res;
+}
+";
+    let mut harness = TestHarness::new();
+    let response = get_hover_response(&mut harness, fixture, &[]).await;
+    assert_snapshot!(serde_json::to_string_pretty(&response).unwrap());
+}
+
+#[tokio::test]
 async fn hover_on_included_definition() {
     let included_fixture = r"
 // This is from another file.

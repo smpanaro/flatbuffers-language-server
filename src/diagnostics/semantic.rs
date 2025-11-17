@@ -97,6 +97,12 @@ pub fn analyze_unused_includes<S: BuildHasher>(
                     used_types.insert(variant.name.clone());
                 }
             }
+            SymbolKind::RpcService(r) => {
+                for method in &r.methods {
+                    used_types.insert(method.request_type.parsed.qualified_name());
+                    used_types.insert(method.response_type.parsed.qualified_name());
+                }
+            }
             _ => (),
         }
     }

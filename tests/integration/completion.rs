@@ -362,3 +362,20 @@ table Forest {
     let response = get_completion_list(&mut harness, fixture, &[]).await;
     assert_snapshot!(response);
 }
+
+#[tokio::test]
+async fn completion_for_rpc_service_request() {
+    let fixture = r"
+table ReqOne {}
+table ReqTwo {}
+struct StructsNotAllowed { f: int; }
+
+rpc_service Service {
+    Read(ReqOne): ReqOne;
+    Write($0
+}
+";
+    let mut harness = TestHarness::new();
+    let response = get_completion_list(&mut harness, fixture, &[]).await;
+    assert_snapshot!(response);
+}

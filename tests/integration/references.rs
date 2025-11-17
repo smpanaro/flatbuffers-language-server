@@ -102,6 +102,80 @@ table MyTable {
 }
 
 #[tokio::test]
+async fn find_references_for_rpc_service() {
+    let fixture = r"
+namespace Model;
+
+/// Req is a request.
+table Req {
+    id: string;
+}
+/// Res is a response.
+table Res {
+    text: string;
+}
+
+namespace API;
+
+/// Service has a comment.
+rpc_service Serv$0ice {
+    /// Read has a comment.
+    Read(Model.Req):Model.Res;
+}
+";
+    let mut locations = get_references(fixture, &[]).await;
+    locations.sort_by_key(|loc| loc.range.start.line);
+
+    assert_eq!(locations.len(), 1);
+
+    // Definition
+    assert_eq!(
+        locations[0].range,
+        Range::new(Position::new(15, 12), Position::new(15, 19))
+    );
+}
+
+#[tokio::test]
+async fn find_references_for_rpc_argument() {
+    let fixture = r"
+namespace Model;
+
+/// Req is a request.
+table R$0eq {
+    id: string;
+}
+/// Res is a response.
+table Res {
+    text: string;
+}
+
+namespace API;
+
+/// Service has a comment.
+rpc_service Service {
+    /// Read has a comment.
+    Read(Model.Req):Model.Res;
+}
+";
+    let mut locations = get_references(fixture, &[]).await;
+    locations.sort_by_key(|loc| loc.range.start.line);
+
+    assert_eq!(locations.len(), 2);
+
+    // Definition
+    assert_eq!(
+        locations[0].range,
+        Range::new(Position::new(4, 6), Position::new(4, 9))
+    );
+
+    // Usage in RPC Method
+    assert_eq!(
+        locations[1].range,
+        Range::new(Position::new(17, 15), Position::new(17, 18))
+    );
+}
+
+#[tokio::test]
 async fn find_references_across_files() {
     let included_fixture = r"
 table In$0cludedTable {

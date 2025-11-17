@@ -2,12 +2,14 @@ mod attributes;
 mod field_type;
 mod keyword;
 mod root_type;
+mod rpc_method;
 mod util;
 
 use crate::ext::duration::DurationFormat;
 use crate::handlers::completion::field_type::handle_field_type_completion;
 use crate::handlers::completion::keyword::handle_keyword_completion;
 use crate::handlers::completion::root_type::handle_root_type_completion;
+use crate::handlers::completion::rpc_method::handle_rpc_method_completion;
 use crate::utils::paths::uri_to_path_buf;
 use crate::{
     analysis::WorkspaceSnapshot, handlers::completion::attributes::handle_attribute_completion,
@@ -37,8 +39,10 @@ pub fn handle_completion(
     }
 
     let response = if let Some(response) =
-        handle_attribute_completion(snapshot, &path, position, &line)
+        handle_rpc_method_completion(snapshot, &path, &line, position)
     {
+        Some(response)
+    } else if let Some(response) = handle_attribute_completion(snapshot, &path, position, &line) {
         Some(response)
     } else if let Some(response) = handle_root_type_completion(snapshot, &path, &line, position) {
         Some(response)
