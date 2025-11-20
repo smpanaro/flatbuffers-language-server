@@ -415,7 +415,7 @@ mod tests {
         let path_a = PathBuf::from("a.fbs");
 
         let mut st = SymbolTable::new(path_a.clone());
-        for sym in vec![
+        for sym in [
             make_symbol("com.foo.bar.A", &path_a),
             make_symbol("com.foo.bar.B", &path_a),
             make_symbol("com.foo.C", &path_a),
@@ -442,7 +442,7 @@ mod tests {
         let path_a = PathBuf::from("a.fbs");
 
         let mut st = SymbolTable::new(path_a.clone());
-        for sym in vec![
+        for sym in [
             make_symbol("com.foo.bar.Collides", &path_a),
             make_symbol("com.baz.qux.Collides", &path_a),
             make_symbol("com.foo.Unique", &path_a),
