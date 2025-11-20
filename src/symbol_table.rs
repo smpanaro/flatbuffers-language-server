@@ -13,7 +13,7 @@ pub struct Location {
 impl From<Location> for lsp_types::Location {
     fn from(val: Location) -> Self {
         lsp_types::Location {
-            uri: path_buf_to_uri(&val.path).unwrap(),
+            uri: path_buf_to_uri(&val.path).expect("failed to create lsp::Location from Location"),
             range: val.range,
         }
     }

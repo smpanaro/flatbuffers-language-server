@@ -7,7 +7,7 @@ use tower_lsp_server::lsp_types::{Diagnostic, DiagnosticSeverity, Position, Rang
 
 static RE: std::sync::LazyLock<Regex> = std::sync::LazyLock::new(|| {
     Regex::new(r"^.+?:(\d+):\s*(\d+):\s+(error|warning):\s+(.+?)(?:, originally at: .+?:(\d+))?$")
-        .unwrap()
+        .expect("generic diagnostic regex failed to compile")
 });
 
 pub struct GenericDiagnosticHandler;
@@ -15,7 +15,7 @@ pub struct GenericDiagnosticHandler;
 impl ErrorDiagnosticHandler for GenericDiagnosticHandler {
     fn handle(&self, line: &str, _content: &str) -> Option<(PathBuf, Diagnostic)> {
         if let Some(captures) = RE.captures(line) {
-            let file_path = captures.get(0).unwrap().as_str().split(':').next().unwrap();
+            let file_path = captures.get(0)?.as_str().split(':').next()?;
             let Ok(file_path) = fs::canonicalize(file_path) else {
                 error!("failed to canonicalize file: {file_path}");
                 return None;

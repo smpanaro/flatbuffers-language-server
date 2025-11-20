@@ -47,19 +47,17 @@ pub fn handle_attribute_completion(
                         if let SymbolKind::Field(f) = &field.kind {
                             if let Some(id) = f.id {
                                 max_id = max(max_id, id);
-                                // Check styling
-                                if let Some(line) = snapshot
-                                    .documents
-                                    .get(path)
-                                    .unwrap()
-                                    .lines()
+                            }
+
+                            // Check styling
+                            if let Some(line) = snapshot.documents.get(path).and_then(|doc| {
+                                doc.lines()
                                     .nth(field.info.location.range.start.line as usize)
-                                {
-                                    let line_str = line.to_string();
-                                    if let Some(id_attr) = line_str.find("id:") {
-                                        if line_str.chars().nth(id_attr + 3).unwrap_or(' ') != ' ' {
-                                            style_with_space = false;
-                                        }
+                                    .map(|line| line.to_string())
+                            }) {
+                                if let Some(id_attr) = line.find("id:") {
+                                    if line.chars().nth(id_attr + 3).unwrap_or(' ') != ' ' {
+                                        style_with_space = false;
                                     }
                                 }
                             }

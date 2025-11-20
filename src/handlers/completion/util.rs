@@ -18,8 +18,9 @@ pub fn generate_include_text_edit(
             .is_some_and(|includes| includes.iter().any(|p| p == &symbol.info.location.path));
 
         if !is_already_included {
-            if let Some(relative_path) =
-                pathdiff::diff_paths(&symbol.info.location.path, path.parent().unwrap())
+            if let Some(relative_path) = path
+                .parent()
+                .and_then(|parent| pathdiff::diff_paths(&symbol.info.location.path, parent))
             {
                 if let Some(doc) = snapshot.documents.get(path) {
                     let edit = generate_include_edit(&doc, &relative_path.to_string_lossy());

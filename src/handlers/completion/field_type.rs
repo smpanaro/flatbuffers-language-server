@@ -9,8 +9,9 @@ use tower_lsp_server::lsp_types::{
     CompletionTextEdit, Documentation, MarkupContent, MarkupKind, Position, Range, TextEdit,
 };
 
-static FIELD_RE: LazyLock<Regex> =
-    LazyLock::new(|| Regex::new(r"^\s*(\w+)\s*:\s*\[?\s*([\w\.]*)").unwrap());
+static FIELD_RE: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(r"^\s*(\w+)\s*:\s*\[?\s*([\w\.]*)").expect("field type regex failed to compile")
+});
 
 #[allow(clippy::too_many_lines)]
 pub fn handle_field_type_completion(

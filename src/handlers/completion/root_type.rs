@@ -9,8 +9,9 @@ use tower_lsp_server::lsp_types::{
     CompletionTextEdit, Documentation, MarkupContent, MarkupKind, Position, Range, TextEdit,
 };
 
-static ROOT_TYPE_RE: LazyLock<Regex> =
-    LazyLock::new(|| Regex::new(r"^\s*root_type\s+([\w\.]*)").unwrap());
+static ROOT_TYPE_RE: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(r"^\s*root_type\s+([\w\.]*)").expect("root type regex failed to compile")
+});
 
 pub fn handle_root_type_completion(
     snapshot: &WorkspaceSnapshot,

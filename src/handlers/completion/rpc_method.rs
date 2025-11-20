@@ -14,14 +14,14 @@ use tower_lsp_server::lsp_types::{
 
 static REQ_RE: LazyLock<Regex> = LazyLock::new(|| {
     Regex::new(r"^(?<line_prefix>\s*(?<method_name>\w+)+\s*\(\s*)(?<completion_prefix>[\.\w\s]*)$")
-        .unwrap()
+        .expect("rpc request regex failed to compile")
 });
 
 static RESP_RE: LazyLock<Regex> = LazyLock::new(|| {
     Regex::new(
         r"^(?<line_prefix>\s*(?<method_name>\w+)+\s*\(.*\):\s*)(?<completion_prefix>[\.\w\s]*)$",
     )
-    .unwrap()
+    .expect("rpc response regex failed to compile")
 });
 
 pub fn handle_rpc_method_completion(

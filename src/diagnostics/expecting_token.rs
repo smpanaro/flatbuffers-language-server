@@ -12,7 +12,7 @@ use tower_lsp_server::lsp_types::{
 
 static RE: std::sync::LazyLock<Regex> = std::sync::LazyLock::new(|| {
     Regex::new(r"^(.+?):\s*(\d+):\s*(\d+):\s*error:\s*expecting: (.+) instead got:\s*(.+)$")
-        .unwrap()
+        .expect("expecting token regex failed to compile")
 });
 
 pub struct ExpectingTokenHandler;

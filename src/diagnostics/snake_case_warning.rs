@@ -1,3 +1,4 @@
+use std::sync::LazyLock;
 use std::{fs, path::PathBuf, str::FromStr};
 
 use crate::diagnostics::ErrorDiagnosticHandler;
@@ -11,11 +12,11 @@ use tower_lsp_server::lsp_types::{
 
 // Regex to capture snake_case warnings:
 // <1file>:<2line>: <3col>: warning: field names should be lowercase snake_case, got: <4name>
-static SNAKE_CASE_RE: std::sync::LazyLock<Regex> = std::sync::LazyLock::new(|| {
+static SNAKE_CASE_RE: LazyLock<Regex> = LazyLock::new(|| {
     Regex::new(
         r"^(.+?):(\d+): (\d+): warning: field names should be lowercase snake_case, got: (.+)$",
     )
-    .unwrap()
+    .expect("snake case regex failed to compile")
 });
 
 pub struct SnakeCaseWarningHandler;

@@ -39,7 +39,9 @@ impl Parser for FlatcFFIParser {
         let Ok(c_content) = CString::new(content) else {
             return ParseResult::default();
         };
-        let c_filename = CString::new(path.to_str().unwrap_or_default()).unwrap();
+        let Ok(c_filename) = CString::new(path.to_str().unwrap_or_default()) else {
+            return ParseResult::default();
+        };
 
         let c_search_paths: Vec<CString> = search_paths
             .iter()
@@ -488,7 +490,9 @@ unsafe fn build_include_graph(
             continue;
         };
 
-        let c_file_path = CString::new(original_file_path.clone()).unwrap();
+        let Ok(c_file_path) = CString::new(original_file_path.clone()) else {
+            continue;
+        };
         let num_includes = ffi::get_num_includes_for_file(parser_ptr, c_file_path.as_ptr());
         let mut includes = Vec::new();
         for j in 0..num_includes {

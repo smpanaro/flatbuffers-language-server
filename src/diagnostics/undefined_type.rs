@@ -9,11 +9,12 @@ use tower_lsp_server::lsp_types::{Diagnostic, DiagnosticSeverity, Position, Rang
 
 static RE: std::sync::LazyLock<Regex> = std::sync::LazyLock::new(|| {
     Regex::new(r"^.+?:(\d+):\s*(\d+):\s+(error|warning):\s+(.+?)(?:, originally at: (.+?):(\d+)(?::(\d+)-(\d+):(\d+))?)?$")
-        .unwrap()
+        .expect("base undefined type regex failed to compile")
 });
 
 static UNDEFINED_TYPE_RE: std::sync::LazyLock<Regex> = std::sync::LazyLock::new(|| {
-    Regex::new(r"type referenced but not defined \(check namespace\): ((?:\w+\.?)*)").unwrap()
+    Regex::new(r"type referenced but not defined \(check namespace\): ((?:\w+\.?)*)")
+        .expect("specific undefined type regex failed to compile")
 });
 
 pub struct UndefinedTypeHandler;
@@ -71,7 +72,8 @@ impl ErrorDiagnosticHandler for UndefinedTypeHandler {
                     };
                 } else {
                     // Case 2: No detailed "originally at" range.
-                    file_path = captures.get(0).unwrap().as_str().split(':').next().unwrap();
+                    // If this fails, we can't build a diagnostic so we return None.
+                    file_path = captures.get(0)?.as_str().split(':').next()?;
                     let line_num: u32 = captures
                         .get(1)
                         .map_or("1", |m| m.as_str())

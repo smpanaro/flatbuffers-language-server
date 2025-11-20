@@ -7,7 +7,7 @@ use crate::handlers::{
     workspace_symbol,
 };
 use crate::utils::paths::path_buf_to_uri;
-use log::{error, info};
+use log::{error, info, warn};
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
@@ -164,7 +164,8 @@ impl LanguageServer for Backend {
             })
             .await;
 
-        self.client
+        let register_result = self
+            .client
             .register_capability(vec![Registration {
                 id: "fbs-watcher".to_string(),
                 method: "workspace/didChangeWatchedFiles".to_string(),
@@ -175,11 +176,15 @@ impl LanguageServer for Backend {
                             kind: None, // None means all changes
                         }],
                     })
-                    .unwrap(),
+                    .unwrap_or_default(),
                 ),
             }])
-            .await
-            .unwrap();
+            .await;
+        if let Err(register_error) = register_result {
+            warn!(
+                "Failed to register file watcher, some features will be unstable: {register_error}"
+            );
+        }
 
         info!("Server initialized!");
     }

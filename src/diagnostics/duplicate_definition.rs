@@ -18,7 +18,7 @@ use tower_lsp_server::{
 // <1file>:<2line>: <3col>: error: <4type_name> already exists: <5name> previously defined at <6original_file>:<7original_line>:<8original_col>
 static DUPLICATE_RE: std::sync::LazyLock<Regex> = std::sync::LazyLock::new(|| {
     Regex::new(r"^(.+?):(\d+): (\d+): error: (.+?) already exists: (.+?) previously defined at (.+?):(\d+):(\d+)$")
-        .unwrap()
+        .expect("duplicate definition regex failed to compile")
 });
 
 pub struct DuplicateDefinitionHandler;
@@ -59,7 +59,7 @@ impl ErrorDiagnosticHandler for DuplicateDefinitionHandler {
                 .unwrap_or(0u32)
                 .saturating_sub(unqualified_name_length);
             let previous_location = Location {
-                uri: Uri::from_file_path(captures[6].trim()).unwrap(),
+                uri: Uri::from_file_path(captures[6].trim())?,
                 range: Range {
                     start: Position::new(prev_line, prev_char),
                     end: Position::new(prev_line, prev_char + unqualified_name_length),
