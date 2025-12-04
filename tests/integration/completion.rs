@@ -300,6 +300,32 @@ table MyTable {
 }
 
 #[tokio::test]
+async fn completion_for_enum_variant_attribute() {
+    let fixture = r"
+enum MyEnum : ushort {
+    A,
+    B ($0
+}
+";
+    let mut harness = TestHarness::new();
+    let response = get_completion_list(&mut harness, fixture, &[]).await;
+    assert_snapshot!(response);
+}
+
+#[tokio::test]
+async fn completion_for_attribute_outside_parens() {
+    let fixture = r"
+enum MyEnum : ushort {
+    A,
+    B (custom),$0
+}
+";
+    let mut harness = TestHarness::new();
+    let response = get_completion_list(&mut harness, fixture, &[]).await;
+    assert_snapshot!(response);
+}
+
+#[tokio::test]
 async fn completion_for_field_namespace_partial() {
     let fixture = r"
 namespace one.two.three;

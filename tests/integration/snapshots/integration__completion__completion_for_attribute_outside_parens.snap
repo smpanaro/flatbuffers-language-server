@@ -1,0 +1,5 @@
+---
+source: tests/integration/completion.rs
+expression: response
+---
+[]

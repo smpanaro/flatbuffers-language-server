@@ -22,6 +22,14 @@ pub fn handle_attribute_completion(
             }
         }
 
+        // Ignore if cursor is outside of the attribute parens.
+        if line[start_paren..(position.character as usize)]
+            .rfind(')')
+            .is_some()
+        {
+            return None;
+        }
+
         let trigger_text = &line[start_paren + 1..position.character as usize];
         let last_word = trigger_text
             .split(|c: char| c.is_whitespace() || c == ',' || c == ':')
