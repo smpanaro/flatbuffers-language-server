@@ -377,7 +377,7 @@ impl Union {
             "\n{}\n",
             self.variants
                 .iter()
-                .map(|v| format!("  {}", v.name))
+                .map(|v| format!("  {}", v.parsed_type.to_display_string()))
                 .collect::<Vec<String>>()
                 .join(",\n")
         )
