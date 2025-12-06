@@ -24,6 +24,10 @@ pub struct SymbolIndex {
     pub keywords: Arc<HashMap<String, String>>,
     /// Pre-populated, immutable map of built-in attributes.
     pub builtin_attributes: Arc<HashMap<String, Attribute>>,
+    /// Mutable map of user-defined attributes.
+    pub user_defined_attributes: HashMap<String, Attribute>,
+    /// Map from a file path to the list of user-defined attributes declared in it.
+    pub user_defined_attributes_per_file: HashMap<PathBuf, Vec<String>>,
 }
 
 impl SymbolIndex {
@@ -44,10 +48,12 @@ impl SymbolIndex {
             builtins: Arc::new(builtins),
             keywords: Arc::new(keywords),
             builtin_attributes: Arc::new(builtin_attributes),
+            user_defined_attributes: HashMap::new(),
+            user_defined_attributes_per_file: HashMap::new(),
         }
     }
 
-    pub fn update(&mut self, path: &Path, st: SymbolTable) {
+    pub fn update_symbols(&mut self, path: &Path, st: SymbolTable) {
         if let Some(old_symbol_keys) = self.per_file.remove(path) {
             for key in old_symbol_keys {
                 self.global.remove(&key);
@@ -68,10 +74,41 @@ impl SymbolIndex {
         self.per_file.insert(path.to_path_buf(), new_symbol_keys);
     }
 
+    pub fn update_attributes(&mut self, path: &Path, attributes: HashMap<String, String>) {
+        // Clear old attributes for this path
+        if let Some(old_attr_keys) = self.user_defined_attributes_per_file.remove(path) {
+            for key in old_attr_keys {
+                self.user_defined_attributes.remove(&key);
+            }
+        }
+
+        // Add new attributes
+        let new_attr_keys: Vec<String> = attributes.keys().cloned().collect();
+        for (attr_name, doc) in attributes {
+            self.user_defined_attributes.insert(
+                attr_name.clone(),
+                Attribute {
+                    name: attr_name,
+                    doc,
+                    restricted_to_types: None,
+                },
+            );
+        }
+        if !new_attr_keys.is_empty() {
+            self.user_defined_attributes_per_file
+                .insert(path.to_path_buf(), new_attr_keys);
+        }
+    }
+
     pub fn remove(&mut self, path: &Path) {
         if let Some(old_symbol_keys) = self.per_file.remove(path) {
             for key in old_symbol_keys {
                 self.global.remove(&key);
+            }
+        }
+        if let Some(old_attr_keys) = self.user_defined_attributes_per_file.remove(path) {
+            for key in old_attr_keys {
+                self.user_defined_attributes.remove(&key);
             }
         }
     }
@@ -370,7 +407,7 @@ mod tests {
     }
 
     #[test]
-    fn test_update() {
+    fn test_update_symbols() {
         let mut index = SymbolIndex::new();
         let path_a = PathBuf::from("a.fbs");
         let path_b = PathBuf::from("b.fbs");
@@ -378,18 +415,69 @@ mod tests {
         let mut st1 = SymbolTable::new(path_a.clone());
         st1.insert("A".to_string(), make_symbol("A", &path_a));
 
-        index.update(&path_a, st1);
+        index.update_symbols(&path_a, st1);
         assert_eq!(index.global.len(), 1);
         assert_eq!(index.per_file.get(&path_a).unwrap().len(), 1);
 
         let mut st2 = SymbolTable::new(path_a.clone());
         st2.insert("B".to_string(), make_symbol("B", &path_b));
-        index.update(&path_a, st2);
+        index.update_symbols(&path_a, st2);
 
         assert_eq!(index.global.len(), 1);
         assert!(index.global.contains_key("B"));
         assert!(!index.global.contains_key("A"));
         assert!(index.per_file.get(&path_a).unwrap().is_empty());
+    }
+
+    #[test]
+    fn test_update_attributes() {
+        let mut index = SymbolIndex::new();
+        let path_a = PathBuf::from("a.fbs");
+        let path_b = PathBuf::from("b.fbs");
+
+        let mut attrs_a = HashMap::new();
+        attrs_a.insert("attr1".to_string(), "doc1".to_string());
+        attrs_a.insert("attr2".to_string(), "doc2".to_string());
+
+        index.update_attributes(&path_a, attrs_a);
+        assert_eq!(index.user_defined_attributes.len(), 2);
+        assert_eq!(
+            index
+                .user_defined_attributes_per_file
+                .get(&path_a)
+                .unwrap()
+                .len(),
+            2
+        );
+
+        let mut attrs_b = HashMap::new();
+        attrs_b.insert("attr3".to_string(), "doc3".to_string());
+        index.update_attributes(&path_b, attrs_b);
+        assert_eq!(index.user_defined_attributes.len(), 3);
+        assert_eq!(
+            index
+                .user_defined_attributes_per_file
+                .get(&path_b)
+                .unwrap()
+                .len(),
+            1
+        );
+
+        // Test updating attributes for path_a
+        let mut new_attrs_a = HashMap::new();
+        new_attrs_a.insert("attr4".to_string(), "doc4".to_string());
+        index.update_attributes(&path_a, new_attrs_a);
+        assert_eq!(index.user_defined_attributes.len(), 2); // attr1, attr2 removed, attr4 added. attr3 remains.
+        assert!(!index.user_defined_attributes.contains_key("attr1"));
+        assert!(index.user_defined_attributes.contains_key("attr4"));
+        assert_eq!(
+            index
+                .user_defined_attributes_per_file
+                .get(&path_a)
+                .unwrap()
+                .len(),
+            1
+        );
     }
 
     #[test]
@@ -399,14 +487,22 @@ mod tests {
 
         let mut st = SymbolTable::new(path_a.clone());
         st.insert("A".to_string(), make_symbol("A", &path_a));
-        index.update(&path_a, st);
+        index.update_symbols(&path_a, st);
+
+        let mut attrs = HashMap::new();
+        attrs.insert("attr1".to_string(), "doc1".to_string());
+        index.update_attributes(&path_a, attrs);
 
         assert_eq!(index.global.len(), 1);
         assert_eq!(index.per_file.len(), 1);
+        assert_eq!(index.user_defined_attributes.len(), 1);
+        assert_eq!(index.user_defined_attributes_per_file.len(), 1);
 
         index.remove(&path_a);
         assert!(index.global.is_empty());
         assert!(index.per_file.is_empty());
+        assert!(index.user_defined_attributes.is_empty());
+        assert!(index.user_defined_attributes_per_file.is_empty());
     }
 
     #[test]
@@ -424,7 +520,7 @@ mod tests {
             st.insert(sym.info.qualified_name(), sym);
         }
 
-        index.update(&path_a, st);
+        index.update_symbols(&path_a, st);
 
         assert_eq!(
             HashSet::from_iter(vec![
@@ -450,7 +546,7 @@ mod tests {
             st.insert(sym.info.qualified_name(), sym);
         }
 
-        index.update(&path_a, st);
+        index.update_symbols(&path_a, st);
 
         let collisions = index.collisions();
         assert_eq!(collisions.keys().len(), 1);

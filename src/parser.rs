@@ -24,6 +24,7 @@ pub struct ParseResult {
     pub symbol_table: Option<SymbolTable>,
     pub includes: Vec<PathBuf>,
     pub root_type_info: Option<RootTypeInfo>,
+    pub user_defined_attributes: HashMap<String, String>,
 }
 
 /// A trait for parsing `FlatBuffers` schema files.
@@ -71,6 +72,7 @@ impl Parser for FlatcFFIParser {
 
             let included_files = extract_all_included_files(parser_ptr); // recursive. includes transient includes.
             let root_type_info = extract_root_type(parser_ptr);
+            let user_defined_attributes = extract_user_defined_attributes(parser_ptr);
 
             let include_graph = build_include_graph(parser_ptr); // direct includes only.
             diagnostics::semantic::analyze_unused_includes(
@@ -88,6 +90,7 @@ impl Parser for FlatcFFIParser {
                 symbol_table: Some(st),
                 includes: included_files,
                 root_type_info,
+                user_defined_attributes,
             };
 
             ffi::delete_parser(parser_ptr);
@@ -124,6 +127,33 @@ unsafe fn extract_all_included_files(parser_ptr: *mut ffi::FlatbuffersParser) ->
         }
     }
     included_files
+}
+
+/// Extracts all user-defined attributes from the parser.
+unsafe fn extract_user_defined_attributes(
+    parser_ptr: *mut ffi::FlatbuffersParser,
+) -> HashMap<String, String> {
+    let mut attributes = HashMap::new();
+    let num_attributes = ffi::get_num_user_defined_attributes(parser_ptr);
+    for i in 0..num_attributes {
+        if let Some(attr_name) =
+            c_str_to_optional_string(ffi::get_user_defined_attribute(parser_ptr, i))
+        {
+            let doc = CString::new(attr_name.clone())
+                .map(|c_attr_name| {
+                    c_str_to_optional_string(ffi::get_user_defined_attribute_doc(
+                        parser_ptr,
+                        c_attr_name.as_ptr(),
+                    ))
+                    .unwrap_or_default()
+                    .trim()
+                    .to_string()
+                })
+                .unwrap_or_default();
+            attributes.insert(attr_name, doc);
+        }
+    }
+    attributes
 }
 
 /// Extracts all struct and table definitions from the parser.

@@ -16,17 +16,14 @@ pub fn handle_attribute_completion(
 ) -> Option<CompletionResponse> {
     if let Some(start_paren) = line[..position.character as usize].rfind('(') {
         // Ignore if inside a comment
-        if let Some(comment_start) = line.find("//") {
-            if start_paren > comment_start {
-                return None;
-            }
+        let comment_start = line.find("//");
+        if comment_start.is_some_and(|cs| cs < start_paren) {
+            return None;
         }
 
         // Ignore if cursor is outside of the attribute parens.
-        if line[start_paren..(position.character as usize)]
-            .rfind(')')
-            .is_some()
-        {
+        let right_paren = line[..comment_start.unwrap_or(line.len())].rfind(')');
+        if right_paren.is_some_and(|rp| rp < position.character as usize) {
             return None;
         }
 
@@ -118,9 +115,19 @@ pub fn handle_attribute_completion(
         }
 
         // Other attributes
-        let attribute_list = &line[start_paren..];
+        let attr_end = vec![comment_start, right_paren, Some(line.len())]
+            .into_iter()
+            .flatten()
+            .min()
+            .unwrap_or(line.len());
+        let attribute_list = &line[start_paren..attr_end];
         let value_attributes = ["force_align", "nested_flatbuffer", "hash"]; // attributes that require a value
-        for entry in snapshot.symbols.builtin_attributes.iter() {
+        for entry in snapshot
+            .symbols
+            .builtin_attributes
+            .iter()
+            .chain(snapshot.symbols.user_defined_attributes.iter())
+        {
             let (name, attr) = entry;
 
             if attribute_list.contains(name) {

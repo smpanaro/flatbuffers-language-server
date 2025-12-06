@@ -26,6 +26,10 @@ pub fn handle_field_type_completion(
         return None;
     }
     let (range, partial_text) = get_field_type_completion_context(line, position)?;
+    if partial_text.trim_start().contains(char::is_whitespace) {
+        // Cannot have spaces within a type.
+        return None;
+    }
     let captures = FIELD_RE.captures(line)?;
     let field_name = captures.get(1).map_or("", |m| m.as_str());
 
@@ -239,7 +243,7 @@ fn get_field_type_completion_context(line: &str, position: Position) -> Option<(
                 },
                 end: position,
             };
-            let partial_text = partial_match.as_str().to_string();
+            let partial_text = line_upto_cursor[partial_match.start()..].to_string();
             (range, partial_text)
         })
     })
@@ -283,6 +287,14 @@ mod tests {
             assert_eq!(partial, "T");
             assert_eq!(range.start.character, 10);
             assert_eq!(range.end.character, 11);
+        }
+
+        {
+            let line = "  field: int i";
+            let (range, partial) = get_field_type_completion_context(line, pos(14)).unwrap();
+            assert_eq!(partial, "int i");
+            assert_eq!(range.start.character, 9);
+            assert_eq!(range.end.character, 14);
         }
     }
 

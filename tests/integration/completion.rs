@@ -302,9 +302,29 @@ table MyTable {
 #[tokio::test]
 async fn completion_for_enum_variant_attribute() {
     let fixture = r"
+// This is my custom attribute.
+attribute my_attr;
+
 enum MyEnum : ushort {
     A,
     B ($0
+}
+";
+    let mut harness = TestHarness::new();
+    let response = get_completion_list(&mut harness, fixture, &[]).await;
+    assert_snapshot!(response);
+}
+
+#[tokio::test]
+async fn completion_for_enum_variant_attribute_sibling_table() {
+    let fixture = r"
+attribute my_attr;
+
+table PotentialRPCArg {}
+
+enum MyEnum : ushort {
+    A,
+    B ($0 // This line in isolation looks like an RPC method.
 }
 ";
     let mut harness = TestHarness::new();
@@ -323,6 +343,51 @@ enum MyEnum : ushort {
     let mut harness = TestHarness::new();
     let response = get_completion_list(&mut harness, fixture, &[]).await;
     assert_snapshot!(response);
+}
+
+#[tokio::test]
+async fn completion_for_attribute_disallowed_field_locations() {
+    let fixtures = vec![
+        r"
+table Elements {
+    name: string;
+    count: int // $0 (
+}",
+        r"
+table Elements {
+    name: string;
+    count: int $0 ( //
+}",
+        r"
+table Elements {
+    name: string;
+    count: int // $0
+}",
+        r"
+table Elements {
+    name: string;
+    count: int // ($0
+}",
+        r"
+table Elements {
+    name: string;
+    count: int $0
+}",
+        r"
+table Elements {
+    name: string;
+    count: int i$0
+}",
+    ];
+
+    for fixture in fixtures {
+        let mut harness = TestHarness::new();
+        let response = get_completion_list(&mut harness, fixture, &[]).await;
+        assert_eq!(
+            "[]", response,
+            "expected no completions for fixture: {fixture}"
+        );
+    }
 }
 
 #[tokio::test]
@@ -397,8 +462,26 @@ table ReqTwo {}
 struct StructsNotAllowed { f: int; }
 
 rpc_service Service {
-    Read(ReqOne): ReqOne;
+    Read(ReqOne): ReqOne; // Can't have an empty service.
     Write($0
+}
+";
+    let mut harness = TestHarness::new();
+    let response = get_completion_list(&mut harness, fixture, &[]).await;
+    assert_snapshot!(response);
+}
+
+#[tokio::test]
+async fn completion_for_rpc_service_request_sibling_attr() {
+    let fixture = r"
+attribute my_attr;
+
+table ReqOne {}
+table ReqTwo {}
+
+rpc_service Service {
+    Read(ReqOne): ReqOne; // Can't have an empty service.
+    Write(my$0 // This line in isolation looks like an enum value (which could take my_attr as an attribute).
 }
 ";
     let mut harness = TestHarness::new();

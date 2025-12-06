@@ -453,6 +453,42 @@ struct RpcMethodDefinitionInfo get_rpc_method_info(struct FlatbuffersParser* par
     return info;
 }
 
+// Functions for user-defined attributes
+int get_num_user_defined_attributes(struct FlatbuffersParser* parser) {
+    if (!parser) return 0;
+    int count = 0;
+    for (const auto& attr : parser->impl.known_attributes_) {
+        if (!attr.second) { // `false` indicates a user-defined attribute
+            count++;
+        }
+    }
+    return count;
+}
+
+const char* get_user_defined_attribute(struct FlatbuffersParser* parser, int index) {
+    if (!parser) return "";
+    int current_index = 0;
+    for (const auto& attr : parser->impl.known_attributes_) {
+        if (!attr.second) { // `false` indicates a user-defined attribute
+            if (current_index == index) {
+                auto result = parser->string_cache.insert(attr.first);
+                return result.first->c_str();
+            }
+            current_index++;
+        }
+    }
+    return "";
+}
+
+const char* get_user_defined_attribute_doc(struct FlatbuffersParser* parser, const char* name) {
+    if (!parser || !name) return "";
+    auto it = parser->impl.user_attribute_docs_.find(name);
+    if (it != parser->impl.user_attribute_docs_.end()) {
+        return join_doc_comments(it->second, parser->string_cache);
+    }
+    return "";
+}
+
 // Functions for include graph
 int get_num_files_with_includes(struct FlatbuffersParser* parser) {
     if (!parser) return 0;

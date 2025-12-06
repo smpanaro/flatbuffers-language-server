@@ -38,11 +38,16 @@ pub fn handle_completion(
         return None;
     }
 
+    let last_keyword = preceding_symbol_kind(&doc, position);
+
     let response = if let Some(response) =
         handle_rpc_method_completion(snapshot, &path, &line, position)
+            .take_if(|_| last_keyword.as_deref() == Some("rpc_service"))
     {
         Some(response)
-    } else if let Some(response) = handle_attribute_completion(snapshot, &path, position, &line) {
+    } else if let Some(response) = handle_attribute_completion(snapshot, &path, position, &line)
+        .take_if(|_| last_keyword.as_deref() != Some("rpc_service"))
+    {
         Some(response)
     } else if let Some(response) = handle_root_type_completion(snapshot, &path, &line, position) {
         Some(response)
@@ -66,6 +71,65 @@ pub fn handle_completion(
     );
 
     response
+}
+
+// Returns the symbol kind of the first keyword (table, enum, rpc_service) that
+// that appears before this position (either on the same line or a prior line).
+fn preceding_symbol_kind(doc: &Rope, position: Position) -> Option<String> {
+    let mut balance = 0;
+
+    // Iterate backwards from the current line
+    for i in (0..=position.line as usize).rev() {
+        let line_chunk = doc.line(i);
+        let line_str = line_chunk.to_string();
+
+        // Determine the text segment to analyze:
+        // - If on the current line, stop at the cursor character.
+        // - If on a previous line, analyze the whole line.
+        let text_segment = if i == position.line as usize {
+            let char_idx = position.character as usize;
+            if char_idx < line_str.len() {
+                &line_str[..char_idx]
+            } else {
+                &line_str[..]
+            }
+        } else {
+            &line_str[..]
+        };
+
+        // Strip comments (simple check for "//")
+        let clean_text = text_segment.split("//").next().unwrap_or("");
+
+        // Scan characters in reverse to check brace balance
+        for c in clean_text.chars().rev() {
+            match c {
+                '}' => balance += 1,
+                '{' => balance -= 1,
+                _ => {}
+            }
+        }
+
+        // If balance drops below zero, we found the opening brace for the current context.
+        // Check this line for the defining keyword.
+        if balance < 0 {
+            let trimmed = clean_text.trim();
+            if trimmed.contains("rpc_service") {
+                return Some("rpc_service".to_string());
+            } else if trimmed.contains("table") {
+                return Some("table".to_string());
+            } else if trimmed.contains("struct") {
+                return Some("struct".to_string());
+            } else if trimmed.contains("enum") {
+                return Some("enum".to_string());
+            } else if trimmed.contains("union") {
+                return Some("union".to_string());
+            }
+            // Found a block start, but no recognized keyword (or unmatched brace), stop searching.
+            return None;
+        }
+    }
+
+    None
 }
 
 fn should_suppress_completion(doc: &Rope, position: Position) -> bool {

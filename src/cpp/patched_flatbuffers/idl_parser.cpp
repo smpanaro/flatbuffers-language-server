@@ -3889,6 +3889,7 @@ CheckedError Parser::DoParse(const char *source, const char **include_paths,
     } else if (IsIdent("include")) {
       return Error("includes must come before declarations");
     } else if (IsIdent("attribute")) {
+      std::vector<std::string> dc = doc_comment_;
       NEXT();
       auto name = attribute_;
       if (Is(kTokenIdentifier)) {
@@ -3898,6 +3899,9 @@ CheckedError Parser::DoParse(const char *source, const char **include_paths,
       }
       EXPECT(';');
       known_attributes_[name] = false;
+      if (!dc.empty()) {
+        user_attribute_docs_[name] = dc;
+      }
     } else if (IsIdent("rpc_service")) {
       ECHECK(ParseService(source_filename));
     } else {

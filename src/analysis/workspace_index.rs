@@ -34,7 +34,9 @@ impl WorkspaceIndex {
                 None => self.root_types.root_types.remove(path),
             };
 
-            self.symbols.update(path, st);
+            self.symbols.update_symbols(path, st);
+            self.symbols
+                .update_attributes(path, result.user_defined_attributes);
         }
 
         self.dependencies.update(path, result.includes.clone());

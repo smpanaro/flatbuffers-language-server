@@ -1302,6 +1302,7 @@ class Parser : public ParserState {
   std::vector<std::string> native_included_files_;
 
   std::map<std::string, bool> known_attributes_;
+  std::map<std::string, std::vector<std::string>> user_attribute_docs_;
 
   IDLOptions opts;
   bool uses_flexbuffers_;

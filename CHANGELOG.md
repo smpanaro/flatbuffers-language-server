@@ -7,6 +7,7 @@
 - Allow more features to work when there are parsing errors. This includes hint diagnostics and hovers, among others.
 - Add full support for rpc_service definitions: hover, references, completions, etc.
 - Add namespace to completions so editors can show and style based on it.
+- Add user-defined attributes to attribute completions.
 
 ### Bug Fixes
 - Fixed invalid syntax in enum and union hovers. This resulted in incorrect highlighting in some editors.

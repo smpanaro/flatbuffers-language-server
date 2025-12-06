@@ -137,6 +137,11 @@ struct RpcServiceDefinitionInfo get_rpc_service_info(struct FlatbuffersParser* p
 int get_num_rpc_methods(struct FlatbuffersParser* parser, int service_index);
 struct RpcMethodDefinitionInfo get_rpc_method_info(struct FlatbuffersParser* parser, int service_index, int method_index);
 
+// Functions for user-defined attributes
+int get_num_user_defined_attributes(struct FlatbuffersParser* parser);
+const char* get_user_defined_attribute(struct FlatbuffersParser* parser, int index);
+const char* get_user_defined_attribute_doc(struct FlatbuffersParser* parser, const char* name);
+
 // Functions for all included files
 int get_num_all_included_files(struct FlatbuffersParser* parser);
 const char* get_all_included_file_path(struct FlatbuffersParser* parser, int index);
