@@ -28,6 +28,7 @@ struct StructDefinitionInfo {
     unsigned col;
     size_t bytesize; // struct only
     size_t minalign; // struct only
+    bool is_predeclared;
 };
 
 // A struct to pass enum/union definition information

@@ -26,7 +26,7 @@ impl ErrorDiagnosticHandler for SnakeCaseWarningHandler {
         let captures = SNAKE_CASE_RE.captures(line)?;
         let file_path = captures[1].trim();
         let Ok(file_path) = fs::canonicalize(file_path) else {
-            error!("failed to canonicalize file: {file_path}");
+            error!("failed to canonicalize file: {file_path} in snake case handler");
             return None;
         };
 

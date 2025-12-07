@@ -164,6 +164,12 @@ unsafe fn extract_structs_and_tables(
     let num_structs = ffi::get_num_structs(parser_ptr);
     for i in 0..num_structs {
         let def_info = ffi::get_struct_info(parser_ptr, i);
+
+        if def_info.is_predeclared {
+            // This happens sometimes when there are parsing errors.
+            continue;
+        }
+
         let Some(name) = c_str_to_optional_string(def_info.name) else {
             continue;
         };
@@ -180,7 +186,7 @@ unsafe fn extract_structs_and_tables(
 
         let file = c_str_to_string(def_info.file);
         let Ok(file_path) = fs::canonicalize(&file) else {
-            error!("failed to canonicalize file: {file}");
+            error!("failed to canonicalize file: {file} for struct/table named: {qualified_name}");
             continue;
         };
 
@@ -277,7 +283,7 @@ unsafe fn extract_enums_and_unions(parser_ptr: *mut ffi::FlatbuffersParser, st: 
 
         let file = c_str_to_string(def_info.file);
         let Ok(file_path) = fs::canonicalize(&file) else {
-            error!("failed to canonicalize file: {file}");
+            error!("failed to canonicalize file: {file} for enum/union named: {qualified_name}");
             continue;
         };
 
@@ -379,7 +385,7 @@ unsafe fn extract_rpc_services(parser_ptr: *mut ffi::FlatbuffersParser, st: &mut
 
         let file = c_str_to_string(def_info.file);
         let Ok(file_path) = fs::canonicalize(&file) else {
-            error!("failed to canonicalize file: {file}");
+            error!("failed to canonicalize file: {file} for rpc_service named: {qualified_name}");
             continue;
         };
 
@@ -480,7 +486,7 @@ unsafe fn extract_root_type(parser_ptr: *mut ffi::FlatbuffersParser) -> Option<R
     let file = c_str_to_string(root_def.file);
 
     let Ok(file_path) = fs::canonicalize(&file) else {
-        error!("failed to canonicalize file: {file}");
+        error!("failed to canonicalize file: {file} for root_type named: {qualified_name}");
         return None;
     };
 

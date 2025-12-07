@@ -113,7 +113,7 @@ impl ErrorDiagnosticHandler for UndefinedTypeHandler {
                 }
 
                 let Ok(file_path) = fs::canonicalize(file_path) else {
-                    error!("failed to canonicalize file: {file_path}");
+                    error!("failed to canonicalize file: {file_path} in undefined type handler");
                     return None;
                 };
 

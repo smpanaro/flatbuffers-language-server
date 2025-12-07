@@ -115,7 +115,6 @@ pub fn analyze_unused_includes<S: BuildHasher>(
             // TODO: Make everything PathBuf.
             if let Some(path_str) = path.to_str() {
                 symbol_defining_files.insert(path_str);
-                log::info!("{} requires {}", symbol.info.name, path.display());
             }
         }
     }

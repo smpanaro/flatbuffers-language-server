@@ -1963,6 +1963,7 @@ CheckedError Parser::ParseMetaData(SymbolTable<Value> *attributes) {
         return Error("attribute name must be either identifier or string: " +
                      name);
       if (known_attributes_.find(name) == known_attributes_.end())
+        // TODO(flatbuffers-language-server): This doesn't need to stop parsing.
         return Error("user define attributes must be declared before use: " +
                      name);
       NEXT();

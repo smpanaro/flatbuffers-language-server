@@ -116,3 +116,29 @@ table Player {
         "Expected hover information for field before missing semicolon"
     );
 }
+
+#[tokio::test]
+#[ignore = "Error-tolerant parsing is not implemented."]
+async fn hover_on_predeclared_table() {
+    let fixture = r"
+// Should be able to hover on this pre-declared table
+// even though there is a parsing error before it is declared.
+union Enemy { Mo$0nster }
+
+table Middle {
+    // not_an_attr needs to be pre-declared for flatc to generate code,
+    // but this file is perfectly parseable otherwise.
+    foo: int (not_an_attr);
+}
+
+table Monster {
+    name: string;
+}
+";
+    let mut harness = TestHarness::new();
+    let response = get_hover_response(&mut harness, fixture, &[]).await;
+    assert!(
+        response.is_some(),
+        "Expected hover information for pre-declared table"
+    );
+}

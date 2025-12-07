@@ -123,7 +123,7 @@ int get_num_structs(struct FlatbuffersParser* parser) {
 }
 
 struct StructDefinitionInfo get_struct_info(struct FlatbuffersParser* parser, int index) {
-    struct StructDefinitionInfo info = { nullptr, nullptr, nullptr, nullptr, false, 0, 0, 0, 0 };
+    struct StructDefinitionInfo info = { nullptr, nullptr, nullptr, nullptr, false, 0, 0, 0, 0, false };
     if (!parser || index < 0 || static_cast<size_t>(index) >= parser->impl.structs_.vec.size()) {
         return info;
     }
@@ -149,6 +149,7 @@ struct StructDefinitionInfo get_struct_info(struct FlatbuffersParser* parser, in
     info.col = struct_def->decl_col;
     info.bytesize = struct_def->bytesize;
     info.minalign = struct_def->minalign;
+    info.is_predeclared = struct_def->predecl;
     return info;
 }
 

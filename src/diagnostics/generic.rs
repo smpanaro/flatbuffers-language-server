@@ -17,7 +17,7 @@ impl ErrorDiagnosticHandler for GenericDiagnosticHandler {
         if let Some(captures) = RE.captures(line) {
             let file_path = captures.get(0)?.as_str().split(':').next()?;
             let Ok(file_path) = fs::canonicalize(file_path) else {
-                error!("failed to canonicalize file: {file_path}");
+                error!("failed to canonicalize file: {file_path} in generic handler");
                 return None;
             };
 

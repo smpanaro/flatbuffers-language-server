@@ -23,7 +23,7 @@ impl ErrorDiagnosticHandler for ExpectingTokenHandler {
         if let Some(captures) = RE.captures(line) {
             let file_path = captures[1].trim();
             let Ok(file_path) = fs::canonicalize(file_path) else {
-                error!("failed to canonicalize file: {file_path}");
+                error!("failed to canonicalize file: {file_path} in expecting token handler");
                 return None;
             };
             let Ok(file_url) = path_buf_to_uri(&file_path) else {

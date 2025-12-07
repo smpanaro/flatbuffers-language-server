@@ -28,7 +28,7 @@ impl ErrorDiagnosticHandler for DuplicateDefinitionHandler {
         if let Some(captures) = DUPLICATE_RE.captures(line) {
             let file_path = captures[1].trim();
             let Ok(file_path) = fs::canonicalize(file_path) else {
-                error!("failed to canonicalize file: {file_path}");
+                error!("failed to canonicalize file: {file_path} in duplicate definition handler");
                 return None;
             };
 
