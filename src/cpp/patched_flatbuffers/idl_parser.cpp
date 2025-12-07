@@ -2623,6 +2623,9 @@ CheckedError Parser::ParseEnum(const bool is_union, EnumDef **dest,
           if (ev.union_type.base_type != BASE_TYPE_STRUCT &&
               ev.union_type.base_type != BASE_TYPE_STRING)
             return Error("union value type may only be table/struct/string");
+
+          ev.decl_range = ev.union_type.decl_range;
+          ev.decl_text = ev.union_type.decl_text;
         } else {
           ev.union_type = Type(BASE_TYPE_STRUCT, LookupCreateStruct(full_name));
         }

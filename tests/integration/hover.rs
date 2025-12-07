@@ -166,6 +166,40 @@ union MyUnion {
 }
 
 #[tokio::test]
+async fn hover_on_union_aliased_member() {
+    let fixture = r"
+/// A table with b.
+table MyTable {
+    b: bool;
+}
+
+union MyUnion {
+    Alias: My$0Table
+}
+";
+    let mut harness = TestHarness::new();
+    let response = get_hover_response(&mut harness, fixture, &[]).await;
+    assert_snapshot!(serde_json::to_string_pretty(&response).unwrap());
+}
+
+#[tokio::test]
+async fn hover_on_union_alias() {
+    let fixture = r"
+/// A table with b.
+table MyTable {
+    b: bool;
+}
+
+union MyUnion {
+    Al$0ias: MyTable
+}
+";
+    let mut harness = TestHarness::new();
+    let response = get_hover_response(&mut harness, fixture, &[]).await;
+    assert!(response.is_none());
+}
+
+#[tokio::test]
 async fn hover_on_root_type() {
     let fixture = r"
 namespace MyNS; // root type requires a namespac
@@ -399,6 +433,35 @@ union Any { Glo$0bal.Foo, Bar, Baz }
     let mut harness = TestHarness::new();
     let response = get_hover_response(&mut harness, fixture, &[]).await;
     assert_snapshot!(serde_json::to_string_pretty(&response).unwrap());
+}
+
+#[tokio::test]
+async fn hover_union_namespaced_member_aliased() {
+    let fixture = r"
+namespace Global;
+table Foo {}
+table Bar {}
+table Baz {}
+union Any { GFoo: Global.Fo$0o, Bar, Baz }
+";
+    let mut harness = TestHarness::new();
+    let response = get_hover_response(&mut harness, fixture, &[]).await;
+    assert_snapshot!(serde_json::to_string_pretty(&response).unwrap());
+}
+
+#[tokio::test]
+async fn hover_union_namespaced_member_namespaced_alias() {
+    let fixture = r"
+namespace Global;
+table Foo {}
+table Bar {}
+table Baz {}
+// NOTE: Fake.GFoo is not actually a namespace. flatc treats it as a name with a `.` in it.
+union Any { Fake.GF$0oo: Global.Foo, Bar, Baz }
+";
+    let mut harness = TestHarness::new();
+    let response = get_hover_response(&mut harness, fixture, &[]).await;
+    assert!(response.is_none());
 }
 
 #[tokio::test]
