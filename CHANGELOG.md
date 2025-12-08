@@ -1,4 +1,6 @@
-## Unreleased
+## 0.0.2 - December 7, 2025
+
+This release brings project symbol search, syntax support for namespaces and RPCs, as well as fixes for hovers and diagnostics.
 
 ### New Features
 - Fuzzy search across all project types (tables, structs, enums etc).
